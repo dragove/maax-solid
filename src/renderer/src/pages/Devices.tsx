@@ -8,7 +8,9 @@ import { StatusPill } from "../components/ui/StatusPill";
 interface DevicesProps {
   readonly data: Bootstrap;
   readonly locale: Locale;
-  readonly screenshots: Readonly<Record<string, string>>;
+  readonly screenshots: Readonly<
+    Record<string, { url: string; width: number; height: number; durationMs: number }>
+  >;
   readonly busy: boolean;
   readonly onAdd: () => void;
   readonly onConnect: (id: string) => void;
@@ -120,12 +122,26 @@ export const Devices: Component<DevicesProps> = (props) => {
                         </div>
                       }
                     >
-                      {(url) => (
-                        <img
-                          class="device-shot-image"
-                          src={url()}
-                          alt={`${device.profile.name} screenshot`}
-                        />
+                      {(shot) => (
+                        <>
+                          <img
+                            class="device-shot-image"
+                            src={shot().url}
+                            alt={`${device.profile.name} screenshot`}
+                          />
+                          <span class="device-shot-meta">
+                            <span>
+                              {shot().width}×{shot().height} · {shot().durationMs} ms
+                            </span>
+                            <Show when={device.screencapCost}>
+                              {(cost) => (
+                                <span>
+                                  core {cost().min} / {cost().avg} / {cost().max} ms
+                                </span>
+                              )}
+                            </Show>
+                          </span>
+                        </>
                       )}
                     </Show>
                     <Show when={props.screenshots[device.profile.id]}>

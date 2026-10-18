@@ -90,7 +90,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
   );
   const [runs, setRuns] = createSignal<Record<string, RunSnapshot>>({});
   const [logs, setLogs] = createSignal<ReadonlyArray<UiLogEntry>>([]);
-  const [screenshots, setScreenshots] = createSignal<Record<string, string>>({});
+  const [screenshots, setScreenshots] = createSignal<
+    Record<string, { url: string; width: number; height: number; durationMs: number }>
+  >({});
   const [busy, setBusy] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
   const [addDeviceOpen, setAddDeviceOpen] = createSignal(false);
@@ -304,7 +306,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
       unsubscribe();
       media.removeEventListener("change", onMedia);
       if (saveTimer !== undefined) window.clearTimeout(saveTimer);
-      for (const url of Object.values(screenshots())) URL.revokeObjectURL(url);
+      for (const shot of Object.values(screenshots())) URL.revokeObjectURL(shot.url);
     };
   });
 
@@ -442,8 +444,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
     const url = URL.createObjectURL(blob);
     setScreenshots((current) => {
       const previous = current[id];
-      if (previous) URL.revokeObjectURL(previous);
-      return { ...current, [id]: url };
+      if (previous) URL.revokeObjectURL(previous.url);
+      return {
+        ...current,
+        [id]: { url, width: shot.width, height: shot.height, durationMs: shot.durationMs },
+      };
     });
   };
 

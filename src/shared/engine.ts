@@ -105,6 +105,7 @@ export interface ScreenshotResult {
   readonly png: Uint8Array;
   readonly width: number;
   readonly height: number;
+  readonly durationMs: number;
 }
 
 export interface OkResult {

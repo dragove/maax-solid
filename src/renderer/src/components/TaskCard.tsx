@@ -163,7 +163,8 @@ const FieldControl: Component<{
       );
     }
     case "multi-select": {
-      const selected = Array.isArray(props.value) ? (props.value as Array<string | number>) : [];
+      const selected = (): Array<string | number> =>
+        Array.isArray(props.value) ? (props.value as Array<string | number>) : [];
       const options = props.field.options ?? [];
       return (
         <div class="field field--wide" title={description()}>
@@ -171,7 +172,7 @@ const FieldControl: Component<{
           <div class="chip-row">
             <For each={options}>
               {(option) => {
-                const on = () => selected.some((value) => sameOption(value, option.value));
+                const on = () => selected().some((value) => sameOption(value, option.value));
                 return (
                   <button
                     type="button"
@@ -179,8 +180,8 @@ const FieldControl: Component<{
                     onClick={() =>
                       props.onChange(
                         on()
-                          ? selected.filter((value) => !sameOption(value, option.value))
-                          : [...selected, option.value],
+                          ? selected().filter((value) => !sameOption(value, option.value))
+                          : [...selected(), option.value],
                       )
                     }
                   >

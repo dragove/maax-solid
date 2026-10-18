@@ -24,7 +24,12 @@ export interface MaaCoreLibrary {
   stop(handle: bigint): boolean;
   running(handle: bigint): boolean;
   connected(handle: bigint): boolean;
-  screenshot(handle: bigint): { png: Uint8Array; width: number; height: number };
+  screenshot(handle: bigint): {
+    png: Uint8Array;
+    width: number;
+    height: number;
+    durationMs: number;
+  };
 }
 
 interface PngSize {
@@ -64,6 +69,7 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
   const asstStop = lib.func("uint8 AsstStop(void *handle)");
   const asstRunning = lib.func("uint8 AsstRunning(void *handle)");
   const asstConnected = lib.func("uint8 AsstConnected(void *handle)");
+  const asstAsyncScreencap = lib.func("int32 AsstAsyncScreencap(void *handle, uint8 block)");
   const asstGetImage = lib.func("uint64 AsstGetImage(void *handle, void *buffer, uint64 size)");
   const asstGetVersion = lib.func("const char *AsstGetVersion()");
 
@@ -106,6 +112,8 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
     running: (handle) => bool(asstRunning(handle)),
     connected: (handle) => bool(asstConnected(handle)),
     screenshot: (handle) => {
+      asstAsyncScreencap(handle, 1);
+      const startedAt = Date.now();
       const sizes = [8 * 1024 * 1024, 16 * 1024 * 1024];
       for (const size of sizes) {
         const buffer = Buffer.allocUnsafe(size);
@@ -115,7 +123,7 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
         if (length <= 0)
           throw new Error("MaaCore did not return a screenshot (is the device connected?)");
         const png = new Uint8Array(buffer.buffer, buffer.byteOffset, length).slice();
-        return { png, ...pngSize(png) };
+        return { png, ...pngSize(png), durationMs: Date.now() - startedAt };
       }
       throw new Error("Screenshot exceeds the 16 MiB capture buffer");
     },

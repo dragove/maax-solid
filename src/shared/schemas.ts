@@ -185,6 +185,13 @@ export const ResolutionSchema = Schema.Struct({
   width: Schema.Int,
   height: Schema.Int,
 });
+
+export const ScreencapCostSchema = Schema.Struct({
+  min: Schema.Number,
+  avg: Schema.Number,
+  max: Schema.Number,
+});
+export type ScreencapCost = Schema.Schema.Type<typeof ScreencapCostSchema>;
 export type Resolution = Schema.Schema.Type<typeof ResolutionSchema>;
 
 export const DeviceViewSchema = Schema.Struct({
@@ -192,6 +199,7 @@ export const DeviceViewSchema = Schema.Struct({
   status: DeviceStatusSchema,
   engineVersion: Schema.optional(Schema.String),
   resolution: Schema.optional(ResolutionSchema),
+  screencapCost: Schema.optional(ScreencapCostSchema),
   lastError: Schema.optional(Schema.String),
 });
 export type DeviceView = Schema.Schema.Type<typeof DeviceViewSchema>;
@@ -418,5 +426,6 @@ export const ScreenshotSchema = Schema.Struct({
   png: Schema.Uint8Array,
   width: Schema.Int,
   height: Schema.Int,
+  durationMs: Schema.Number,
 });
 export type Screenshot = Schema.Schema.Type<typeof ScreenshotSchema>;

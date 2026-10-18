@@ -13,6 +13,7 @@ import type {
   DeviceStatus,
   DeviceView,
   EngineInfo,
+  ScreencapCost,
   Resolution,
   RunSnapshot,
   Screenshot,
@@ -151,6 +152,7 @@ interface RuntimeDevice {
   hostKey?: string;
   engineVersion?: string;
   resolution?: Resolution;
+  screencapCost?: ScreencapCost;
   lastError?: string;
 }
 
@@ -290,6 +292,7 @@ export const ApplicationLive: Layer.Layer<
         status: state.status,
         ...(state.engineVersion ? { engineVersion: state.engineVersion } : {}),
         ...(state.resolution ? { resolution: state.resolution } : {}),
+        ...(state.screencapCost ? { screencapCost: state.screencapCost } : {}),
         ...(state.lastError ? { lastError: state.lastError } : {}),
       };
     };
@@ -406,6 +409,16 @@ export const ApplicationLive: Layer.Layer<
             ok: false,
             message: typeof payload.why === "string" ? payload.why : "连接失败",
           });
+        }
+      }
+
+      if ((item.msg === 2 || item.msg === 20003) && what === "ScreencapCost") {
+        const min = Number(details.min);
+        const avg = Number(details.avg);
+        const max = Number(details.max);
+        if (Number.isFinite(min) && Number.isFinite(avg) && Number.isFinite(max)) {
+          setDeviceState(deviceId, { screencapCost: { min, avg, max } });
+          emitDevice(deviceId);
         }
       }
 

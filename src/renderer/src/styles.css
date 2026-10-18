@@ -2900,3 +2900,19 @@ select.input {
   font-size: 11px;
   color: var(--muted);
 }
+
+.device-shot-meta {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 7px;
+  font-family: var(--mono);
+  font-size: 8px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.58);
+  border-radius: 5px;
+  backdrop-filter: blur(8px);
+}

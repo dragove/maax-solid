@@ -70,11 +70,27 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
       return { level: "error", message: `${t(locale, "log.raw")} · InternalError ${why}`.trim() };
     case 1:
       return { level: "error", message: `InitFailed${why ? ` · ${why}` : ""}` };
-    case 2:
+    case 2: {
+      if (what === "ScreencapCost") {
+        const min = num(details.min);
+        const avg = num(details.avg);
+        const max = num(details.max);
+        return {
+          level: "debug",
+          message: `${t(locale, "log.screencapCost")} · ${min ?? "?"} / ${avg ?? "?"} / ${max ?? "?"} ms`,
+        };
+      }
+      if (what === "FastestWayToScreencap") {
+        return {
+          level: "debug",
+          message: `${t(locale, "log.screencapMethod")} · ${str(details.method) || "?"} · ${num(details.cost) ?? "?"} ms`,
+        };
+      }
       return {
         level: what === "ConnectFailed" || what === "Disconnect" ? "warn" : "info",
         message: `${t(locale, "log.connection")} · ${what}${why ? ` · ${why}` : ""}`,
       };
+    }
     case 3:
       return { level: "info", message: `${t(locale, "log.allDone")} · ${chain}` };
     case 4:
@@ -97,11 +113,38 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
       return { level: "debug", message: `${chain} · ${what || "extra info"}` };
     case 10004:
       return { level: "warn", message: `${t(locale, "log.taskStopped")} · ${chain}` };
-    case 20000:
+    case 20000: {
+      const subtask = str(payload.subtask);
+      const first = Array.isArray(payload.first)
+        ? payload.first.filter((value): value is string => typeof value === "string")
+        : [];
+      const label = first[0] || str(details.task) || subtask || chain;
+      if (subtask === "AutoRecruitTask") {
+        return {
+          level: "error",
+          message: `${t(locale, "log.recruitError")}${why ? ` · ${why}` : ""}`,
+        };
+      }
+      if (subtask === "RecognizeDrops") {
+        return { level: "error", message: t(locale, "log.dropError") };
+      }
+      if (subtask === "StartGameTask") {
+        return { level: "error", message: t(locale, "log.startGameError") };
+      }
+      if (subtask === "StopGameTask") {
+        return { level: "error", message: t(locale, "log.stopGameError") };
+      }
+      if (subtask === "DepotRecognitionTask" && str(payload.what) === "DepotTemplateLoadError") {
+        return { level: "error", message: t(locale, "log.depotError") };
+      }
+
+      // ProcessTask emits SubTaskError for ordinary recognition misses and
+      // expected branch exits. Keep them for diagnostics, not as warnings.
       return {
-        level: "warn",
-        message: `${t(locale, "log.subtask")} · ${str(details.task) || str(payload.why) || why || "unknown"} · error`,
+        level: "debug",
+        message: `${t(locale, "log.subtask")} · ${label} · error`,
       };
+    }
     case 20001:
       return {
         level: "debug",
