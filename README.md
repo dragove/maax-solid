@@ -5,16 +5,16 @@ Maax 是一个面向 **MaaAssistantArknights / MaaCore** 的现代桌面客户�
 的设备上下文、任务队列与核心管理体验，并把内核隔离、多版本回退和类型化错误
 作为一等设计。
 
-![Maax 界面](docs/preview-dark.png)
+![Maax 界面](docs/preview-dark.jpg)
 
 <details>
 <summary>浅色主题</summary>
 
-![Maax 浅色主题](docs/preview-light.png)
+![Maax 浅色主题](docs/preview-light.jpg)
 
 </details>
 
-![关卡推荐与自动代理倍率](docs/preview-stage-picker.png)
+![关卡推荐与自动代理倍率](docs/preview-stage-picker.jpg)
 
 ## 当前能力
 
