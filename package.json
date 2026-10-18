@@ -1,0 +1,44 @@
+{
+  "name": "maax-solid",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A secure Electron 44 + Solid 2 RC + Effect 4 desktop baseline running on Node.js 26 and pnpm 12.",
+  "license": "MIT",
+  "author": "Maax",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "prepare": "effect-tsgo patch --oxlint",
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "check": "pnpm run lint && pnpm run format:check",
+    "build": "pnpm run lint && electron-vite build",
+    "package": "pnpm run build && electron-builder --dir",
+    "dist": "pnpm run build && electron-builder"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "0.53.4",
+    "@solidjs/vite-plugin": "3.0.0-next.50",
+    "@solidjs/web": "2.0.0-rc.15",
+    "@types/node": "26.6.5",
+    "effect": "4.0.5",
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "6.0.0",
+    "oxfmt": "0.73.0",
+    "oxlint": "1.88.0",
+    "oxlint-tsgolint": "7.0.2004",
+    "solid-js": "2.0.0-rc.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  },
+  "engines": {
+    "node": ">=26.0.0 <27",
+    "pnpm": ">=12.0.0 <13"
+  },
+  "packageManager": "pnpm@12.14.0",
+  "productName": "Maax"
+}
