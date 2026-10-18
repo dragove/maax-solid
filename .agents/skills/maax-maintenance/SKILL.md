@@ -1,228 +1,216 @@
 ---
 name: maax-maintenance
-description: Maax maintenance guardrails. Use when editing task forms or Solid fields, Effect services/layers, IPC schemas, the MaaCore utilityProcess/callbacks, run-log formatting, screenshots, Fight stage/series options, or Electron packaging in this repo.
+description: Maintenance guardrails for this Electron + Solid 2 + Effect 4 repo. Use when changing reactive UI, Effect services/layers, IPC contracts, native-process integration, log severity mapping, or packaging.
 ---
 
 # Maax maintenance guardrails
 
 Read [`.agents/skills/solid2/SKILL.md`](../solid2/SKILL.md) before changing TSX.
-This file is not a Solid/Effect primer: it records the repo-specific traps that
-have already caused regressions. When a rule and the current code disagree,
-investigate the history before "fixing" the rule.
+This file records durable patterns that prevent regressions in this repo; the
+Solid primer remains the authority for API details.
 
 ## Start here
 
-1. **Classify the boundary.** Renderer-only field → Solid rules. Main-process
-   service → Effect rules. Core/FFI → utility-process rules. Crossing IPC →
-   update the schema/channel/bridge/handler chain first.
-2. **Read the owning file.** Do not patch a symptom in a leaf component when the
-   state is rebuilt in `AppShell`, `Tasks`, or a main-process service.
-3. **Verify with the real path.** Form behavior: focus/selection in the running
-   app. Core callbacks: inspect the actual callback payload, not only the UI
-   label. Packaging: launch `dist/linux-unpacked/maax`.
-4. **Finish with**: `pnpm check`, `pnpm test`, `pnpm build`; `pnpm package` when
-   the change can affect packaged runtime.
+1. **Locate the boundary.** Renderer state, main-process service, native helper,
+   or IPC edge each have different failure modes. Fix the owner, not the leaf
+   that merely displays the symptom.
+2. **Read the existing path end to end.** For an IPC change, read the schema,
+   command map, preload, renderer service, and main handler before editing.
+3. **Reproduce the real interaction.** Reactive bugs often only appear after a
+   second update. Force the update, then check selection, focus, and persisted
+   state.
+4. **Verify before finishing:** `pnpm check`, `pnpm test`, `pnpm build`;
+   `pnpm package` when the change can affect packaged runtime.
 
-## Solid 2: forms and editable lists
+## Reactive UI
 
-### Editing a row must not remount the form
+### List identity and remounting
 
-**Symptom:** typing one character pauses the input, focuses are lost, and the
-"Saving" indicator flashes after every keystroke.
-
-**Cause:** `<For>` defaults to keying by object identity. Immutable task
-updates replace the edited object, so the whole row is destroyed and recreated.
-
-**Rule:** use `keyed={false}` for editable rows. The callback receives an
-accessor and a **plain number** index:
+Solid's `<For>` keys rows by object identity by default. Replacing an item with
+a new object therefore destroys and recreates its DOM. For positional lists
+whose rows are edited in place, use `keyed={false}` so the row survives updates:
 
 ```tsx
-<For each={props.plan!.tasks} keyed={false}>
+<For each={rows()} keyed={false}>
   {(row, index) => {
-    const task = () => row();
+    const value = () => row();
     return (
-      <TaskCard
-        task={task()}
-        onRemove={() => props.onRemoveTask(task().id)}
-        onDragStart={() => setDragFrom(index)}
-      />
+      <Row item={value()} onRemove={() => remove(value().id)} onDragStart={() => setFrom(index)} />
     );
   }}
 </For>
 ```
 
-Do not write `index()` under `keyed={false}`. Do not pass `task` itself (the
-accessor) as a value prop; pass `task()` and let the child read `props.task`.
+- With `keyed={false}`, the callback receives an **item accessor** and a
+  **number** index. Do not call `index()`.
+- Pass `value()`, not the accessor, when the child expects a value prop. The
+  child then reads `props.item` reactively.
+- If rows have stable unique IDs, keying by ID is an equally valid choice; the
+  rule is to choose identity deliberately, not to inherit reference identity by
+  accident.
+- Symptom of the default mistake: typing in a row pauses or loses focus, and a
+  save indicator flickers on every keystroke because the input is recreated.
 
-### Never freeze a prop value in a component body
+### Never snapshot reactive props
 
-`FieldControl` is created once and receives new props. Locals such as
-`const selected = Array.isArray(props.value) ? ... : []` go stale; the summary
-outside may update while chips/selects stay visually wrong.
-
-Use a function or memo for every value that can change:
+A component body runs once. A local computed from `props.value` at that moment
+is stale on the next update, even though surrounding JSX updates correctly.
 
 ```tsx
-const selected = (): Array<string | number> =>
-  Array.isArray(props.value) ? (props.value as Array<string | number>) : [];
+// Wrong: frozen at component creation
+const selected = Array.isArray(props.value) ? props.value : [];
 
-const on = () => selected().some((value) => sameOption(value, option.value));
+// Right: evaluated in the reactive scope that reads it
+const selected = (): string[] => (Array.isArray(props.value) ? (props.value as string[]) : []);
 ```
 
-The same applies to `select`: keep `current` as `() => ...` and compare inside
-`<option selected={String(current()) === String(option.value)}>`. Setting a
-native `<select value={current}>` before its dynamic options mount can display
-the wrong option even when the stored value is correct.
+Use accessors or memos for anything that can change: chip state, selected
+options, derived labels, and handlers that read the latest value. A summary
+that updates while the control next to it does not is the usual signature.
 
-### Task-form checklist
+### Dynamic native controls
 
-- Add a field kind → update the `FieldKind` union **and** every `FieldControl`
-  switch. A missing branch returns nothing and trips `TS7030`/`TS2322`.
-- New task type → add its defaults, field definitions, catalog icon, and
-  `buildMaaTaskParams` mapping in `src/shared/tasks.ts`.
-- Defaults only apply to newly created tasks. Existing saved plans keep their
-  stored params; migrate explicitly or tell the user.
-- Do not use `classList`; Solid 2 uses `class={...}` (string/object accepted).
-- `JSX` comes from `@solidjs/web`, not `solid-js`.
-- `<For keyed={false}>` index is a number; default `<For>` index is an accessor.
-- Avoid reactive reads at the top of a component body. Read in JSX, a memo, or
-  `untrack`. The compiler's strict-read diagnostics are real design feedback,
-  even when a particular warning appears to be a false positive.
+When options are rendered dynamically, setting a native `<select value={...}>`
+before those options exist can display the wrong option even when state is
+correct. Make the selection explicit per option:
 
-### Async bootstrap
+```tsx
+const current = () => (typeof props.value === "string" ? props.value : "");
 
-Do not read an async bootstrap value in `AppShell`'s component body
-(`PENDING_ASYNC_UNTRACKED_READ`). Load bootstrap imperatively in the outer
-`Workbench`, then render `<AppShell initial={resolvedSnapshot} />` only after it
-resolves. Keep the resolved snapshot immutable for the shell's lifetime.
+<select onChange={(event) => props.onChange(event.currentTarget.value)}>
+  <For each={options()}>
+    {(option) => (
+      <option value={option} selected={option === current()}>
+        {option}
+      </option>
+    )}
+  </For>
+</select>;
+```
 
-## Effect 4: services, layers, IPC
+### Async bootstrap and component bodies
 
-- This repo uses **Effect 4**. `Effect.catchAll` is a v3 name; use
-  `Effect.catch`. Check diagnostic `outdated-api` before copying examples from
-  older Maa/Effect code.
-- Public service methods should be `R = never`. If a method needs `FileSystem`,
-  provide it at layer construction or with `Effect.provideService(FileSystem, fs)`
-  inside the method; do not leak a new requirement through the API type.
-- Compose layers explicitly. When a service needs another layer, name the
-  dependency type (see `CoreInstallerWithDeps`) rather than relying on inference.
-- `ManagedRuntime` must include services used at module boundaries, including
-  `EventBus` when event emission happens outside a request.
-- Annotate ambiguous `Effect.tryPromise` / schema results. A decoded schema type
-  assigned inline can collapse to `never`; define
-  `type X = Schema.Schema.Type<typeof XSchema>` and annotate the `try` return.
-- No `await` inside `Effect.gen`; use `yield* Effect.promise(...)` or
-  `yield* Effect.tryPromise(...)`. Do not swallow typed errors with a bare
-  `try/catch`; use Effect's error channel.
-- `Effect.fail(maaxError(...))` is a warning because `maaxError` is already
-  yieldable; prefer `yield* maaxError(...)` in generators when the type allows.
-- IPC changes are atomic: `src/shared/schemas.ts` → `src/shared/ipc.ts` command
-  and result maps → preload → `DesktopBridge` result schema → main handler →
-  tests. Both sides decode; do not hand-write a parallel result interface.
-- Renderer-side `runtime.runPromise` belongs in event handlers, `onSettled`, or
-  Effect boundaries — not in JSX/render computation.
+Do not read an async bootstrap value in a shell component body; the framework's
+untracked-read diagnostic is legitimate. Resolve bootstrap in the outer
+component, then render the shell with the resolved snapshot.
 
-## MaaCore utility process
+### Exhaustive branches
 
-MaaCore must never be loaded into Electron's main process. It installs global
-signal handlers, and koffi callbacks run on the Node main thread while the core
-message thread is blocked. Keep one utility process per core version/resource.
+When adding a member to a discriminated union, update every switch that renders
+or transforms it. A missing `case` returns `undefined` and surfaces later as
+`TS7030` or a runtime blank panel.
 
-- Callback contract: enqueue the raw callback immediately; do no FFI, logging
-  fan-out, process control, or `AsstDestroy` inside the callback. Destroy only
-  after the callback returns and the command chain is idle.
-- Filter `process.env` before `utilityProcess.fork`; Electron types allow only
-  string values and an `undefined` value causes `Invalid value for env`.
-- Use the **device id as the session id** when waiters such as connect are keyed
-  by device. A random session id silently times out even though callbacks arrive.
-- Initialize in this order: `AsstSetUserDir(existing writable dir)` →
-  `AsstLoadResource(packageRoot)`. The load root contains `resource/config.json`;
-  a global override is `<root>/resource/global/<Server>`.
-- Parse core versions as semver: `v6.20.0-linux-x86_64` is version `v6.20.0`,
-  not the whole filename.
-- Image API: try 8 MiB, retry 16 MiB, and use the library's null-size sentinel
-  rather than a hard-coded pointer value. Force a fresh image with
-  `AsstAsyncScreencap(handle, 1)` before `AsstGetImage`.
-- Show two screenshot timings: measured request duration, and the core's
-  `ScreencapCost` (a `ConnectionInfo` message, not `SubTaskExtraInfo`) when it
-  arrives. Core reports min/avg/max periodically, so measured time must still
-  work on the first screenshot.
-- Never call `AsstSetTaskParams` with a partial object when the API resets
-  omitted fields; send the complete task param object.
-- Core downloads: require a native user confirmation, download to a staged
-  directory, extract the archive, validate `resource/config.json` +
-  `libMaaCore.so`, then register atomically. Dev-only URL/confirmation overrides
-  must be disabled when packaged.
+### Solid 2 API traps
 
-### Fight series and stages
+- `classList` does not exist; use `class={...}` with a string or object.
+- `JSX` is exported by `@solidjs/web`, not `solid-js`.
+- Default `<For>` gives `(item, indexAccessor)`; `keyed={false}` gives
+  `(itemAccessor, number)`.
+- Avoid reactive reads at the top of a component body; read in JSX, a memo, or
+  `untrack`.
 
-- `series` is an integer and the GUI must not compute AUTO: `0` = MaaCore auto,
-  `-1` = leave the in-game setting alone, `1..10` = fixed. New tasks default to
-  `0`.
-- Core accepts `7..10` only when the active resource supports the new series
-  list. On old/global resources an invalid value rejects the **entire** Fight
-  parameter update. Keep the UI warning, or detect the resource flag before
-  sending.
-- Stage recommendations: fetch `gui/StageActivityV2.json` per client
-  (`Bilibili` uses the `Official` key), filter by `UtcStartTime` /
-  `UtcExpireTime` / `TimeZone`, preserve API order, and merge with the curated
-  permanent list. The API order is the de-facto recommendation; WPF does not
-  have a scoring algorithm.
-- The stage field must accept manual codes. Do not replace free text with a
-  closed dropdown.
+## Effect 4
 
-### Callback log semantics
+- This repo uses Effect 4. `Effect.catchAll` is a v3 name; use `Effect.catch`.
+  Run the Effect-aware lint before copying older examples.
+- Public service methods should be `R = never`. Provide dependencies such as
+  `FileSystem` inside the service method or layer, not through the public API.
+- Name layer dependencies explicitly when inference is ambiguous; use a
+  `WithDeps` layer type rather than casting.
+- `ManagedRuntime` must include every service used at module boundaries,
+  including event buses.
+- Annotate ambiguous `Effect.tryPromise` / Schema decode results. Inline decoded
+  types can collapse to `never`; define a `Schema.Schema.Type<typeof X>` alias
+  and annotate the `try` return.
+- Do not `await` inside `Effect.gen`; use `yield* Effect.promise(...)` or
+  `yield* Effect.tryPromise(...)`.
+- Keep typed errors in the error channel. Normalize external failures once at
+  the adapter boundary instead of throwing unknown values through services.
+- `Effect.runPromise` / `runtime.runPromise` belong at IPC handlers, event
+  handlers, `onSettled`, and tests, not in render computation.
 
-`SubTaskError` (20000) is not uniformly a warning. `ProcessTask` emits it for
-ordinary recognition misses and expected branch exits (`CreditShop-NoMoney`,
-`EndOfClueExchange`, etc.). WPF only surfaces:
+## IPC and shared contracts
 
-- `AutoRecruitTask`
-- `RecognizeDrops`
-- `StartGameTask` / `StopGameTask`
-- `DepotRecognitionTask` with `DepotTemplateLoadError`
+- Cross-boundary data lives in one schema module. Infer types from the schema;
+  do not create parallel hand-written interfaces.
+- A new command touches the whole chain atomically: command/result schema,
+  channel map, preload allowlist, renderer Effect service, main handler, and
+  tests.
+- Decode on both sides. A payload that is valid in the renderer but not in main
+  is still an untrusted value.
+- Keep the preload surface minimal; do not expose raw Electron APIs or a generic
+  `ipcRenderer` bridge.
+- Result envelopes should preserve enough structure for the renderer to show a
+  typed failure without parsing strings.
 
-Format those as errors; demote everything else to debug and use
-`payload.first[0]` (or `subtask`/`taskchain`) so logs never say `unknown`.
-`ScreencapCost` and `FastestWayToScreencap` are debug-level connection info.
+## Native process isolation
 
-## Electron and packaging
+Native libraries that install global signal handlers, maintain global state, or
+invoke callbacks on a blocked thread must not run in Electron's main process.
+Use a utility process/worker, one host per core version or resource set.
 
-- `koffi` is a runtime dependency, not a dev dependency. Keep
-  `allowBuilds.koffi` in `pnpm-workspace.yaml` and `asarUnpack` for
-  `node_modules/koffi/**` + `node_modules/@koromix/**`.
-- electron-vite needs both main inputs: the app entry and the core-host entry.
-  The dev core-host path and the packaged asar path must both be valid.
-- Do not expose the remote-debugging port in production; it is a dev-only
-  facility.
-- `npmRebuild: false` is intentional for the prebuilt koffi addon. Verify the
-  `.node` exists under `app.asar.unpacked` after packaging.
-- electron-builder's "platform-specific optional dependencies not bundled"
-  warning is expected on a Linux x64 build; confirm the Linux binary is present
-  and the packaged app actually starts before treating it as benign.
-- Core/resource trees are external (imported/downloaded), not bundled; the app
-  must fail with a clear setup state, not crash the window.
+- Callback handlers must only enqueue raw events. No lifecycle calls, blocking
+  FFI, disk writes, or logging fan-out inside the callback; do it after it
+  returns.
+- Filter `process.env` before `utilityProcess.fork`; Electron accepts only
+  string values and an `undefined` value aborts startup.
+- Correlate callbacks with the same ID used by waiters. A random session ID can
+  time out even though callbacks are arriving.
+- Preserve the native library's initialization order and root-directory
+  contract. Validate required files before registering a core/resource.
+- Use the library's buffer-size sentinel and retry budget; do not hard-code a
+  pointer or assume one buffer size is enough.
+- Do not send partial parameter objects when the native API resets omitted
+  fields; send the complete object.
+- Measure user-visible duration at the boundary. If the library reports its own
+  timing separately, keep both and label them, rather than replacing one with
+  the other.
+
+## Log severity mapping
+
+Callback message IDs are not a severity scale. Map payload types to user-facing
+levels in one formatter:
+
+- Expected branch exits and ordinary recognition misses are debug/info.
+- Actionable failures (start/stop failure, recognition failure, corrupt
+  resource, operation aborted) are errors.
+- Always use the most specific payload field available (`first`, `subtask`,
+  `taskchain`) instead of emitting `unknown`.
+- Add a formatter test for both an expected noisy event and a real failure.
+
+## Packaging
+
+- A native addon used at runtime belongs in `dependencies`, not
+  `devDependencies`; build scripts must be explicitly allowed by the package
+  manager.
+- Unpack native binaries from the asar and verify the packaged `.node` exists.
+- Build every main entry the app forks, not only the Electron entry.
+- Keep `npmRebuild: false` only when shipping a known prebuilt addon.
+- Do not expose remote debugging in production.
+- External resources are not bundled; a missing resource/core must produce a
+  clear setup error, not a window crash.
+- Builder warnings about optional platform binaries are expected on a
+  single-platform build, but the matching binary and a successful launch are
+  required before calling them harmless.
 
 ## Verification matrix
 
-| Change                | Minimum verification                                                |
-| --------------------- | ------------------------------------------------------------------- |
-| Task field / form     | type a full value, check focus and saved params; toggle every chip  |
-| Select / stage picker | open the menu, filter, select, reopen, verify persisted value       |
-| Core callback / log   | feed the real payload; check debug vs error level                   |
-| Screenshot            | connect a device, take a screenshot, check dimensions + timing      |
-| IPC / schema          | reload renderer, verify both decode paths and a failed payload      |
-| Core host / FFI       | connect, screenshot, start + stop a run; check core log for errors  |
-| Packaging             | `pnpm package`, launch the unpacked binary, connect and load a core |
+| Change           | Minimum check                                                     |
+| ---------------- | ----------------------------------------------------------------- |
+| Reactive control | update twice; verify focus, visual selection, and persisted value |
+| Dynamic list     | add/remove/reorder; confirm no unexpected remount                 |
+| Effect service   | type check, layer boot, and one failure path                      |
+| IPC contract     | invalid payload is rejected; valid payload round-trips            |
+| Native host      | connect, perform one operation, stop; inspect native log          |
+| Log formatter    | expected branch is not error; real failure is error               |
+| Packaging        | build, launch unpacked app, load a core/resource                  |
 
-Run `pnpm check` and `pnpm build` on every change. Add a test only where the
-boundary is stable and the invariant is worth pinning (schema mapping, log
-severity, stage parsing); avoid brittle DOM/UI tests for this rapidly changing
-MVP.
+Add tests only where the contract is stable: schemas, pure mappers, severity
+classification, parser output. Avoid brittle DOM tests for screens that are
+still changing quickly.
 
-## Keep documents portable
+## Portability
 
-Do not put machine-specific absolute paths, device addresses, usernames, or
-downloaded-core locations in this skill, `AGENTS.md`, README, or docs. Use
-repo-relative paths and generic runtime locations such as
-`app.getPath("userData")`.
+Use repo-relative paths and runtime APIs such as `app.getPath("userData")`.
+Do not put machine-specific absolute paths, usernames, device addresses, or
+downloaded binary locations in skills, `AGENTS.md`, README, or docs.
