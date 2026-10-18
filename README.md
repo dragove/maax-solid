@@ -14,6 +14,8 @@ Maax 是一个面向 **MaaAssistantArknights / MaaCore** 的现代桌面客户�
 
 </details>
 
+![关卡推荐与自动代理倍率](docs/preview-stage-picker.png)
+
 ## 当前能力
 
 - 本地导入 MaaCore；官方稳定版下载（原生确认框、分阶段安装、可回滚的多版本登记）。
