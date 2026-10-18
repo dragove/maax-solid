@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import { BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import { createWriteStream } from "node:fs";
 import { cp, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -159,9 +159,13 @@ export const CoreInstallerLive: Layer.Layer<
       }
 
       progress("metadata", 0, 0);
+      const releaseUrl =
+        !app.isPackaged && process.env.MAAX_CORE_RELEASE_URL
+          ? process.env.MAAX_CORE_RELEASE_URL
+          : RELEASE_URL;
       const release = yield* Effect.tryPromise({
         try: async () => {
-          const response = await fetch(RELEASE_URL, { signal: AbortSignal.timeout(30_000) });
+          const response = await fetch(releaseUrl, { signal: AbortSignal.timeout(30_000) });
           if (!response.ok)
             throw new Error(`HTTP ${response.status} while reading release metadata`);
           return Schema.decodeUnknownSync(ReleaseSchema)(await response.json());
@@ -176,6 +180,7 @@ export const CoreInstallerLive: Layer.Layer<
 
       const window = BrowserWindow.getFocusedWindow();
       const sizeMegabytes = Math.ceil(asset.size / 1024 / 1024);
+      const autoConfirm = !app.isPackaged && process.env.MAAX_AUTO_CONFIRM_DOWNLOAD === "1";
       const options = {
         type: "question" as const,
         buttons: ["下载并安装", "取消"],
@@ -185,15 +190,17 @@ export const CoreInstallerLive: Layer.Layer<
         message: `下载 MaaCore ${release.version}？`,
         detail: `将下载 ${asset.name}（约 ${sizeMegabytes} MB）并解压到 MaaX 的用户数据目录。\n\n来源：${asset.browser_download_url}`,
       };
-      const confirmation = window
-        ? yield* Effect.tryPromise({
-            try: () => dialog.showMessageBox(window, options),
-            catch: (cause) => maaxError("确认对话框失败", cause),
-          })
-        : yield* Effect.tryPromise({
-            try: () => dialog.showMessageBox(options),
-            catch: (cause) => maaxError("确认对话框失败", cause),
-          });
+      const confirmation = autoConfirm
+        ? { response: 0 }
+        : window
+          ? yield* Effect.tryPromise({
+              try: () => dialog.showMessageBox(window, options),
+              catch: (cause) => maaxError("确认对话框失败", cause),
+            })
+          : yield* Effect.tryPromise({
+              try: () => dialog.showMessageBox(options),
+              catch: (cause) => maaxError("确认对话框失败", cause),
+            });
       if (confirmation.response !== 0) return null;
 
       const safeVersion = release.version.replace(/[^a-zA-Z0-9._-]+/gu, "-");
