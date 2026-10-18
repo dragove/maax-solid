@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { app } from "electron";
+import { Notification, app } from "electron";
 import { randomUUID } from "node:crypto";
 import { cpus, release, totalmem } from "node:os";
 import { join } from "node:path";
@@ -352,6 +352,26 @@ export const ApplicationLive: Layer.Layer<
       } else if (item.msg === 3) {
         const failed = run.snapshot.tasks.some((task) => task.status === "failed");
         finishRun(deviceId, failed ? "failed" : "completed");
+        if (settingsCache?.notifyOnComplete && Notification.isSupported()) {
+          const device = profiles.get(deviceId)?.name ?? "MAAX";
+          const chinese = settingsCache.locale === "zh-CN";
+          new Notification({
+            title: failed
+              ? chinese
+                ? "任务失败"
+                : "Task failed"
+              : chinese
+                ? "任务完成"
+                : "Task completed",
+            body: failed
+              ? chinese
+                ? `${device} 的任务队列已结束，其中存在失败任务。`
+                : `${device}'s queue finished with a failed task.`
+              : chinese
+                ? `${device} 的任务队列已完成。`
+                : `${device}'s queue completed.`,
+          }).show();
+        }
       }
     };
 
