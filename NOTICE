@@ -1,0 +1,60 @@
+Maax
+Copyright (C) 2026 Maax contributors
+
+Maax is free software: you can redistribute it and/or modify it under the
+terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version.
+
+Maax is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+details.
+
+This application is an independent desktop client for MaaAssistantArknights.
+It is not affiliated with or endorsed by the MaaAssistantArknights team.
+
+Third-party components
+======================
+
+MaaAssistantArknights / MaaCore
+  Copyright (C) MaaAssistantArknights contributors
+  License: AGPL-3.0-or-later
+  Source: https://github.com/MaaAssistantArknights/MaaAssistantArknights
+  MaaCore is not bundled with the Maax installer. Users install or download
+  it separately; it is executed in an isolated helper process and is licensed
+  under the GNU Affero General Public License.
+
+MaaX (MeoAsstElectronUI)
+  License: AGPL-3.0-or-later
+  Source: https://github.com/MaaAssistantArknights/MeoAsstElectronUI
+  MaaX is the discontinued project whose feature set and interaction model
+  inspired this reimplementation. No MaaX source code is included.
+
+Electron
+  Copyright (C) Electron contributors, OpenJS Foundation
+  License: MIT
+
+SolidJS
+  Copyright (C) SolidJS contributors
+  License: MIT
+
+Effect
+  Copyright (C) Effect contributors
+  License: MIT
+
+Kobalte
+  Copyright (C) Kobalte contributors
+  License: MIT
+
+Lucide
+  Copyright (C) Lucide contributors
+  License: ISC
+
+Koffi
+  Copyright (C) Niels Martignène
+  License: MIT
+
+The full license texts for dependencies are distributed with their respective
+packages. A complete source offer for Maax is available from the project
+repository.

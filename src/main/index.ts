@@ -1,22 +1,21 @@
-import { app, BrowserWindow, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, session, shell } from "electron";
 import { Effect } from "effect";
 import { join } from "node:path";
 import appIcon from "../../build/icon.png?asset";
-import { IPC_CHANNELS } from "../shared/ipc";
-import { pingMainProcess, readRuntimeInfo } from "./runtime";
+import { registerIpcHandlers } from "./ipc";
+import { makeRuntime, type AppRuntime } from "./runtime";
+import { Application } from "./services/application";
 
 const isDevelopment = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
+let runtime: AppRuntime | null = null;
+let quitting = false;
 
 app.setName("Maax");
 
-function registerIpcHandlers(): void {
-  // The Electron lifecycle is imperative, while application logic stays in
-  // Effect. Run each Effect at the IPC boundary and let Electron transport the
-  // resulting Promise or rejection.
-  ipcMain.handle(IPC_CHANNELS.runtimeInfo, () => Effect.runPromise(readRuntimeInfo));
-  ipcMain.handle(IPC_CHANNELS.ping, () => Effect.runPromise(pingMainProcess));
+if (isDevelopment) {
+  app.commandLine.appendSwitch("remote-debugging-port", "9229");
 }
 
 function openExternalUrl(url: string): void {
@@ -62,10 +61,10 @@ function hardenWindow(window: BrowserWindow): void {
 
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
-    width: 1320,
-    height: 920,
-    minWidth: 980,
-    minHeight: 700,
+    width: 1400,
+    height: 940,
+    minWidth: 1040,
+    minHeight: 720,
     show: false,
     title: "Maax",
     backgroundColor: "#07090e",
@@ -94,12 +93,40 @@ async function createWindow(): Promise<void> {
 
   hardenWindow(window);
 
+  if (isDevelopment) {
+    window.webContents.on("console-message", (event) => {
+      console.log(
+        `[renderer:${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`,
+      );
+    });
+  }
+
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 
   if (isDevelopment && rendererUrl) {
     await window.loadURL(rendererUrl);
   } else {
     await window.loadFile(join(__dirname, "../renderer/index.html"));
+  }
+}
+
+async function shutdown(): Promise<void> {
+  if (quitting) return;
+  quitting = true;
+  try {
+    if (runtime) {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const application = yield* Application;
+          yield* application.shutdown;
+        }),
+      );
+      await runtime.dispose();
+    }
+  } catch (error) {
+    console.error("Failed to shut down cleanly", error);
+  } finally {
+    app.quit();
   }
 }
 
@@ -119,10 +146,9 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(async () => {
       app.setAppUserModelId("app.maax.desktop");
-      registerIpcHandlers();
+      runtime = makeRuntime();
+      registerIpcHandlers(runtime, () => mainWindow);
 
-      // This app never needs camera, microphone, notifications, or other
-      // privileged web capabilities.
       session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
         callback(false),
       );
@@ -146,6 +172,12 @@ app.on("web-contents-created", (_event, contents) => {
   contents.on("will-attach-webview", (event) => {
     event.preventDefault();
   });
+});
+
+app.on("before-quit", (event) => {
+  if (quitting) return;
+  event.preventDefault();
+  void shutdown();
 });
 
 app.on("window-all-closed", () => {

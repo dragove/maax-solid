@@ -1,5 +1,6 @@
 allowBuilds:
   electron-winstaller: true
+  koffi: true
 minimumReleaseAgeExclude:
   - "@effect/tsgo-darwin-arm64@0.53.4"
   - "@effect/tsgo-darwin-x64@0.53.4"

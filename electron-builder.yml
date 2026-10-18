@@ -7,8 +7,13 @@ directories:
 files:
   - out/**/*
   - package.json
+  - LICENSE
+  - NOTICE
   - "!**/*.map"
 asar: true
+asarUnpack:
+  - node_modules/koffi/**/*
+  - node_modules/@koromix/**/*
 npmRebuild: false
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 linux:

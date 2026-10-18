@@ -1,59 +1,35 @@
-import { app } from "electron";
-import { cpus, release, totalmem } from "node:os";
-import { Effect, Schema } from "effect";
-import {
-  PingResultSchema,
-  RuntimeInfoSchema,
-  type PingResult,
-  type RuntimeInfo,
-} from "../shared/schemas";
+import { layer as NodeServicesLive } from "@effect/platform-node/NodeServices";
+import { Layer, ManagedRuntime } from "effect";
+import { ApplicationLive, type Application } from "./services/application";
+import { CoreRegistryLive } from "./services/core-registry";
+import { CoreInstallerLive } from "./services/core-installer";
+import { AppPathsLive } from "./services/paths";
+import { SettingsLive } from "./services/settings";
+import { WorkspaceLive } from "./services/workspace";
+import { EventBus, EventBusLive } from "./events";
 
 /**
- * Every IPC response is an Effect that both captures host state and validates
- * its own shape with Effect Schema before it reaches the contextBridge.
+ * Layer graph for the Electron main process. Native/Electron APIs stay at the
+ * edges; everything below is ordinary Effect code with typed errors.
  */
-export const readRuntimeInfo: Effect.Effect<RuntimeInfo, Schema.SchemaError> = Effect.gen(
-  function* () {
-    const payload = yield* Effect.sync(() => ({
-      app: {
-        name: app.getName(),
-        version: app.getVersion(),
-        packaged: app.isPackaged,
-        locale: app.getLocale(),
-      },
-      versions: {
-        electron: process.versions.electron ?? "unknown",
-        chromium: process.versions.chrome ?? "unknown",
-        node: process.versions.node,
-        v8: process.versions.v8,
-      },
-      system: {
-        platform: process.platform,
-        arch: process.arch,
-        release: release(),
-        cpuCount: cpus().length,
-        totalMemoryBytes: totalmem(),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      },
-      security: {
-        sandbox: true,
-        contextIsolation: true,
-        nodeIntegration: false,
-      },
-    }));
-
-    return yield* Schema.decodeEffect(RuntimeInfoSchema)(payload);
-  },
+const CoreInstallerWithDeps = CoreInstallerLive.pipe(
+  Layer.provideMerge(SettingsLive),
+  Layer.provideMerge(CoreRegistryLive),
+  Layer.provideMerge(EventBusLive),
+  Layer.provideMerge(AppPathsLive),
+  Layer.provideMerge(NodeServicesLive),
 );
 
-export const pingMainProcess: Effect.Effect<PingResult, Schema.SchemaError> = Effect.gen(
-  function* () {
-    const payload = yield* Effect.sync(() => ({
-      receivedAt: Date.now(),
-      processId: process.pid,
-      uptimeSeconds: process.uptime(),
-    }));
-
-    return yield* Schema.decodeEffect(PingResultSchema)(payload);
-  },
+const AppLive = ApplicationLive.pipe(
+  Layer.provideMerge(SettingsLive),
+  Layer.provideMerge(WorkspaceLive),
+  Layer.provideMerge(CoreRegistryLive),
+  Layer.provideMerge(CoreInstallerWithDeps),
+  Layer.provideMerge(EventBusLive),
+  Layer.provideMerge(AppPathsLive),
+  Layer.provideMerge(NodeServicesLive),
 );
+
+export type AppRuntime = ManagedRuntime.ManagedRuntime<Application | EventBus, never>;
+
+export const makeRuntime = (): AppRuntime => ManagedRuntime.make(AppLive);

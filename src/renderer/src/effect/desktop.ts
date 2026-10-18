@@ -1,40 +1,40 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import type { MaaxBridge } from "../../../shared/ipc";
+import type { CommandName, CommandPayloads, CommandResults, MaaxBridge } from "../../../shared/ipc";
+import { COMMANDS } from "../../../shared/ipc";
 import {
-  PingResultSchema,
-  RuntimeInfoSchema,
-  type PingResult,
-  type RuntimeInfo,
+  AppSettingsSchema,
+  BootstrapSchema,
+  CoreInfoSchema,
+  DeviceViewSchema,
+  IpcEnvelopeSchema,
+  MaaxEventSchema,
+  RunSnapshotSchema,
+  ScreenshotSchema,
+  TaskPlanSchema,
+  type MaaxEvent,
 } from "../../../shared/schemas";
 
 /**
  * Typed, schema-validated access to the sandboxed preload bridge.
  *
- * The service is exposed as Effect values rather than Promise methods so
- * consumers can compose calls, retries, timeouts, and interruption without
- * leaving the Effect runtime.
+ * The renderer never calls `window.maax` directly. Commands are exposed as
+ * Effects so callers can compose retries, timeouts and interruption, and every
+ * response is decoded before it reaches application state.
  */
 export class DesktopBridge extends Context.Service<
   DesktopBridge,
   {
-    readonly runtimeInfo: Effect.Effect<RuntimeInfo, DesktopBridgeError>;
-    readonly ping: Effect.Effect<PingResult, DesktopBridgeError>;
+    readonly invoke: (command: string, payload: unknown) => Promise<unknown>;
   }
 >()("maax/DesktopBridge") {}
 
-export class DesktopBridgeError extends Schema.TaggedError<
-  DesktopBridgeError,
-  { readonly brand: unique symbol }
->()("DesktopBridgeError", {
-  operation: Schema.String,
-  reason: Schema.String,
-}) {}
-
-const errorReason = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : String(cause);
-
-const bridgeError = (operation: string, cause: unknown): DesktopBridgeError =>
-  new DesktopBridgeError({ operation, reason: errorReason(cause) });
+export class DesktopBridgeError extends Schema.TaggedError<DesktopBridgeError>()(
+  "DesktopBridgeError",
+  {
+    operation: Schema.String,
+    reason: Schema.String,
+  },
+) {}
 
 function getBridge(): MaaxBridge {
   if (!window.maax) {
@@ -43,37 +43,85 @@ function getBridge(): MaaxBridge {
   return window.maax;
 }
 
-const loadBridge = <A>(
-  operation: string,
-  invoke: () => Promise<unknown>,
-  decode: (input: unknown) => Effect.Effect<A, Schema.SchemaError>,
-): Effect.Effect<A, DesktopBridgeError> =>
-  Effect.gen(function* () {
-    const response = yield* Effect.tryPromise({
-      try: invoke,
-      catch: (cause) => bridgeError(operation, cause),
+const resultSchemas = {
+  [COMMANDS.bootstrap]: BootstrapSchema,
+  [COMMANDS.updateSettings]: AppSettingsSchema,
+  [COMMANDS.pickAndAddCore]: Schema.NullOr(CoreInfoSchema),
+  [COMMANDS.addCore]: CoreInfoSchema,
+  [COMMANDS.setActiveCore]: Schema.Struct({
+    settings: AppSettingsSchema,
+    cores: Schema.Array(CoreInfoSchema),
+  }),
+  [COMMANDS.removeCore]: Schema.Array(CoreInfoSchema),
+  [COMMANDS.refreshCores]: Schema.Array(CoreInfoSchema),
+  [COMMANDS.downloadCore]: Schema.NullOr(CoreInfoSchema),
+  [COMMANDS.addDevice]: DeviceViewSchema,
+  [COMMANDS.updateDevice]: DeviceViewSchema,
+  [COMMANDS.removeDevice]: Schema.Array(DeviceViewSchema),
+  [COMMANDS.connectDevice]: DeviceViewSchema,
+  [COMMANDS.disconnectDevice]: DeviceViewSchema,
+  [COMMANDS.screenshotDevice]: ScreenshotSchema,
+  [COMMANDS.savePlan]: TaskPlanSchema,
+  [COMMANDS.removePlan]: Schema.Array(TaskPlanSchema),
+  [COMMANDS.startRun]: RunSnapshotSchema,
+  [COMMANDS.stopRun]: RunSnapshotSchema,
+} as const;
+
+export function command<C extends CommandName>(
+  name: C,
+  payload: CommandPayloads[C],
+): Effect.Effect<CommandResults[C], DesktopBridgeError, DesktopBridge> {
+  return Effect.gen(function* () {
+    const bridge = yield* DesktopBridge;
+    const raw = yield* Effect.tryPromise({
+      try: () => bridge.invoke(name, payload),
+      catch: (cause) =>
+        new DesktopBridgeError({
+          operation: name,
+          reason: cause instanceof Error ? cause.message : String(cause),
+        }),
     });
 
-    return yield* decode(response).pipe(
-      Effect.mapError((cause) => bridgeError(`invalid ${operation} response`, cause)),
-    );
+    const envelope = yield* Effect.try({
+      try: () => Schema.decodeUnknownSync(IpcEnvelopeSchema)(raw),
+      catch: (cause) =>
+        new DesktopBridgeError({ operation: `${name}/envelope`, reason: String(cause) }),
+    });
+
+    if (!envelope.ok) {
+      return yield* new DesktopBridgeError({
+        operation: envelope.error.tag,
+        reason: envelope.error.detail
+          ? `${envelope.error.message} (${envelope.error.detail})`
+          : envelope.error.message,
+      });
+    }
+
+    const value = yield* Effect.try({
+      try: () =>
+        Schema.decodeUnknownSync(
+          resultSchemas[name] as unknown as Schema.ConstraintDecoder<unknown>,
+        )(envelope.value),
+      catch: (cause) =>
+        new DesktopBridgeError({ operation: `${name}/result`, reason: String(cause) }),
+    });
+    return value as CommandResults[C];
   });
+}
+
+export const bootstrap = command(COMMANDS.bootstrap, undefined);
 
 export const DesktopBridgeLive = Layer.succeed(DesktopBridge, {
-  runtimeInfo: loadBridge(
-    "runtime-info",
-    () => getBridge().getRuntimeInfo(),
-    Schema.decodeUnknownEffect(RuntimeInfoSchema),
-  ),
-  ping: loadBridge("ping", () => getBridge().ping(), Schema.decodeUnknownEffect(PingResultSchema)),
+  invoke: (commandName, payload) => getBridge().invoke(commandName, payload),
 });
 
-export const runtimeInfoEffect = Effect.gen(function* () {
-  const bridge = yield* DesktopBridge;
-  return yield* bridge.runtimeInfo;
-});
-
-export const pingEffect = Effect.gen(function* () {
-  const bridge = yield* DesktopBridge;
-  return yield* bridge.ping;
-});
+/** Subscribe to validated main-process events. Returns an unsubscribe function. */
+export function subscribeEvents(listener: (event: MaaxEvent) => void): () => void {
+  return getBridge().subscribe((raw) => {
+    try {
+      listener(Schema.decodeUnknownSync(MaaxEventSchema)(raw));
+    } catch (error) {
+      console.error("Dropped invalid renderer event", error);
+    }
+  });
+}

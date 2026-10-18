@@ -2,14 +2,15 @@
   "name": "maax-solid",
   "version": "0.1.0",
   "private": true,
-  "description": "A secure Electron 44 + Solid 2 RC + Effect 4 desktop baseline running on Node.js 26 and pnpm 12.",
-  "license": "MIT",
+  "description": "A modern desktop client for MaaAssistantArknights, built with Electron 44, Solid 2 and Effect 4.",
+  "license": "AGPL-3.0-or-later",
   "author": "Maax",
   "main": "./out/main/index.js",
   "scripts": {
     "prepare": "effect-tsgo patch --oxlint",
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
+    "test": "vitest run",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt .",
@@ -19,21 +20,31 @@
     "package": "pnpm run build && electron-builder --dir",
     "dist": "pnpm run build && electron-builder"
   },
+  "dependencies": {
+    "koffi": "3.3.3"
+  },
   "devDependencies": {
+    "@effect/platform-node": "4.0.5",
     "@effect/tsgo": "0.53.4",
+    "@effect/vitest": "4.0.5",
+    "@kobalte/core": "2.0.0-alpha.3",
     "@solidjs/vite-plugin": "3.0.0-next.50",
     "@solidjs/web": "2.0.0-rc.15",
     "@types/node": "26.6.5",
+    "@types/semver": "7.7.0",
     "effect": "4.0.5",
     "electron": "44.9.0",
     "electron-builder": "26.15.3",
     "electron-vite": "6.0.0",
+    "lucide": "1.59.0",
     "oxfmt": "0.73.0",
     "oxlint": "1.88.0",
     "oxlint-tsgolint": "7.0.2004",
+    "semver": "7.8.5",
     "solid-js": "2.0.0-rc.15",
     "typescript": "7.0.2",
-    "vite": "8.3.4"
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
   },
   "engines": {
     "node": ">=26.0.0 <27",

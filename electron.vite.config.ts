@@ -30,6 +30,14 @@ const buildMetadata = {
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve("src/main/index.ts"),
+          "core-host": resolve("src/main/core-host/index.ts"),
+        },
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
