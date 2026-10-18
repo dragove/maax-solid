@@ -7,6 +7,7 @@ import type {
   DeviceView,
   RunSnapshot,
   Screenshot,
+  StageCatalog,
   TaskPlan,
 } from "./schemas";
 
@@ -31,6 +32,7 @@ export const COMMANDS = {
   removeCore: "cores.remove",
   refreshCores: "cores.refresh",
   downloadCore: "cores.download",
+  stageCatalog: "stages.catalog",
   addDevice: "devices.add",
   updateDevice: "devices.update",
   removeDevice: "devices.remove",
@@ -54,6 +56,7 @@ export interface CommandPayloads {
   "cores.remove": { coreId: string };
   "cores.refresh": undefined;
   "cores.download": undefined;
+  "stages.catalog": undefined;
   "devices.add": DeviceDraft;
   "devices.update": { id: string; patch: Partial<DeviceDraft> };
   "devices.remove": { id: string };
@@ -75,6 +78,7 @@ export interface CommandResults {
   "cores.remove": ReadonlyArray<CoreInfo>;
   "cores.refresh": ReadonlyArray<CoreInfo>;
   "cores.download": CoreInfo | null;
+  "stages.catalog": StageCatalog;
   "devices.add": DeviceView;
   "devices.update": DeviceView;
   "devices.remove": ReadonlyArray<DeviceView>;

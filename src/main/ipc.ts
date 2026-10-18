@@ -87,6 +87,8 @@ export function registerIpcHandlers(
           return run((app) => app.refreshCores);
         case COMMANDS.downloadCore:
           return run((app) => app.downloadCore);
+        case COMMANDS.stageCatalog:
+          return run((app) => app.stageCatalog);
         case COMMANDS.addDevice: {
           const draft = decode(DeviceDraftSchema, payload);
           return run((app) => app.addDevice(draft));

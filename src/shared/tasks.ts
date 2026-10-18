@@ -10,7 +10,7 @@ export interface LocalizedText {
   readonly en: string;
 }
 
-export type FieldKind = "switch" | "number" | "text" | "select" | "multi-select" | "tags";
+export type FieldKind = "switch" | "number" | "text" | "stage" | "select" | "multi-select" | "tags";
 
 export interface FieldOption {
   readonly value: string | number;
@@ -81,7 +81,7 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
     fields: [
       {
         key: "stage",
-        kind: "text",
+        kind: "stage",
         label: { zh: "关卡", en: "Stage" },
         description: {
           zh: "主线的 1-7、剿灭、资源本（CE-6 / LS-6 / CA-5）或活动关卡。留空则识别当前关卡。",
@@ -140,10 +140,14 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
         key: "series",
         kind: "select",
         label: { zh: "代理倍率", en: "Consecutive battles" },
-        options: numberOptions([1, 2, 3, 4, 5, 6]),
+        options: [
+          { value: 0, label: { zh: "自动（推荐）", en: "Auto (recommended)" } },
+          { value: -1, label: { zh: "不切换", en: "Do not switch" } },
+          ...numberOptions([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+        ],
         description: {
-          zh: "连续战斗次数；代理指挥未解锁时可能不可用。",
-          en: "Number of consecutive battles. May be unavailable before auto-deploy is unlocked.",
+          zh: "自动会按当前理智选择本次可连续作战的最大次数；不切换则保持游戏当前设置。7–10 仅在支持新倍率列表的服务器可用。",
+          en: "Auto picks the largest available run for the current sanity; Do not switch leaves the in-game setting untouched. 7–10 requires the newer series list on the current resource.",
         },
       },
       {
@@ -465,7 +469,7 @@ export function getTaskDefaults(type: TaskType): Record<string, unknown> {
         medicine_expire_days: 0,
         stone: 0,
         times: 0,
-        series: 1,
+        series: 0,
         DrGrandet: false,
       };
     case "Recruit":

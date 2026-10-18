@@ -6,6 +6,7 @@ import type {
   DeviceView,
   DownloadProgress,
   Locale,
+  StageCatalogEntry,
   RunSnapshot,
   TaskPlan,
   TaskType,
@@ -97,6 +98,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
   const [download, setDownload] = createSignal<DownloadProgress>();
+  const [stages, setStages] = createSignal<ReadonlyArray<StageCatalogEntry>>([]);
 
   let logId = 0;
   let contentRef: HTMLElement | undefined;
@@ -288,6 +290,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
   };
 
   onSettled(() => {
+    void runtime
+      .runPromise(command(COMMANDS.stageCatalog, undefined))
+      .then((catalog) => setStages(catalog.entries))
+      .catch((error: unknown) => console.warn("Stage catalog unavailable", error));
     const unsubscribe = subscribeEvents(applyEvent);
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const onMedia = (event: MediaQueryListEvent): void => {
@@ -641,6 +647,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               plan={selectedPlan()}
               run={selectedRun()}
               logs={deviceLogs()}
+              stages={stages()}
               busy={busy()}
               saving={saving()}
               onConnect={() => void connectDevice()}

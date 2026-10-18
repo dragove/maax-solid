@@ -9,6 +9,8 @@
 - [x] Device profiles, ADB connect/disconnect, screenshot preview.
 - [x] Device-scoped task plan with StartUp, Fight, Recruit, Infrast, Mall,
       Award, CloseDown.
+- [x] Fight series Auto/NotSwitch/1–10 and a searchable, categorized stage picker
+      with live event stages.
 - [x] Run/stop, live task-chain and subtask projection, log stream.
 - [x] Schema-validated settings/workspace persistence with atomic writes.
 - [x] Chinese/English UI, dark/light/system themes.

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 import { Notification, app } from "electron";
 import { randomUUID } from "node:crypto";
 import { cpus, release, totalmem } from "node:os";
@@ -16,6 +16,8 @@ import type {
   Resolution,
   RunSnapshot,
   Screenshot,
+  StageCatalog,
+  StageCatalogEntry,
   TaskPlan,
   RuntimeInfo,
 } from "../../shared/schemas";
@@ -26,6 +28,105 @@ import type {
   InitResult,
 } from "../../shared/engine";
 import { buildMaaTaskParams } from "../../shared/tasks";
+
+const STAGE_ACTIVITY_URL =
+  "https://api.maa.plus/MaaAssistantArknights/api/gui/StageActivityV2.json";
+
+const ActivityInfoSchema = Schema.Struct({
+  Tip: Schema.optional(Schema.String),
+  StageName: Schema.optional(Schema.String),
+  UtcStartTime: Schema.optional(Schema.String),
+  UtcExpireTime: Schema.optional(Schema.String),
+  TimeZone: Schema.optional(Schema.Number),
+});
+const ActivityStageSchema = Schema.Struct({
+  Display: Schema.optional(Schema.String),
+  Value: Schema.optional(Schema.String),
+  Drop: Schema.optional(Schema.String),
+});
+const SideStorySchema = Schema.Struct({
+  MinimumRequired: Schema.optional(Schema.String),
+  Activity: Schema.optional(ActivityInfoSchema),
+  Stages: Schema.optional(Schema.Array(ActivityStageSchema)),
+});
+const StageActivityResponseSchema = Schema.Record(
+  Schema.String,
+  Schema.Struct({ sideStoryStage: Schema.optional(Schema.Record(Schema.String, SideStorySchema)) }),
+);
+type StageActivityData = Schema.Schema.Type<typeof StageActivityResponseSchema>;
+
+const parseActivityDate = (value: string | undefined, timeZone: number | undefined): number => {
+  if (!value) return 0;
+  const normalized = value.replaceAll("/", "-").replace(" ", "T");
+  const zone = typeof timeZone === "number" ? timeZone : 8;
+  const offset = `${zone >= 0 ? "+" : "-"}${String(Math.abs(zone)).padStart(2, "0")}:00`;
+  const parsed = Date.parse(`${normalized}${offset}`);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const permanentStageEntries = (locale: string): ReadonlyArray<StageCatalogEntry> => {
+  const zh = locale === "zh-CN";
+  const group = {
+    recommended: zh ? "推荐" : "Recommended",
+    resource: zh ? "资源关卡" : "Resource stages",
+    annihilation: zh ? "剿灭作战" : "Annihilation",
+  };
+  const entry = (
+    value: string,
+    label: string,
+    groupLabel: string,
+    tip?: string,
+  ): StageCatalogEntry => ({
+    value,
+    label,
+    group: groupLabel,
+    groupLabel,
+    ...(tip ? { tip } : {}),
+  });
+
+  return [
+    entry(
+      "",
+      zh ? "当前 / 上次关卡" : "Current / last stage",
+      group.recommended,
+      zh ? "留空则识别游戏当前或上次关卡" : "Leave empty to use the current or last stage",
+    ),
+    entry("1-7", "1-7", group.recommended),
+    entry("R8-11", "R8-11", group.recommended),
+    entry("12-17-HARD", "12-17-HARD", group.recommended),
+    entry("CE-6", "CE-6", group.resource, zh ? "龙门币" : "LMD"),
+    entry("LS-6", "LS-6", group.resource, zh ? "经验" : "EXP"),
+    entry("CA-5", "CA-5", group.resource, zh ? "技能" : "Skill summaries"),
+    entry("AP-5", "AP-5", group.resource, zh ? "采购凭证" : "Purchase certificates"),
+    entry("SK-5", "SK-5", group.resource, zh ? "碳" : "Carbon"),
+    entry("PR-A-1", "PR-A-1", group.resource, zh ? "术师/近卫芯片" : "Caster/Guard chips"),
+    entry("PR-A-2", "PR-A-2", group.resource, zh ? "术师/近卫芯片" : "Caster/Guard chips"),
+    entry("PR-B-1", "PR-B-1", group.resource, zh ? "狙击/重装芯片" : "Sniper/Defender chips"),
+    entry("PR-B-2", "PR-B-2", group.resource, zh ? "狙击/重装芯片" : "Sniper/Defender chips"),
+    entry("PR-C-1", "PR-C-1", group.resource, zh ? "医疗/辅助芯片" : "Medic/Supporter chips"),
+    entry("PR-C-2", "PR-C-2", group.resource, zh ? "医疗/辅助芯片" : "Medic/Supporter chips"),
+    entry("PR-D-1", "PR-D-1", group.resource, zh ? "先锋/特种芯片" : "Vanguard/Specialist chips"),
+    entry("PR-D-2", "PR-D-2", group.resource, zh ? "先锋/特种芯片" : "Vanguard/Specialist chips"),
+    entry(
+      "Annihilation",
+      "Annihilation",
+      group.annihilation,
+      zh ? "当前剿灭" : "Current annihilation",
+    ),
+    entry("Chernobog@Annihilation", "Chernobog", group.annihilation),
+    entry("LungmenOutskirts@Annihilation", "Lungmen Outskirts", group.annihilation),
+    entry("LungmenDowntown@Annihilation", "Lungmen Downtown", group.annihilation),
+  ];
+};
+
+const clientKeyFor = (clientType: string): string =>
+  clientType === "Bilibili" ? "Official" : clientType;
+
+interface StageCache {
+  readonly key: string;
+  readonly at: number;
+  readonly catalog: StageCatalog;
+}
 import { CoreHostClient } from "../core-host-client";
 import { CoreRegistry } from "./core-registry";
 import { CoreInstaller } from "./core-installer";
@@ -80,6 +181,7 @@ export interface ApplicationApi {
   readonly connectDevice: (id: string) => Effect.Effect<DeviceView, MaaxError>;
   readonly disconnectDevice: (id: string) => Effect.Effect<DeviceView, MaaxError>;
   readonly screenshotDevice: (id: string) => Effect.Effect<Screenshot, MaaxError>;
+  readonly stageCatalog: Effect.Effect<StageCatalog>;
   readonly savePlan: (plan: TaskPlan) => Effect.Effect<TaskPlan, MaaxError>;
   readonly removePlan: (id: string) => Effect.Effect<ReadonlyArray<TaskPlan>>;
   readonly startRun: (deviceId: string, planId: string) => Effect.Effect<RunSnapshot, MaaxError>;
@@ -162,6 +264,7 @@ export const ApplicationLive: Layer.Layer<
     let plans: TaskPlan[] = [];
     let engine: EngineInfo = { phase: "idle", sessionCount: 0 };
     let shuttingDown = false;
+    let stageCache: StageCache | undefined;
 
     const log = (level: "debug" | "info" | "warn" | "error", message: string): void => {
       if (level === "debug" && !settingsCache?.developerMode) return;
@@ -816,6 +919,69 @@ export const ApplicationLive: Layer.Layer<
       return cores;
     });
 
+    const stageCatalog = Effect.gen(function* () {
+      const currentSettings = yield* settings.get;
+      const locale = currentSettings.locale;
+      const client = clientKeyFor(currentSettings.clientType);
+      const cacheKey = `${client}:${locale}`;
+      if (stageCache && stageCache.key === cacheKey && Date.now() - stageCache.at < 10 * 60_000) {
+        return stageCache.catalog;
+      }
+
+      const permanent = permanentStageEntries(locale);
+      const activity = yield* Effect.tryPromise({
+        try: async (): Promise<StageActivityData> => {
+          const response = await fetch(STAGE_ACTIVITY_URL, { signal: AbortSignal.timeout(20_000) });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return Schema.decodeUnknownSync(StageActivityResponseSchema)(await response.json());
+        },
+        catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
+      }).pipe(
+        Effect.map((data: StageActivityData) => {
+          const zh = locale === "zh-CN";
+          const entries: StageCatalogEntry[] = [];
+          const now = Date.now();
+          for (const story of Object.values(data[client]?.sideStoryStage ?? {})) {
+            const info = story.Activity;
+            const start = parseActivityDate(info?.UtcStartTime, info?.TimeZone);
+            const expire = parseActivityDate(info?.UtcExpireTime, info?.TimeZone);
+            if (start > 0 && now < start) continue;
+            if (expire > 0 && now > expire) continue;
+            const groupLabel =
+              `${zh ? "活动" : "Event"} · ${info?.StageName || info?.Tip || ""}`.trim();
+            for (const stage of story.Stages ?? []) {
+              if (!stage.Value) continue;
+              entries.push({
+                value: stage.Value,
+                label: stage.Display || stage.Value,
+                group: "activity",
+                groupLabel,
+                ...(stage.Drop ? { tip: `${zh ? "掉落" : "Drop"}: ${stage.Drop}` } : {}),
+              });
+            }
+          }
+          return { entries, warning: undefined as string | undefined };
+        }),
+        Effect.catch(() =>
+          Effect.succeed({
+            entries: [] as StageCatalogEntry[],
+            warning:
+              locale === "zh-CN"
+                ? "活动关卡获取失败，已显示常驻推荐关卡。"
+                : "Could not load event stages; showing permanent recommendations.",
+          }),
+        ),
+      );
+
+      const catalog: StageCatalog = {
+        entries: [permanent[0]!, ...activity.entries, ...permanent.slice(1)],
+        updatedAt: Date.now(),
+        ...(activity.warning ? { warning: activity.warning } : {}),
+      };
+      stageCache = { key: cacheKey, at: Date.now(), catalog };
+      return catalog;
+    });
+
     const downloadCore = Effect.gen(function* () {
       const core = yield* installer.downloadStable;
       if (core) {
@@ -920,6 +1086,7 @@ export const ApplicationLive: Layer.Layer<
       connectDevice,
       disconnectDevice,
       screenshotDevice,
+      stageCatalog,
       savePlan,
       removePlan,
       startRun,

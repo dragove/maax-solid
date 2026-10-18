@@ -10,6 +10,7 @@ import {
   MaaxEventSchema,
   RunSnapshotSchema,
   ScreenshotSchema,
+  StageCatalogSchema,
   TaskPlanSchema,
   type MaaxEvent,
 } from "../../../shared/schemas";
@@ -55,6 +56,7 @@ const resultSchemas = {
   [COMMANDS.removeCore]: Schema.Array(CoreInfoSchema),
   [COMMANDS.refreshCores]: Schema.Array(CoreInfoSchema),
   [COMMANDS.downloadCore]: Schema.NullOr(CoreInfoSchema),
+  [COMMANDS.stageCatalog]: StageCatalogSchema,
   [COMMANDS.addDevice]: DeviceViewSchema,
   [COMMANDS.updateDevice]: DeviceViewSchema,
   [COMMANDS.removeDevice]: Schema.Array(DeviceViewSchema),

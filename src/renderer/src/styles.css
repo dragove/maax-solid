@@ -1494,6 +1494,7 @@ select.input {
 }
 
 .task-card--expanded {
+  overflow: visible;
   border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
 }
 
@@ -2776,4 +2777,126 @@ select.input {
   font-family: var(--mono);
   font-size: 9px;
   color: var(--faint);
+}
+
+/* --- stage picker ---------------------------------------------------------- */
+
+.stage-picker {
+  position: relative;
+}
+
+.stage-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.stage-search-icon {
+  position: absolute;
+  left: 12px;
+  z-index: 1;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.stage-input {
+  padding-left: 34px;
+  padding-right: 36px;
+}
+
+.stage-chevron {
+  position: absolute;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+  border-radius: 7px;
+}
+
+.stage-chevron:hover {
+  color: var(--text);
+  background: var(--panel-strong);
+}
+
+.stage-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: min(440px, 100%);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--panel-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+
+.stage-group + .stage-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.stage-group-label {
+  margin: 4px 8px 3px;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+
+.stage-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  text-align: left;
+  border-radius: 7px;
+}
+
+.stage-option:hover,
+.stage-option--active {
+  background: var(--panel-strong);
+}
+
+.stage-option-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stage-option-value {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.stage-option-tip {
+  overflow: hidden;
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-option-check {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.stage-empty {
+  margin: 0;
+  padding: 14px 10px;
+  font-size: 11px;
+  color: var(--muted);
 }

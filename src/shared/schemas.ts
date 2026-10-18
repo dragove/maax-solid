@@ -398,6 +398,22 @@ export const IpcFailureSchema = Schema.Struct({
 export const IpcEnvelopeSchema = Schema.Union([IpcSuccessSchema, IpcFailureSchema]);
 export type IpcEnvelope = Schema.Schema.Type<typeof IpcEnvelopeSchema>;
 
+export const StageCatalogEntrySchema = Schema.Struct({
+  value: Schema.String,
+  label: Schema.String,
+  group: Schema.String,
+  groupLabel: Schema.String,
+  tip: Schema.optional(Schema.String),
+});
+export type StageCatalogEntry = Schema.Schema.Type<typeof StageCatalogEntrySchema>;
+
+export const StageCatalogSchema = Schema.Struct({
+  entries: Schema.Array(StageCatalogEntrySchema),
+  updatedAt: Schema.Number,
+  warning: Schema.optional(Schema.String),
+});
+export type StageCatalog = Schema.Schema.Type<typeof StageCatalogSchema>;
+
 export const ScreenshotSchema = Schema.Struct({
   png: Schema.Uint8Array,
   width: Schema.Int,

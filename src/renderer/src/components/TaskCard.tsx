@@ -1,14 +1,16 @@
 import { For, Show, createSignal, type Component } from "solid-js";
-import type { Locale, RunTaskState, TaskConfig } from "../../../shared/schemas";
+import type { Locale, RunTaskState, StageCatalogEntry, TaskConfig } from "../../../shared/schemas";
 import type { FieldOption, TaskField } from "../../../shared/tasks";
 import { TASK_DEFINITIONS } from "../../../shared/tasks";
 import { pick, t } from "../i18n/i18n";
+import { StagePicker } from "./StagePicker";
 import { Icon } from "./ui/Icon";
 import { Switch } from "./ui/Switch";
 
 interface TaskCardProps {
   readonly task: TaskConfig;
   readonly locale: Locale;
+  readonly stages: ReadonlyArray<StageCatalogEntry>;
   readonly expanded: boolean;
   readonly runTask?: RunTaskState;
   readonly disabled?: boolean;
@@ -69,6 +71,7 @@ const sameOption = (left: string | number, right: string | number): boolean =>
 const FieldControl: Component<{
   field: TaskField;
   locale: Locale;
+  stages: ReadonlyArray<StageCatalogEntry>;
   value: unknown;
   onChange: (value: unknown) => void;
 }> = (props) => {
@@ -99,6 +102,21 @@ const FieldControl: Component<{
               const next = event.currentTarget.valueAsNumber;
               props.onChange(Number.isFinite(next) ? next : 0);
             }}
+          />
+        </label>
+      );
+    case "stage":
+      return (
+        <label class="field field--wide" title={description()}>
+          <span class="field-label">{label()}</span>
+          <StagePicker
+            value={typeof props.value === "string" ? props.value : ""}
+            stages={props.stages}
+            locale={props.locale}
+            placeholder={
+              props.field.placeholder ? pick(props.locale, props.field.placeholder) : undefined
+            }
+            onChange={props.onChange}
           />
         </label>
       );
@@ -285,6 +303,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
                 <FieldControl
                   field={field}
                   locale={props.locale}
+                  stages={props.stages}
                   value={props.task.params[field.key]}
                   onChange={(value) => props.onParamChange(field.key, value)}
                 />
@@ -307,6 +326,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
                     <FieldControl
                       field={field}
                       locale={props.locale}
+                      stages={props.stages}
                       value={props.task.params[field.key]}
                       onChange={(value) => props.onParamChange(field.key, value)}
                     />

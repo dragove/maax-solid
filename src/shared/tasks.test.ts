@@ -32,6 +32,12 @@ describe("task parameter builder", () => {
     expect(buildMaaTaskParams(task, settings)).not.toHaveProperty("times");
   });
 
+  it("passes AUTO series through as zero", () => {
+    const task = createTask("Fight");
+    expect(task.params.series).toBe(0);
+    expect(buildMaaTaskParams(task, settings).series).toBe(0);
+  });
+
   it("creates every default task with valid params", () => {
     const task = createTask("StartUp");
     expect(task.enabled).toBe(true);

@@ -4,6 +4,7 @@ import type {
   DeviceView,
   Locale,
   RunSnapshot,
+  StageCatalogEntry,
   TaskPlan,
   TaskType,
 } from "../../../shared/schemas";
@@ -22,6 +23,7 @@ interface TasksProps {
   readonly plan: TaskPlan | undefined;
   readonly run: RunSnapshot | undefined;
   readonly logs: ReadonlyArray<UiLogEntry>;
+  readonly stages: ReadonlyArray<StageCatalogEntry>;
   readonly busy: boolean;
   readonly saving: boolean;
   readonly onConnect: () => void;
@@ -221,9 +223,11 @@ export const Tasks: Component<TasksProps> = (props) => {
             }
           >
             <div class="task-list">
-              <For each={props.plan!.tasks}>
-                {(task, index) => {
-                  const runTask = () => props.run?.tasks.find((item) => item.configId === task.id);
+              <For each={props.plan!.tasks} keyed={false}>
+                {(taskAccessor, index) => {
+                  const task = () => taskAccessor();
+                  const runTask = () =>
+                    props.run?.tasks.find((item) => item.configId === task().id);
                   return (
                     <div
                       class="task-slot"
@@ -231,23 +235,24 @@ export const Tasks: Component<TasksProps> = (props) => {
                       onDrop={(event) => {
                         event.preventDefault();
                         const from = dragFrom();
-                        if (from !== null && from !== index()) props.onMoveTask(from, index());
+                        if (from !== null && from !== index) props.onMoveTask(from, index);
                         setDragFrom(null);
                       }}
                     >
                       <TaskCard
-                        task={task}
+                        task={task()}
                         locale={props.locale}
-                        expanded={expandedId() === task.id}
+                        stages={props.stages}
+                        expanded={expandedId() === task().id}
                         runTask={runTask()}
                         disabled={isRunning()}
                         onToggleExpanded={() =>
-                          setExpandedId((current) => (current === task.id ? null : task.id))
+                          setExpandedId((current) => (current === task().id ? null : task().id))
                         }
-                        onEnabledChange={(enabled) => props.onEnabledChange(task.id, enabled)}
-                        onParamChange={(key, value) => props.onParamChange(task.id, key, value)}
-                        onRemove={() => props.onRemoveTask(task.id)}
-                        onDragStart={() => setDragFrom(index())}
+                        onEnabledChange={(enabled) => props.onEnabledChange(task().id, enabled)}
+                        onParamChange={(key, value) => props.onParamChange(task().id, key, value)}
+                        onRemove={() => props.onRemoveTask(task().id)}
+                        onDragStart={() => setDragFrom(index)}
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={() => undefined}
                       />
