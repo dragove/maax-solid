@@ -2,9 +2,21 @@ import type {
   AppSettings,
   AppSettingsPatch,
   Bootstrap,
+  CopilotFile,
+  CopilotLevel,
+  CopilotResolveResult,
+  CopilotItem,
+  CopilotOptions,
+  CopilotSearchResult,
+  CopilotSetup,
   CoreInfo,
+  OperatorEntry,
+  CoreReleaseCheck,
   DeviceDraft,
   DeviceView,
+  ResourceApplyResult,
+  ResourceCheck,
+  ResourceStatus,
   RunSnapshot,
   Screenshot,
   StageCatalog,
@@ -32,6 +44,11 @@ export const COMMANDS = {
   removeCore: "cores.remove",
   refreshCores: "cores.refresh",
   downloadCore: "cores.download",
+  checkCoreUpdate: "cores.check-update",
+  resourceStatus: "resources.status",
+  checkResourceUpdate: "resources.check",
+  updateResource: "resources.update",
+  rollbackResource: "resources.rollback",
   stageCatalog: "stages.catalog",
   addDevice: "devices.add",
   updateDevice: "devices.update",
@@ -41,6 +58,20 @@ export const COMMANDS = {
   screenshotDevice: "devices.screenshot",
   savePlan: "plans.save",
   removePlan: "plans.remove",
+  createPlan: "plans.create",
+  duplicatePlan: "plans.duplicate",
+  renamePlan: "plans.rename",
+  importPlan: "plans.import",
+  exportPlan: "plans.export",
+  setActivePlan: "plans.set-active",
+  importCopilot: "copilot.import",
+  resolveCopilot: "copilot.resolve",
+  searchCopilot: "copilot.search",
+  searchCopilotLevels: "copilot.levels",
+  searchOperators: "copilot.operators",
+  updateCopilotOptions: "copilot.options",
+  setCopilotItems: "copilot.items",
+  startCopilot: "copilot.start",
   startRun: "runs.start",
   stopRun: "runs.stop",
 } as const;
@@ -56,6 +87,11 @@ export interface CommandPayloads {
   "cores.remove": { coreId: string };
   "cores.refresh": undefined;
   "cores.download": undefined;
+  "cores.check-update": undefined;
+  "resources.status": { coreId: string };
+  "resources.check": { coreId: string };
+  "resources.update": { coreId: string };
+  "resources.rollback": { coreId: string; backupId: string };
   "stages.catalog": undefined;
   "devices.add": DeviceDraft;
   "devices.update": { id: string; patch: Partial<DeviceDraft> };
@@ -65,6 +101,30 @@ export interface CommandPayloads {
   "devices.screenshot": { id: string };
   "plans.save": { plan: TaskPlan };
   "plans.remove": { id: string };
+  "plans.create": { deviceId: string; name: string };
+  "plans.duplicate": { planId: string; name?: string };
+  "plans.rename": { planId: string; name: string };
+  "plans.import": { deviceId: string };
+  "plans.export": { planId: string };
+  "plans.set-active": { deviceId: string; planId: string };
+  "copilot.import": undefined;
+  "copilot.resolve": { input: string };
+  "copilot.search": {
+    document?: string;
+    operator?: string;
+    uploaderId?: string;
+    stage?: string;
+    orderBy?: "hot" | "views" | "upload_time";
+    desc?: boolean;
+    page?: number;
+    limit?: number;
+    language?: "zh" | "en";
+  };
+  "copilot.levels": { query: string };
+  "copilot.operators": { query: string };
+  "copilot.options": Partial<CopilotOptions>;
+  "copilot.items": { items: ReadonlyArray<CopilotItem> };
+  "copilot.start": { deviceId: string };
   "runs.start": { deviceId: string; planId: string };
   "runs.stop": { deviceId: string };
 }
@@ -78,6 +138,11 @@ export interface CommandResults {
   "cores.remove": ReadonlyArray<CoreInfo>;
   "cores.refresh": ReadonlyArray<CoreInfo>;
   "cores.download": CoreInfo | null;
+  "cores.check-update": CoreReleaseCheck;
+  "resources.status": ResourceStatus;
+  "resources.check": ResourceCheck;
+  "resources.update": ResourceApplyResult;
+  "resources.rollback": ResourceApplyResult;
   "stages.catalog": StageCatalog;
   "devices.add": DeviceView;
   "devices.update": DeviceView;
@@ -87,6 +152,20 @@ export interface CommandResults {
   "devices.screenshot": Screenshot;
   "plans.save": TaskPlan;
   "plans.remove": ReadonlyArray<TaskPlan>;
+  "plans.create": TaskPlan;
+  "plans.duplicate": TaskPlan;
+  "plans.rename": TaskPlan;
+  "plans.import": TaskPlan | null;
+  "plans.export": string | null;
+  "plans.set-active": DeviceView;
+  "copilot.import": CopilotFile | null;
+  "copilot.resolve": CopilotResolveResult;
+  "copilot.search": CopilotSearchResult;
+  "copilot.levels": ReadonlyArray<CopilotLevel>;
+  "copilot.operators": ReadonlyArray<OperatorEntry>;
+  "copilot.options": CopilotSetup;
+  "copilot.items": CopilotSetup;
+  "copilot.start": RunSnapshot;
   "runs.start": RunSnapshot;
   "runs.stop": RunSnapshot;
 }

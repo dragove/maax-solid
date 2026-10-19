@@ -1,4 +1,4 @@
-import type { AppSettings, TaskConfig, TaskType } from "./schemas";
+import type { AppSettings, CopilotSetup, TaskConfig, TaskType } from "./schemas";
 
 /**
  * Declarative task catalogue shared by the renderer forms and the main process
@@ -10,7 +10,7 @@ export interface LocalizedText {
   readonly en: string;
 }
 
-export type FieldKind = "switch" | "number" | "text" | "stage" | "select" | "multi-select" | "tags";
+export type FieldKind = "switch" | "number" | "text" | "stage" | "select" | "multi-select" | "tags" | "file";
 
 export interface FieldOption {
   readonly value: string | number;
@@ -28,6 +28,10 @@ export interface TaskField {
   readonly max?: number;
   readonly step?: number;
   readonly advanced?: boolean;
+  /** The task cannot be started until this field has a value. */
+  readonly required?: boolean;
+  /** Custom presence rule; defaults to "non-empty string/number/array". */
+  readonly satisfies?: (params: Record<string, unknown>) => boolean;
   readonly visibleWhen?: (params: Record<string, unknown>) => boolean;
 }
 
@@ -436,6 +440,199 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
       },
     ],
   },
+  Copilot: {
+    type: "Copilot",
+    name: { zh: "自动战斗", en: "Auto Battle" },
+    description: {
+      zh: "按作业文件自动组队并战斗，支持普通关卡、剿灭与活动关卡。",
+      en: "Follow a copilot file: build the squad automatically and clear the stage.",
+    },
+    icon: "swords",
+    fields: [
+      {
+        key: "filename",
+        kind: "file",
+        label: { zh: "本地作业文件", en: "Local copilot file" },
+        description: {
+          zh: "也可以直接导入一个 JSON 文件；上面的作业列表优先。",
+          en: "You can also import a JSON file; the assignment list above takes precedence.",
+        },
+        required: true,
+        visibleWhen: (params) => !hasCopilotList(params),
+        satisfies: (params) =>
+          hasCopilotList(params) || (typeof params.filename === "string" && (params.filename as string).trim() !== ""),
+      },
+      {
+        key: "formation",
+        kind: "switch",
+        label: { zh: "自动编队", en: "Auto formation" },
+        description: { zh: "按作业要求自动选择干员与技能。", en: "Pick operators and skills as the file requires." },
+      },
+      {
+        key: "add_trust",
+        kind: "switch",
+        label: { zh: "填充信赖干员", en: "Fill with trust operators" },
+        description: {
+          zh: "空余位置自动补充需要刷信赖的干员。",
+          en: "Fill empty slots with operators that need trust.",
+        },
+      },
+      {
+        key: "ignore_requirements",
+        kind: "switch",
+        label: { zh: "忽略练度要求", en: "Ignore level requirements" },
+        description: {
+          zh: "干员练度不足时仍然尝试执行，可能失败。",
+          en: "Run even when operators are below the required level; it may fail.",
+        },
+        advanced: true,
+      },
+      {
+        key: "use_sanity_potion",
+        kind: "switch",
+        label: { zh: "使用理智药", en: "Use sanity potions" },
+        advanced: true,
+      },
+      {
+        key: "support_unit_usage",
+        kind: "select",
+        label: { zh: "助战干员", en: "Support unit" },
+        options: [
+          { value: 0, label: { zh: "不使用", en: "Do not use" } },
+          { value: 1, label: { zh: "需要时使用", en: "When required" } },
+          { value: 2, label: { zh: "仅助战", en: "Support only" } },
+          { value: 3, label: { zh: "随机助战", en: "Random support" } },
+        ],
+        advanced: true,
+      },
+      {
+        key: "loop_times",
+        kind: "number",
+        label: { zh: "循环次数", en: "Loop count" },
+        min: 1,
+        max: 99,
+        step: 1,
+        advanced: true,
+      },
+      {
+        key: "formation_index",
+        kind: "number",
+        label: { zh: "指定编队", en: "Formation slot" },
+        min: 0,
+        max: 4,
+        step: 1,
+        description: {
+          zh: "0 表示不指定，1–4 对应游戏内编队栏位。",
+          en: "0 lets the copilot choose; 1-4 pins a slot.",
+        },
+        advanced: true,
+      },
+    ],
+  },
+  SSSCopilot: {
+    type: "SSSCopilot",
+    name: { zh: "保全派驻", en: "SSS Copilot" },
+    description: {
+      zh: "按作业文件完成保全派驻，可重复刷取。",
+      en: "Clear Stationary Security Service from a copilot file, optionally on repeat.",
+    },
+    icon: "box",
+    fields: [
+      {
+        key: "filename",
+        kind: "file",
+        label: { zh: "作业文件", en: "Copilot file" },
+        required: true,
+      },
+      {
+        key: "formation",
+        kind: "switch",
+        label: { zh: "自动编队", en: "Auto formation" },
+      },
+      {
+        key: "loop_times",
+        kind: "number",
+        label: { zh: "循环次数", en: "Loop count" },
+        min: 1,
+        max: 99,
+        step: 1,
+      },
+      {
+        key: "use_sanity_potion",
+        kind: "switch",
+        label: { zh: "使用理智药", en: "Use sanity potions" },
+        advanced: true,
+      },
+      {
+        key: "support_unit_usage",
+        kind: "select",
+        label: { zh: "助战干员", en: "Support unit" },
+        options: [
+          { value: 0, label: { zh: "不使用", en: "Do not use" } },
+          { value: 1, label: { zh: "需要时使用", en: "When required" } },
+          { value: 2, label: { zh: "仅助战", en: "Support only" } },
+          { value: 3, label: { zh: "随机助战", en: "Random support" } },
+        ],
+        advanced: true,
+      },
+    ],
+  },
+  ParadoxCopilot: {
+    type: "ParadoxCopilot",
+    name: { zh: "悖论模拟", en: "Paradox Simulation" },
+    description: {
+      zh: "按作业文件完成干员悖论模拟。",
+      en: "Clear an operator's Paradox Simulation from a copilot file.",
+    },
+    icon: "compass",
+    fields: [
+      {
+        key: "filename",
+        kind: "file",
+        label: { zh: "作业文件", en: "Copilot file" },
+        required: true,
+      },
+    ],
+  },
+  Depot: {
+    type: "Depot",
+    name: { zh: "仓库识别", en: "Depot Recognition" },
+    description: {
+      zh: "识别仓库中的材料并生成数据，供一图流等工具使用。",
+      en: "Read the depot to produce material data for external tools.",
+    },
+    icon: "box",
+    fields: [],
+  },
+  OperBox: {
+    type: "OperBox",
+    name: { zh: "干员识别", en: "Operator Box" },
+    description: {
+      zh: "识别已拥有干员及练度，可用于作业辅助编队。",
+      en: "Read the operator box and their promotion levels.",
+    },
+    icon: "users",
+    fields: [],
+  },
+  Custom: {
+    type: "Custom",
+    name: { zh: "自定义任务", en: "Custom Task" },
+    description: {
+      zh: "执行资源中定义的自定义任务，例如小游戏。",
+      en: "Run custom tasks defined by the resource, such as mini games.",
+    },
+    icon: "terminal",
+    fields: [
+      {
+        key: "task_names",
+        kind: "tags",
+        label: { zh: "任务名", en: "Task names" },
+        placeholder: { zh: "例如 小游戏任务名", en: "e.g. a mini-game task name" },
+        description: { zh: "用逗号分隔，按顺序执行。", en: "Comma-separated, executed in order." },
+        required: true,
+      },
+    ],
+  },
   CloseDown: {
     type: "CloseDown",
     name: { zh: "关闭游戏", en: "Close Game" },
@@ -448,6 +645,7 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
   },
 };
 
+/** Default queue created for a new plan. */
 export const TASK_TYPE_ORDER: ReadonlyArray<TaskType> = [
   "StartUp",
   "Fight",
@@ -457,6 +655,31 @@ export const TASK_TYPE_ORDER: ReadonlyArray<TaskType> = [
   "Award",
   "CloseDown",
 ];
+
+/**
+ * Everything the add-task palette offers, daily tasks first.
+ *
+ * `Copilot` is deliberately absent: clearing a stage for the first time is a
+ * one-off action, so it has its own tab instead of sitting in the daily queue.
+ */
+export const TASK_PALETTE_ORDER: ReadonlyArray<TaskType> = [
+  "StartUp",
+  "Fight",
+  "Recruit",
+  "Infrast",
+  "Mall",
+  "Award",
+  "SSSCopilot",
+  "ParadoxCopilot",
+  "Depot",
+  "OperBox",
+  "Custom",
+  "CloseDown",
+];
+
+/** A copilot task can carry a batch of assignments instead of one file. */
+export const hasCopilotList = (params: Record<string, unknown>): boolean =>
+  Array.isArray(params.copilot_list) && params.copilot_list.length > 0;
 
 export function getTaskDefaults(type: TaskType): Record<string, unknown> {
   switch (type) {
@@ -533,6 +756,33 @@ export function getTaskDefaults(type: TaskType): Record<string, unknown> {
         mining: false,
         specialaccess: false,
       };
+    case "Copilot":
+      return {
+        copilot_list: [],
+        filename: "",
+        formation: true,
+        add_trust: false,
+        ignore_requirements: false,
+        use_sanity_potion: false,
+        support_unit_usage: 0,
+        loop_times: 1,
+        formation_index: 0,
+      };
+    case "SSSCopilot":
+      return {
+        filename: "",
+        formation: true,
+        loop_times: 1,
+        use_sanity_potion: false,
+        support_unit_usage: 0,
+      };
+    case "ParadoxCopilot":
+      return { filename: "" };
+    case "Depot":
+    case "OperBox":
+      return {};
+    case "Custom":
+      return { task_names: [] };
     case "CloseDown":
       return {};
   }
@@ -579,9 +829,102 @@ export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Rec
       return { ...common, ...task.params };
     case "Award":
       return { ...common, ...task.params };
+    case "Copilot": {
+      const params: Record<string, unknown> = {
+        ...common,
+        formation: task.params.formation !== false,
+        add_trust: task.params.add_trust === true,
+        ignore_requirements: task.params.ignore_requirements === true,
+        use_sanity_potion: task.params.use_sanity_potion === true,
+        support_unit_usage: Number(task.params.support_unit_usage) || 0,
+        loop_times: Number(task.params.loop_times) >= 1 ? Number(task.params.loop_times) : 1,
+      };
+      if (Number(task.params.formation_index) > 0) params.formation_index = Number(task.params.formation_index);
+
+      const batch = Array.isArray(task.params.copilot_list) ? task.params.copilot_list : [];
+      const entries = batch.flatMap((item) => {
+        const entry = item as { filename?: unknown; isRaid?: unknown };
+        if (typeof entry.filename !== "string" || entry.filename.trim() === "") return [];
+        // The core reports progress by this index, so it must be the position in
+        // the whole list; normal and raid runs of one file share the file.
+        return [{ id: 0, filename: entry.filename, is_raid: entry.isRaid === true }];
+      });
+      if (entries.length > 0) {
+        return { ...params, copilot_list: entries.map((entry, index) => ({ ...entry, id: index })) };
+      }
+      // Legacy single file: send the stored parameters and drop the empty batch.
+      const single: Record<string, unknown> = { ...common, ...task.params };
+      delete single.copilot_list;
+      if (Number(task.params.formation_index) <= 0) delete single.formation_index;
+      single.loop_times = params.loop_times;
+      return single;
+    }
+    case "SSSCopilot":
+      return {
+        ...common,
+        ...task.params,
+        loop_times: Number(task.params.loop_times) >= 1 ? Number(task.params.loop_times) : 1,
+      };
+    case "ParadoxCopilot":
+      return { ...common, ...task.params };
+    case "Depot":
+    case "OperBox":
+      return { ...common, ...task.params };
+    case "Custom": {
+      const names = Array.isArray(task.params.task_names)
+        ? (task.params.task_names as unknown[]).filter((name): name is string => typeof name === "string")
+        : [];
+      return { ...common, task_names: names };
+    }
     case "CloseDown":
       return { ...common, ...task.params };
   }
+}
+
+/** Build the single task the copilot tab runs, from its saved setup. */
+export function createCopilotTask(setup: CopilotSetup, id = crypto.randomUUID()): TaskConfig {
+  return {
+    id,
+    type: "Copilot",
+    enabled: true,
+    name: "",
+    params: {
+      copilot_list: [...setup.items],
+      filename: "",
+      formation: setup.options.formation,
+      add_trust: setup.options.addTrust,
+      ignore_requirements: setup.options.ignoreRequirements,
+      use_sanity_potion: setup.options.useSanityPotion,
+      support_unit_usage: setup.options.supportUnitUsage,
+      loop_times: setup.options.loopTimes,
+      formation_index: setup.options.formationIndex,
+    },
+    createdAt: 0,
+  };
+}
+
+/**
+ * A task that has a required field left empty cannot run. Starting a queue with
+ * such a task is refused up front instead of surfacing as an opaque MaaCore
+ * rejection half way through the queue.
+ */
+export function firstMissingField(task: TaskConfig): LocalizedText | undefined {
+  for (const field of TASK_DEFINITIONS[task.type].fields) {
+    if (field.required !== true) continue;
+    if (field.satisfies) {
+      if (!field.satisfies(task.params)) return field.label;
+      continue;
+    }
+    const value = task.params[field.key];
+    const filled =
+      typeof value === "string"
+        ? value.trim() !== ""
+        : Array.isArray(value)
+          ? value.length > 0
+          : value !== undefined && value !== null;
+    if (!filled) return field.label;
+  }
+  return undefined;
 }
 
 export function createTask(type: TaskType, id = crypto.randomUUID()): TaskConfig {
