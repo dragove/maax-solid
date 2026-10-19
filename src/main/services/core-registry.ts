@@ -7,6 +7,7 @@ import { CoreInfoSchema, type CoreInfo, type CoreSource } from "../../shared/sch
 import { maaxError } from "../errors";
 import { AppPaths } from "./paths";
 import { readJson, writeJson } from "./json-store";
+import { RESOURCE_VERSION_FILE } from "../../shared/resource-version";
 
 const CoresFileSchema = Schema.Array(CoreInfoSchema);
 
@@ -43,20 +44,35 @@ const sortCores = (cores: ReadonlyArray<CoreInfo>): ReadonlyArray<CoreInfo> =>
     return b.version.localeCompare(a.version);
   });
 
-const inspectCore = (
-  fs: FileSystem,
-  root: string,
-): Effect.Effect<{ status: CoreInfo["status"]; libPath: string; resourcePath: string }> =>
+interface CoreInspection {
+  readonly status: CoreInfo["status"];
+  readonly libPath: string;
+  readonly resourcePath: string;
+  readonly resourceStamp?: string;
+}
+
+/** `resource/version.json` stamps the resource tree; a missing file is not an error. */
+const readResourceStamp = (fs: FileSystem, resourcePath: string): Effect.Effect<string | undefined> =>
+  Effect.gen(function* () {
+    const text = yield* fs
+      .readFileString(join(resourcePath, RESOURCE_VERSION_FILE))
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (text === undefined) return undefined;
+    const parsed = yield* Effect.try(() => JSON.parse(text) as unknown).pipe(Effect.orElseSucceed(() => undefined));
+    const stamp = (parsed as { last_updated?: unknown } | undefined)?.last_updated;
+    return typeof stamp === "string" ? stamp : undefined;
+  });
+
+const inspectCore = (fs: FileSystem, root: string): Effect.Effect<CoreInspection> =>
   Effect.gen(function* () {
     const libPath = join(root, "libMaaCore.so");
     const resourcePath = join(root, "resource");
     const libExists = yield* fs.exists(libPath).pipe(Effect.orElseSucceed(() => false));
     const resourceExists = yield* fs.exists(join(resourcePath, "config.json")).pipe(Effect.orElseSucceed(() => false));
-    return {
-      status: libExists && resourceExists ? "ready" : libExists ? "broken" : "missing",
-      libPath,
-      resourcePath,
-    };
+    const status = libExists && resourceExists ? "ready" : libExists ? "broken" : "missing";
+    if (status !== "ready") return { status, libPath, resourcePath };
+    const resourceStamp = yield* readResourceStamp(fs, resourcePath);
+    return { status, libPath, resourcePath, ...(resourceStamp === undefined ? {} : { resourceStamp }) };
   });
 
 export const CoreRegistryLive: Layer.Layer<CoreRegistry, never, AppPaths | FileSystem> = Layer.effect(
@@ -75,7 +91,9 @@ export const CoreRegistryLive: Layer.Layer<CoreRegistry, never, AppPaths | FileS
     const revalidate = (core: CoreInfo) =>
       Effect.gen(function* () {
         const info = yield* inspectCore(fs, core.root);
-        return { ...core, ...info } satisfies CoreInfo;
+        // Drop the stored stamp first: an unreadable resource must not keep
+        // advertising the previous version.
+        return { ...core, ...info, resourceStamp: info.resourceStamp } satisfies CoreInfo;
       });
 
     const refresh = Effect.gen(function* () {
@@ -114,6 +132,7 @@ export const CoreRegistryLive: Layer.Layer<CoreRegistry, never, AppPaths | FileS
           resourcePath: info.resourcePath,
           managed,
           status: "ready",
+          ...(info.resourceStamp === undefined ? {} : { resourceStamp: info.resourceStamp }),
         };
         const next = sortCores([...current, core]);
         yield* Ref.set(coreRef, next);
@@ -170,6 +189,7 @@ export const CoreRegistryLive: Layer.Layer<CoreRegistry, never, AppPaths | FileS
           resourcePath: devInfo.resourcePath,
           managed: false,
           status: "ready",
+          ...(devInfo.resourceStamp === undefined ? {} : { resourceStamp: devInfo.resourceStamp }),
         };
         const next = sortCores([...current, core]);
         yield* Ref.set(coreRef, next);

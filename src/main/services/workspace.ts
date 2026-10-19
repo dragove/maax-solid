@@ -31,6 +31,7 @@ export interface WorkspaceApi {
     patch: Partial<DeviceDraft>,
   ) => Effect.Effect<DeviceProfile, import("../errors").MaaxError>;
   readonly removeDevice: (id: string) => Effect.Effect<ReadonlyArray<DeviceProfile>>;
+  readonly addPlan: (plan: TaskPlan) => Effect.Effect<TaskPlan>;
   readonly savePlan: (plan: TaskPlan) => Effect.Effect<TaskPlan, import("../errors").MaaxError>;
   readonly removePlan: (id: string) => Effect.Effect<ReadonlyArray<TaskPlan>>;
   readonly getPlan: (id: string) => Effect.Effect<TaskPlan | undefined>;
@@ -131,6 +132,12 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
         const plans = workspace.plans.filter((plan) => plan.deviceId !== id);
         return { workspace: { devices, plans }, result: devices };
       });
+
+    const addPlan = (plan: TaskPlan) =>
+      modify((workspace) => ({
+        workspace: { ...workspace, plans: [...workspace.plans, plan] },
+        result: plan,
+      }));
 
     const savePlan = (plan: TaskPlan) =>
       Effect.gen(function* () {
@@ -238,6 +245,7 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
       addDevice,
       updateDevice,
       removeDevice,
+      addPlan,
       savePlan,
       removePlan,
       getPlan,

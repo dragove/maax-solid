@@ -1,6 +1,12 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
 import { Effect, Schema } from "effect";
-import { AppSettingsPatchSchema, DeviceDraftSchema, DeviceUpdateSchema, TaskPlanSchema } from "../shared/schemas";
+import {
+  AppSettingsPatchSchema,
+  CopilotItemSchema,
+  DeviceDraftSchema,
+  DeviceUpdateSchema,
+  TaskPlanSchema,
+} from "../shared/schemas";
 import { COMMANDS, IPC_CHANNELS } from "../shared/ipc";
 import { EventBus } from "./events";
 import { describeError, type MaaxError } from "./errors";
@@ -13,6 +19,30 @@ const IdInputSchema = Schema.Struct({ id: Schema.NonEmptyString });
 const RunInputSchema = Schema.Struct({
   deviceId: Schema.NonEmptyString,
   planId: Schema.NonEmptyString,
+});
+const CopilotOptionsPatchSchema = Schema.Struct({
+  formation: Schema.optional(Schema.Boolean),
+  addTrust: Schema.optional(Schema.Boolean),
+  ignoreRequirements: Schema.optional(Schema.Boolean),
+  useSanityPotion: Schema.optional(Schema.Boolean),
+  supportUnitUsage: Schema.optional(Schema.Int),
+  loopTimes: Schema.optional(Schema.Int),
+  formationIndex: Schema.optional(Schema.Int),
+});
+const CopilotSearchInputSchema = Schema.Struct({
+  document: Schema.optional(Schema.String),
+  operator: Schema.optional(Schema.String),
+  uploaderId: Schema.optional(Schema.String),
+  stage: Schema.optional(Schema.String),
+  orderBy: Schema.optional(Schema.Literals(["hot", "views", "upload_time"])),
+  desc: Schema.optional(Schema.Boolean),
+  page: Schema.optional(Schema.Finite),
+  limit: Schema.optional(Schema.Finite),
+  language: Schema.optional(Schema.Literals(["zh", "en"])),
+});
+const RollbackInputSchema = Schema.Struct({
+  coreId: Schema.NonEmptyString,
+  backupId: Schema.NonEmptyString,
 });
 
 const decode = <A>(schema: Schema.ConstraintDecoder<A>, input: unknown): A => Schema.decodeUnknownSync(schema)(input);
@@ -74,6 +104,24 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
         return run((app) => app.refreshCores);
       case COMMANDS.downloadCore:
         return run((app) => app.downloadCore);
+      case COMMANDS.checkCoreUpdate:
+        return run((app) => app.checkCoreUpdate);
+      case COMMANDS.resourceStatus: {
+        const { coreId } = decode(CoreIdInputSchema, payload);
+        return run((app) => app.resourceStatus(coreId));
+      }
+      case COMMANDS.checkResourceUpdate: {
+        const { coreId } = decode(CoreIdInputSchema, payload);
+        return run((app) => app.checkResourceUpdate(coreId));
+      }
+      case COMMANDS.updateResource: {
+        const { coreId } = decode(CoreIdInputSchema, payload);
+        return run((app) => app.updateResource(coreId));
+      }
+      case COMMANDS.rollbackResource: {
+        const { coreId, backupId } = decode(RollbackInputSchema, payload);
+        return run((app) => app.rollbackResource(coreId, backupId));
+      }
       case COMMANDS.stageCatalog:
         return run((app) => app.stageCatalog);
       case COMMANDS.addDevice: {
@@ -107,6 +155,69 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
       case COMMANDS.removePlan: {
         const { id } = decode(IdInputSchema, payload);
         return run((app) => app.removePlan(id));
+      }
+      case COMMANDS.createPlan: {
+        const { deviceId, name } = decode(
+          Schema.Struct({ deviceId: Schema.NonEmptyString, name: Schema.String }),
+          payload,
+        );
+        return run((app) => app.createPlan(deviceId, name));
+      }
+      case COMMANDS.duplicatePlan: {
+        const { planId, name } = decode(
+          Schema.Struct({ planId: Schema.NonEmptyString, name: Schema.optional(Schema.String) }),
+          payload,
+        );
+        return run((app) => app.duplicatePlan(planId, name));
+      }
+      case COMMANDS.renamePlan: {
+        const { planId, name } = decode(Schema.Struct({ planId: Schema.NonEmptyString, name: Schema.String }), payload);
+        return run((app) => app.renamePlan(planId, name));
+      }
+      case COMMANDS.importPlan: {
+        const { deviceId } = decode(Schema.Struct({ deviceId: Schema.NonEmptyString }), payload);
+        return run((app) => app.importPlan(deviceId));
+      }
+      case COMMANDS.exportPlan: {
+        const { planId } = decode(Schema.Struct({ planId: Schema.NonEmptyString }), payload);
+        return run((app) => app.exportPlan(planId));
+      }
+      case COMMANDS.setActivePlan: {
+        const { deviceId, planId } = decode(
+          Schema.Struct({ deviceId: Schema.NonEmptyString, planId: Schema.NonEmptyString }),
+          payload,
+        );
+        return run((app) => app.setActivePlan(deviceId, planId));
+      }
+      case COMMANDS.importCopilot:
+        return run((app) => app.importCopilotFile);
+      case COMMANDS.resolveCopilot: {
+        const { input } = decode(Schema.Struct({ input: Schema.String }), payload);
+        return run((app) => app.resolveCopilot(input));
+      }
+      case COMMANDS.searchCopilot: {
+        const params = decode(CopilotSearchInputSchema, payload);
+        return run((app) => app.searchCopilot(params));
+      }
+      case COMMANDS.searchCopilotLevels: {
+        const { query } = decode(Schema.Struct({ query: Schema.String }), payload);
+        return run((app) => app.copilotLevels(query));
+      }
+      case COMMANDS.updateCopilotOptions: {
+        const patch = decode(CopilotOptionsPatchSchema, payload);
+        return run((app) => app.updateCopilotOptions(patch));
+      }
+      case COMMANDS.setCopilotItems: {
+        const { items } = decode(Schema.Struct({ items: Schema.Array(CopilotItemSchema) }), payload);
+        return run((app) => app.setCopilotItems(items));
+      }
+      case COMMANDS.startCopilot: {
+        const { deviceId } = decode(Schema.Struct({ deviceId: Schema.NonEmptyString }), payload);
+        return run((app) => app.startCopilot(deviceId));
+      }
+      case COMMANDS.searchOperators: {
+        const { query } = decode(Schema.Struct({ query: Schema.String }), payload);
+        return run((app) => app.copilotOperators(query));
       }
       case COMMANDS.startRun: {
         const { deviceId, planId } = decode(RunInputSchema, payload);

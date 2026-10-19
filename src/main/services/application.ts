@@ -1,13 +1,22 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import { Notification, app } from "electron";
+import { BrowserWindow, Notification, app, dialog } from "electron";
 import { randomUUID } from "node:crypto";
 import { cpus, release, totalmem } from "node:os";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type {
   AppSettings,
   AppSettingsPatch,
   Bootstrap,
   CoreInfo,
+  CopilotFile,
+  CopilotLevel,
+  CopilotOptions,
+  CopilotResolveResult,
+  CopilotSetup,
+  OperatorEntry,
+  CopilotSearchResult,
+  CoreReleaseCheck,
   DeviceDraft,
   DeviceProfile,
   DeviceStatus,
@@ -15,6 +24,9 @@ import type {
   EngineInfo,
   ScreencapCost,
   Resolution,
+  ResourceApplyResult,
+  ResourceCheck,
+  ResourceStatus,
   RunSnapshot,
   Screenshot,
   StageCatalog,
@@ -23,7 +35,10 @@ import type {
   RuntimeInfo,
 } from "../../shared/schemas";
 import type { AppendTaskResult, ConnectResult, EngineCallback, InitResult } from "../../shared/engine";
-import { buildMaaTaskParams } from "../../shared/tasks";
+import { TaskConfigSchema } from "../../shared/schemas";
+import type { TaskConfig } from "../../shared/schemas";
+import { buildMaaTaskParams, createCopilotTask, createDefaultPlanTasks, firstMissingField } from "../../shared/tasks";
+import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
 
 const STAGE_ACTIVITY_URL = "https://api.maa.plus/MaaAssistantArknights/api/gui/StageActivityV2.json";
 
@@ -112,11 +127,16 @@ interface StageCache {
   readonly catalog: StageCatalog;
 }
 import { CoreHostClient } from "../core-host-client";
+import type { CopilotSearchParams } from "./copilot";
 import { CoreRegistry } from "./core-registry";
 import { CoreInstaller } from "./core-installer";
 import { maaxError, type MaaxError } from "../errors";
 import { EventBus } from "../events";
 import { AppPaths } from "./paths";
+import { CopilotSetupStore } from "./copilot-setup";
+import { OperatorCatalogue } from "./operator-catalog";
+import { PrtsLibrary } from "./prts-library";
+import { ResourceUpdater, type ResourceProgress } from "./resource-updater";
 import { Settings } from "./settings";
 import { Workspace } from "./workspace";
 
@@ -126,7 +146,7 @@ interface HostEntry {
   readonly server: string;
   readonly client: CoreHostClient;
   version: string;
-  refs: number;
+  readonly devices: Set<string>;
 }
 
 interface RuntimeDevice {
@@ -154,6 +174,7 @@ export interface ApplicationApi {
   readonly removeCore: (id: string) => Effect.Effect<ReadonlyArray<CoreInfo>, MaaxError>;
   readonly refreshCores: Effect.Effect<ReadonlyArray<CoreInfo>>;
   readonly downloadCore: Effect.Effect<CoreInfo | null, MaaxError>;
+  readonly checkCoreUpdate: Effect.Effect<CoreReleaseCheck, MaaxError>;
   readonly setActiveCore: (
     id: string,
   ) => Effect.Effect<{ settings: AppSettings; cores: ReadonlyArray<CoreInfo> }, MaaxError>;
@@ -166,8 +187,26 @@ export interface ApplicationApi {
   readonly stageCatalog: Effect.Effect<StageCatalog>;
   readonly savePlan: (plan: TaskPlan) => Effect.Effect<TaskPlan, MaaxError>;
   readonly removePlan: (id: string) => Effect.Effect<ReadonlyArray<TaskPlan>>;
+  readonly createPlan: (deviceId: string, name: string) => Effect.Effect<TaskPlan, MaaxError>;
+  readonly duplicatePlan: (planId: string, name?: string) => Effect.Effect<TaskPlan, MaaxError>;
+  readonly renamePlan: (planId: string, name: string) => Effect.Effect<TaskPlan, MaaxError>;
+  readonly importPlan: (deviceId: string) => Effect.Effect<TaskPlan | null, MaaxError>;
+  readonly exportPlan: (planId: string) => Effect.Effect<string | null, MaaxError>;
+  readonly setActivePlan: (deviceId: string, planId: string) => Effect.Effect<DeviceView, MaaxError>;
+  readonly importCopilotFile: Effect.Effect<CopilotFile | null, MaaxError>;
+  readonly resolveCopilot: (input: string) => Effect.Effect<CopilotResolveResult, MaaxError>;
+  readonly searchCopilot: (params: CopilotSearchParams) => Effect.Effect<CopilotSearchResult, MaaxError>;
+  readonly copilotLevels: (query: string) => Effect.Effect<ReadonlyArray<CopilotLevel>, MaaxError>;
+  readonly copilotOperators: (query: string) => Effect.Effect<ReadonlyArray<OperatorEntry>, MaaxError>;
+  readonly updateCopilotOptions: (patch: Partial<CopilotOptions>) => Effect.Effect<CopilotSetup, MaaxError>;
+  readonly setCopilotItems: (items: CopilotSetup["items"]) => Effect.Effect<CopilotSetup, MaaxError>;
+  readonly startCopilot: (deviceId: string) => Effect.Effect<RunSnapshot, MaaxError>;
   readonly startRun: (deviceId: string, planId: string) => Effect.Effect<RunSnapshot, MaaxError>;
   readonly stopRun: (deviceId: string) => Effect.Effect<RunSnapshot, MaaxError>;
+  readonly resourceStatus: (coreId: string) => Effect.Effect<ResourceStatus, MaaxError>;
+  readonly checkResourceUpdate: (coreId: string) => Effect.Effect<ResourceCheck, MaaxError>;
+  readonly updateResource: (coreId: string) => Effect.Effect<ResourceApplyResult, MaaxError>;
+  readonly rollbackResource: (coreId: string, backupId: string) => Effect.Effect<ResourceApplyResult, MaaxError>;
   readonly shutdown: Effect.Effect<void>;
 }
 
@@ -221,7 +260,15 @@ const safeSegment = (value: string): string => value.replace(/[^a-zA-Z0-9._-]+/g
 export const ApplicationLive: Layer.Layer<
   Application,
   never,
-  AppPaths | CoreRegistry | CoreInstaller | EventBus | Settings | Workspace
+  | AppPaths
+  | CoreRegistry
+  | CoreInstaller
+  | EventBus
+  | Settings
+  | Workspace
+  | ResourceUpdater
+  | PrtsLibrary
+  | CopilotSetupStore
 > = Layer.effect(
   Application,
   Effect.gen(function* () {
@@ -231,12 +278,39 @@ export const ApplicationLive: Layer.Layer<
     const registry = yield* CoreRegistry;
     const installer = yield* CoreInstaller;
     const bus = yield* EventBus;
+    const resources = yield* ResourceUpdater;
+    const prts = yield* PrtsLibrary;
+    const copilotSetup = yield* CopilotSetupStore;
+
+    const emitCopilot = (setup: CopilotSetup): void => {
+      bus.emit({ _tag: "copilot-updated", copilot: setup });
+    };
+    const operatorCatalogue = new OperatorCatalogue();
+
+    /**
+     * Operators come from the active core's `resource/battle_data.json`, so the
+     * list always matches the installed game data and costs no request.
+     */
+    const copilotOperators = (query: string) =>
+      Effect.gen(function* () {
+        const currentSettings = yield* settings.get;
+        const ready = (yield* registry.list).filter((core) => core.status === "ready");
+        const active = currentSettings.activeCoreId
+          ? ready.find((core) => core.id === currentSettings.activeCoreId)
+          : ready[0];
+        if (!active) return yield* maaxError("没有可用的核心，无法读取干员数据");
+        return yield* Effect.tryPromise({
+          try: () => operatorCatalogue.search(join(active.root, "resource"), query),
+          catch: (cause) => maaxError("无法读取干员数据", cause),
+        });
+      });
 
     const hosts = new Map<string, HostEntry>();
     const runtime = new Map<string, RuntimeDevice>();
     const runs = new Map<string, RunState>();
     interface ConnectWaiter {
       readonly resolve: (result: { ok: boolean; message?: string }) => void;
+      readonly abort: (message: string) => void;
       readonly timer: NodeJS.Timeout;
     }
     const connectWaiters = new Map<string, ConnectWaiter>();
@@ -316,29 +390,129 @@ export const ApplicationLive: Layer.Layer<
 
     const finishRun = (deviceId: string, status: RunSnapshot["status"], message?: string): void => {
       const run = runs.get(deviceId);
-      if (
-        !run ||
-        run.snapshot.status === "completed" ||
-        run.snapshot.status === "failed" ||
-        run.snapshot.status === "stopped"
-      ) {
-        return;
-      }
-      run.snapshot = {
-        ...run.snapshot,
-        status,
-        endedAt: Date.now(),
-        ...(message ? { message } : {}),
-        tasks: run.snapshot.tasks.map((task) =>
-          task.status === "running" || task.status === "pending"
-            ? { ...task, status: status === "failed" ? "failed" : "stopped", endedAt: Date.now() }
-            : task,
-        ),
-      };
+      if (!run) return;
+      const next = finishSnapshot(run.snapshot, status, Date.now(), message);
+      if (next === run.snapshot) return;
+      run.snapshot = next;
       emitRun(run);
       setDeviceState(deviceId, { status: "online", lastError: message });
       emitDevice(deviceId);
       emitEngine();
+    };
+
+    const notifyRunFinished = (deviceId: string, failed: boolean): void => {
+      if (!settingsCache?.notifyOnComplete || !Notification.isSupported()) return;
+      const device = profiles.get(deviceId)?.name ?? "MAAX";
+      const chinese = settingsCache.locale === "zh-CN";
+      new Notification({
+        title: failed ? (chinese ? "任务失败" : "Task failed") : chinese ? "任务完成" : "Task completed",
+        body: failed
+          ? chinese
+            ? `${device} 的任务队列已结束，其中存在失败任务。`
+            : `${device}'s queue finished with a failed task.`
+          : chinese
+            ? `${device} 的任务队列已完成。`
+            : `${device}'s queue completed.`,
+      }).show();
+    };
+
+    /* ---------------------------------------------------------------------- */
+    /* Host lifecycle                                                          */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * A host is a disposable utility process shared by every device on the same
+     * core and resource server. Membership is tracked per device so the process
+     * can be released when the last device leaves, and so a crash knows exactly
+     * which devices to bring back.
+     */
+    const RECONNECT_DELAYS_MS = [1_000, 3_000, 8_000] as const;
+    const reconnectTimers = new Map<string, NodeJS.Timeout>();
+    const reconnectAttempts = new Map<string, number>();
+    // Devices the app should keep trying to bring back. Cleared by an explicit
+    // disconnect, a delete, a successful connect or shutdown, so an in-flight
+    // retry that fails afterwards cannot start a new chain behind the user.
+    const reconnectWanted = new Set<string>();
+
+    const cancelReconnect = (deviceId: string): void => {
+      const timer = reconnectTimers.get(deviceId);
+      if (timer !== undefined) clearTimeout(timer);
+      reconnectTimers.delete(deviceId);
+      reconnectAttempts.delete(deviceId);
+      reconnectWanted.delete(deviceId);
+    };
+
+    const stopHost = (key: string): void => {
+      const host = hosts.get(key);
+      if (!host) return;
+      hosts.delete(key);
+      host.devices.clear();
+      void host.client.stop().catch(() => undefined);
+    };
+
+    const releaseHostIfIdle = (key: string): void => {
+      const host = hosts.get(key);
+      if (!host || host.devices.size > 0) return;
+      stopHost(key);
+      emitEngine();
+    };
+
+    /** Attach a device to its host and release the host it left behind. */
+    const bindDevice = (deviceId: string, host: HostEntry): void => {
+      for (const [key, other] of hosts) {
+        if (other !== host && other.devices.delete(deviceId)) releaseHostIfIdle(key);
+      }
+      host.devices.add(deviceId);
+    };
+
+    const detachDevice = (deviceId: string): void => {
+      for (const [key, host] of hosts) {
+        if (!host.devices.delete(deviceId)) continue;
+        releaseHostIfIdle(key);
+        return;
+      }
+    };
+
+    /**
+     * A crashed host takes every session with it. Reconnecting is safe because
+     * runs are never resumed: an interrupted queue is marked failed, so a retry
+     * cannot spend sanity, medicine or Originite twice.
+     */
+    const scheduleReconnect = (deviceId: string, reason: string): void => {
+      if (shuttingDown || !profiles.has(deviceId) || !reconnectWanted.has(deviceId)) return;
+      // A host can crash again while a retry is in flight; keep one timer only.
+      const pending = reconnectTimers.get(deviceId);
+      if (pending !== undefined) clearTimeout(pending);
+      const attempt = reconnectAttempts.get(deviceId) ?? 0;
+      const delay = RECONNECT_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        // Stop retrying, but leave a state the user can act on and a counter a
+        // later manual connect can reset.
+        reconnectAttempts.delete(deviceId);
+        reconnectTimers.delete(deviceId);
+        setDeviceState(deviceId, { status: "error", lastError: reason });
+        emitDevice(deviceId);
+        log("warn", `自动重连已放弃：${reason}`);
+        return;
+      }
+      reconnectAttempts.set(deviceId, attempt + 1);
+      setDeviceState(deviceId, { status: "connecting", lastError: reason });
+      emitDevice(deviceId);
+      const timer = setTimeout(() => {
+        reconnectTimers.delete(deviceId);
+        if (shuttingDown) return;
+        // The timer fires outside every Effect: this is an event-handler
+        // boundary, and the connect program needs no services (R = never).
+        // oxlint-disable-next-line effecttsgo/run-effect-inside-effect
+        void Effect.runPromise(
+          connectDevice(deviceId, { retry: true }).pipe(
+            Effect.catch((error) =>
+              Effect.sync(() => scheduleReconnect(deviceId, error instanceof Error ? error.message : String(error))),
+            ),
+          ),
+        ).catch(() => undefined);
+      }, delay);
+      reconnectTimers.set(deviceId, timer);
     };
 
     const handleCallback = (item: EngineCallback): void => {
@@ -398,57 +572,33 @@ export const ApplicationLive: Layer.Layer<
 
       const run = runs.get(deviceId);
       if (!run) return;
-      const taskId = Number(payload.taskid ?? 0);
+      const action = runCallbackAction(item.msg, payload);
+      if (!action) return;
 
-      if (item.msg === 10001) {
-        run.snapshot = {
-          ...run.snapshot,
-          status: "running",
-          currentTaskId: taskId,
-          tasks: run.snapshot.tasks.map((entry) =>
-            entry.taskId === taskId ? { ...entry, status: "running", startedAt: Date.now() } : entry,
-          ),
-        };
-        setDeviceState(deviceId, { status: "running" });
-        emitDevice(deviceId);
-        emitRun(run);
-        emitEngine();
-      } else if (item.msg === 10002) {
-        run.snapshot = {
-          ...run.snapshot,
-          tasks: run.snapshot.tasks.map((entry) =>
-            entry.taskId === taskId ? { ...entry, status: "completed", endedAt: Date.now() } : entry,
-          ),
-        };
-        emitRun(run);
-      } else if (item.msg === 10000) {
-        const message = typeof payload.why === "string" ? payload.why : "任务出错";
-        run.snapshot = {
-          ...run.snapshot,
-          message,
-          tasks: run.snapshot.tasks.map((entry) =>
-            entry.taskId === taskId ? { ...entry, status: "failed", endedAt: Date.now(), message } : entry,
-          ),
-        };
-        emitRun(run);
-      } else if (item.msg === 10004) {
-        finishRun(deviceId, "stopped");
-      } else if (item.msg === 3) {
-        const failed = run.snapshot.tasks.some((task) => task.status === "failed");
-        finishRun(deviceId, failed ? "failed" : "completed");
-        if (settingsCache?.notifyOnComplete && Notification.isSupported()) {
-          const device = profiles.get(deviceId)?.name ?? "MAAX";
-          const chinese = settingsCache.locale === "zh-CN";
-          new Notification({
-            title: failed ? (chinese ? "任务失败" : "Task failed") : chinese ? "任务完成" : "Task completed",
-            body: failed
-              ? chinese
-                ? `${device} 的任务队列已结束，其中存在失败任务。`
-                : `${device}'s queue finished with a failed task.`
-              : chinese
-                ? `${device} 的任务队列已完成。`
-                : `${device}'s queue completed.`,
-          }).show();
+      switch (action.kind) {
+        case "task-started":
+          run.snapshot = startTask(run.snapshot, action.taskId, Date.now());
+          setDeviceState(deviceId, { status: "running" });
+          emitDevice(deviceId);
+          emitRun(run);
+          emitEngine();
+          break;
+        case "task-completed":
+          run.snapshot = completeTask(run.snapshot, action.taskId, Date.now());
+          emitRun(run);
+          break;
+        case "task-failed":
+          run.snapshot = failTask(run.snapshot, action.taskId, action.message, Date.now());
+          emitRun(run);
+          break;
+        case "run-stopped":
+          finishRun(deviceId, "stopped");
+          break;
+        case "queue-finished": {
+          const failed = run.snapshot.tasks.some((task) => task.status === "failed");
+          finishRun(deviceId, failed ? "failed" : "completed");
+          notifyRunFinished(deviceId, failed);
+          break;
         }
       }
     };
@@ -457,23 +607,25 @@ export const ApplicationLive: Layer.Layer<
       const host = hosts.get(key);
       if (!host) return;
       hosts.delete(key);
+      const affected = [...host.devices];
+      host.devices.clear();
       engine = { ...engine, phase: "crashed", message: reason };
-      for (const [deviceId, state] of runtime) {
-        if (state.hostKey === key) {
-          runtime.set(deviceId, {
-            status: "error",
-            lastError: reason,
-          });
-          const run = runs.get(deviceId);
-          if (run && (run.snapshot.status === "running" || run.snapshot.status === "preparing")) {
-            finishRun(deviceId, "failed", reason);
-          }
-          emitDevice(deviceId);
+      for (const deviceId of affected) {
+        abortConnectWaiter(deviceId, reason);
+        const run = runs.get(deviceId);
+        if (run && (run.snapshot.status === "running" || run.snapshot.status === "preparing")) {
+          finishRun(deviceId, "failed", reason);
         }
+        runtime.delete(deviceId);
+        setDeviceState(deviceId, { status: "error", lastError: reason });
+        emitDevice(deviceId);
       }
       bus.emit({ _tag: "engine-updated", engine });
-      if (!shuttingDown) {
-        bus.emit({ _tag: "toast", kind: "error", title: "MaaCore 已退出", message: reason });
+      if (shuttingDown) return;
+      bus.emit({ _tag: "toast", kind: "error", title: "MaaCore 已退出", message: reason });
+      for (const deviceId of affected) {
+        reconnectWanted.add(deviceId);
+        scheduleReconnect(deviceId, reason);
       }
     };
 
@@ -495,10 +647,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const key = `${core.id}::${server}`;
         const existing = hosts.get(key);
-        if (existing && existing.version !== "") {
-          existing.refs += 1;
-          return existing;
-        }
+        if (existing && existing.version !== "") return existing;
 
         if (existing) {
           return yield* maaxError("核心正在启动，请稍候");
@@ -520,7 +669,7 @@ export const ApplicationLive: Layer.Layer<
           onExit: (code, reason) => handleHostExit(key, reason || `exit ${code ?? "?"}`),
         });
 
-        const entry: HostEntry = { key, core, server, client, version: "", refs: 1 };
+        const entry: HostEntry = { key, core, server, client, version: "", devices: new Set<string>() };
         hosts.set(key, entry);
         engine = { ...engine, phase: "starting", coreId: core.id, message: "正在加载 MaaCore…" };
         bus.emit({ _tag: "engine-updated", engine });
@@ -548,7 +697,10 @@ export const ApplicationLive: Layer.Layer<
     const ensureSession = (device: DeviceProfile, host: HostEntry): Effect.Effect<string, MaaxError> =>
       Effect.gen(function* () {
         const state = runtime.get(device.id);
-        if (state?.sessionId && state.hostKey === host.key) return state.sessionId;
+        if (state?.sessionId && state.hostKey === host.key) {
+          bindDevice(device.id, host);
+          return state.sessionId;
+        }
         if (state?.sessionId) {
           const old = hosts.get(state.hostKey ?? "");
           if (old) {
@@ -571,6 +723,7 @@ export const ApplicationLive: Layer.Layer<
           catch: (cause) => maaxError("创建 MaaCore 会话失败", cause),
         });
         setDeviceState(device.id, { sessionId, hostKey: host.key, engineVersion: host.version });
+        bindDevice(device.id, host);
         return sessionId;
       });
 
@@ -585,6 +738,10 @@ export const ApplicationLive: Layer.Layer<
             clearTimeout(timer);
             resolve(result);
           },
+          abort: (message) => {
+            clearTimeout(timer);
+            reject(new Error(message));
+          },
           timer,
         });
       });
@@ -594,6 +751,18 @@ export const ApplicationLive: Layer.Layer<
       if (!waiter) return;
       clearTimeout(waiter.timer);
       connectWaiters.delete(deviceId);
+    };
+
+    /**
+     * Settle a pending connect with a failure so the in-flight connect effect
+     * cannot hang until its timeout and report a stale result after the retry
+     * already moved on.
+     */
+    const abortConnectWaiter = (deviceId: string, message: string): void => {
+      const waiter = connectWaiters.get(deviceId);
+      if (!waiter) return;
+      connectWaiters.delete(deviceId);
+      waiter.abort(message);
     };
 
     const getConnectedDevice = (deviceId: string) =>
@@ -609,10 +778,12 @@ export const ApplicationLive: Layer.Layer<
         return { profile, state, host };
       });
 
-    const connectDevice = (deviceId: string) =>
+    const connectDevice = (deviceId: string, options?: { readonly retry?: boolean }) =>
       Effect.gen(function* () {
         const profile = profiles.get(deviceId);
         if (!profile) return yield* maaxError("设备不存在");
+        // A manual connect wins over pending retries; a retry keeps its counter.
+        if (!options?.retry) cancelReconnect(deviceId);
         const current = runtime.get(deviceId);
         if (current?.status === "online" || current?.status === "running") {
           const view = viewFor(deviceId);
@@ -666,6 +837,7 @@ export const ApplicationLive: Layer.Layer<
           engineVersion: host.version,
           lastError: undefined,
         });
+        cancelReconnect(deviceId);
         emitDevice(deviceId);
         engine = computeEngine();
         bus.emit({ _tag: "engine-updated", engine });
@@ -676,6 +848,8 @@ export const ApplicationLive: Layer.Layer<
 
     const disconnectDevice = (deviceId: string) =>
       Effect.gen(function* () {
+        // An explicit disconnect must win over a pending crash retry.
+        cancelReconnect(deviceId);
         const state = runtime.get(deviceId);
         const run = runs.get(deviceId);
         if (run && (run.snapshot.status === "running" || run.snapshot.status === "preparing")) {
@@ -692,6 +866,7 @@ export const ApplicationLive: Layer.Layer<
         }
         runtime.set(deviceId, { status: "offline" });
         emitDevice(deviceId);
+        detachDevice(deviceId);
         emitEngine();
         const view = viewFor(deviceId);
         if (!view) return yield* maaxError("设备不存在");
@@ -748,16 +923,9 @@ export const ApplicationLive: Layer.Layer<
         return run.snapshot;
       });
 
-    const startRun = (deviceId: string, planId: string) =>
+    /** Append a batch of tasks to the device's session and start it. */
+    const launchTasks = (deviceId: string, tasks: ReadonlyArray<TaskConfig>, planId?: string) =>
       Effect.gen(function* () {
-        const existing = runs.get(deviceId);
-        if (existing && (existing.snapshot.status === "running" || existing.snapshot.status === "preparing")) {
-          return yield* maaxError("这个设备已经在运行任务");
-        }
-        const plan = yield* workspace.getPlan(planId);
-        if (!plan || plan.deviceId !== deviceId) return yield* maaxError("任务计划不存在");
-        const tasks = plan.tasks.filter((task) => task.enabled);
-        if (tasks.length === 0) return yield* maaxError("没有启用的任务，请至少启用一个");
         const { state, host } = yield* getConnectedDevice(deviceId);
         const sessionId = state.sessionId!;
         const runId = randomUUID();
@@ -765,7 +933,7 @@ export const ApplicationLive: Layer.Layer<
         const snapshot: RunSnapshot = {
           id: runId,
           deviceId,
-          planId,
+          ...(planId === undefined ? {} : { planId }),
           status: "preparing",
           startedAt,
           tasks: tasks.map((task) => ({
@@ -825,6 +993,46 @@ export const ApplicationLive: Layer.Layer<
         return run.snapshot;
       });
 
+    const ensureDeviceIdle = (deviceId: string): Effect.Effect<void, MaaxError> =>
+      Effect.gen(function* () {
+        const existing = runs.get(deviceId);
+        if (existing && (existing.snapshot.status === "running" || existing.snapshot.status === "preparing")) {
+          return yield* maaxError("这个设备已经在运行任务");
+        }
+      });
+
+    const startRun = (deviceId: string, planId: string) =>
+      Effect.gen(function* () {
+        yield* ensureDeviceIdle(deviceId);
+        const plan = yield* workspace.getPlan(planId);
+        if (!plan || plan.deviceId !== deviceId) return yield* maaxError("任务计划不存在");
+        const tasks = plan.tasks.filter((task) => task.enabled);
+        if (tasks.length === 0) return yield* maaxError("没有启用的任务，请至少启用一个");
+        for (const task of tasks) {
+          const missing = firstMissingField(task);
+          if (missing) {
+            const label = task.name || task.type;
+            return yield* maaxError(`任务「${label}」缺少必备设置`, missing.zh);
+          }
+        }
+        return yield* launchTasks(deviceId, tasks, planId);
+      });
+
+    /**
+     * Copilot runs on demand: one assignment batch, no plan, no queue. A
+     * completed or stopped run leaves the device connected and idle.
+     */
+    const startCopilot = (deviceId: string) =>
+      Effect.gen(function* () {
+        yield* ensureDeviceIdle(deviceId);
+        const setup = yield* copilotSetup.get;
+        if (setup.items.length === 0) return yield* maaxError("请先添加作业");
+        const task = createCopilotTask(setup);
+        const missing = firstMissingField(task);
+        if (missing) return yield* maaxError(`任务「${task.name || task.type}」缺少必备设置`, missing.zh);
+        return yield* launchTasks(deviceId, [task]);
+      });
+
     const stopRun = (deviceId: string) =>
       Effect.gen(function* () {
         const run = runs.get(deviceId);
@@ -845,6 +1053,7 @@ export const ApplicationLive: Layer.Layer<
         devices: views(),
         plans,
         engine,
+        copilot: yield* copilotSetup.get,
       } satisfies Bootstrap;
     });
 
@@ -881,6 +1090,99 @@ export const ApplicationLive: Layer.Layer<
       bus.emit({ _tag: "cores-updated", cores });
       return cores;
     });
+
+    /* ---------------------------------------------------------------------- */
+    /* Resource updates                                                        */
+    /* ---------------------------------------------------------------------- */
+
+    const emitResourceProgress: ResourceProgress = (phase, received, total) => {
+      bus.emit({ _tag: "download-progress", phase, received, total, source: "resource" });
+    };
+
+    const coreForUpdate = (coreId: string): Effect.Effect<CoreInfo, MaaxError> =>
+      Effect.gen(function* () {
+        const core = yield* registry.get(coreId);
+        if (!core) return yield* maaxError("核心不存在");
+        if (core.status !== "ready") return yield* maaxError("这个核心尚未就绪，无法处理资源");
+        return core;
+      });
+
+    /**
+     * B1: replacing resource files while MaaCore has them loaded is unsafe, and
+     * the app deliberately does not cut a running session. The renderer disables
+     * the same actions; this is the authoritative check.
+     */
+    const ensureCoreIdle = (coreId: string): Effect.Effect<void, MaaxError> =>
+      Effect.gen(function* () {
+        const inUse = [...runtime.values()].some((state) => state.hostKey?.startsWith(`${coreId}::`) ?? false);
+        if (inUse) return yield* maaxError("请先断开连接到这个核心的设备，再更新资源");
+      });
+
+    const releaseCoreHosts = (coreId: string): void => {
+      let stopped = false;
+      for (const [key, host] of hosts) {
+        if (host.core.id !== coreId) continue;
+        stopHost(key);
+        stopped = true;
+      }
+      if (stopped) emitEngine();
+    };
+
+    const afterResourceChange = Effect.gen(function* () {
+      const cores = yield* registry.refresh;
+      bus.emit({ _tag: "cores-updated", cores });
+      return cores;
+    });
+
+    const failResource = (action: string) => (error: MaaxError) =>
+      Effect.sync(() => {
+        bus.emit({ _tag: "download-progress", phase: "failed", received: 0, total: 0, source: "resource" });
+        bus.emit({ _tag: "toast", kind: "error", title: action, message: error.message });
+      });
+
+    const resourceStatus = (coreId: string) =>
+      Effect.gen(function* () {
+        const core = yield* coreForUpdate(coreId);
+        return yield* resources.status(core);
+      });
+
+    const checkResourceUpdate = (coreId: string) =>
+      Effect.gen(function* () {
+        const core = yield* coreForUpdate(coreId);
+        return yield* resources.check(core);
+      });
+
+    const updateResource = (coreId: string) =>
+      Effect.gen(function* () {
+        const core = yield* coreForUpdate(coreId);
+        yield* ensureCoreIdle(coreId);
+        releaseCoreHosts(coreId);
+        const result = yield* resources
+          .apply(core, emitResourceProgress)
+          .pipe(Effect.tapError(failResource("资源更新失败")));
+        yield* afterResourceChange;
+        bus.emit({
+          _tag: "download-progress",
+          phase: "done",
+          received: result.bytes,
+          total: result.bytes,
+          source: "resource",
+        });
+        return result;
+      });
+
+    const rollbackResource = (coreId: string, backupId: string) =>
+      Effect.gen(function* () {
+        const core = yield* coreForUpdate(coreId);
+        yield* ensureCoreIdle(coreId);
+        releaseCoreHosts(coreId);
+        const result = yield* resources
+          .rollback(core, backupId, emitResourceProgress)
+          .pipe(Effect.tapError(failResource("资源回滚失败")));
+        yield* afterResourceChange;
+        bus.emit({ _tag: "download-progress", phase: "done", received: 0, total: 0, source: "resource" });
+        return result;
+      });
 
     const stageCatalog = Effect.gen(function* () {
       const currentSettings = yield* settings.get;
@@ -947,12 +1249,35 @@ export const ApplicationLive: Layer.Layer<
       return catalog;
     });
 
+    const checkCoreUpdate = installer.checkUpdate;
+
+    /**
+     * Installing a core never touches the running one; switching to it does
+     * change which version the next connection uses, so a live session keeps the
+     * current selection and the switch waits for a disconnect.
+     */
     const downloadCore = Effect.gen(function* () {
       const core = yield* installer.downloadStable;
-      if (core) {
-        const cores = yield* registry.list;
-        bus.emit({ _tag: "cores-updated", cores });
+      if (!core) return null;
+      const cores = yield* registry.list;
+      bus.emit({ _tag: "cores-updated", cores });
+
+      const currentSettings = yield* settings.get;
+      if (currentSettings.activeCoreId === core.id) return core;
+
+      const liveSession = [...runtime.values()].some((state) => state.sessionId !== undefined);
+      if (liveSession) {
+        bus.emit({
+          _tag: "toast",
+          kind: "info",
+          title: "核心已安装",
+          message: "断开设备后会使用新版本",
+        });
+        return core;
       }
+
+      settingsCache = yield* settings.update({ activeCoreId: core.id });
+      bus.emit({ _tag: "toast", kind: "success", title: "已切换到新核心", message: core.version });
       return core;
     });
 
@@ -991,6 +1316,7 @@ export const ApplicationLive: Layer.Layer<
 
     const removeDevice = (id: string) =>
       Effect.gen(function* () {
+        cancelReconnect(id);
         const state = runtime.get(id);
         if (state?.sessionId && state.hostKey) {
           const host = hosts.get(state.hostKey);
@@ -1002,6 +1328,7 @@ export const ApplicationLive: Layer.Layer<
           }
         }
         yield* workspace.removeDevice(id);
+        detachDevice(id);
         profiles.delete(id);
         runtime.delete(id);
         runs.delete(id);
@@ -1014,6 +1341,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const saved = yield* workspace.savePlan(plan);
         plans = plans.map((item) => (item.id === saved.id ? saved : item));
+        emitPlans();
         return saved;
       });
 
@@ -1021,11 +1349,203 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const next = yield* workspace.removePlan(id);
         plans = [...next];
+        const deviceIds = [...profiles.keys()];
+        yield* refreshLocalState;
+        emitPlans();
+        for (const deviceId of deviceIds) emitDevice(deviceId);
         return next;
       });
 
+    /* ---------------------------------------------------------------------- */
+    /* Task plans                                                              */
+    /* ---------------------------------------------------------------------- */
+
+    const uniquePlanName = (deviceId: string, base: string): string => {
+      const taken = new Set(plans.filter((plan) => plan.deviceId === deviceId).map((plan) => plan.name));
+      if (!taken.has(base)) return base;
+      let index = 2;
+      while (taken.has(`${base} ${index}`)) index += 1;
+      return `${base} ${index}`;
+    };
+
+    const setActivePlan = (deviceId: string, planId: string) =>
+      Effect.gen(function* () {
+        const profile = yield* workspace.setActivePlan(deviceId, planId);
+        profiles.set(deviceId, profile);
+        emitDevice(deviceId);
+        const view = viewFor(deviceId);
+        if (!view) return yield* maaxError("设备不存在");
+        return view;
+      });
+
+    const emitPlans = (): void => {
+      bus.emit({ _tag: "plans-updated", plans: [...plans] });
+    };
+
+    const createPlan = (deviceId: string, name: string) =>
+      Effect.gen(function* () {
+        if (!profiles.has(deviceId)) return yield* maaxError("设备不存在");
+        const now = Date.now();
+        const plan: TaskPlan = {
+          id: randomUUID(),
+          deviceId,
+          name: uniquePlanName(deviceId, name.trim() || "计划"),
+          tasks: [...createDefaultPlanTasks()],
+          createdAt: now,
+          updatedAt: now,
+        };
+        yield* workspace.addPlan(plan);
+        plans = [...(yield* workspace.getPlans)];
+        emitPlans();
+        yield* setActivePlan(deviceId, plan.id);
+        return plan;
+      });
+
+    const duplicatePlan = (planId: string, name?: string) =>
+      Effect.gen(function* () {
+        const source = yield* workspace.getPlan(planId);
+        if (!source) return yield* maaxError("任务计划不存在");
+        const now = Date.now();
+        const copy: TaskPlan = {
+          id: randomUUID(),
+          deviceId: source.deviceId,
+          name: uniquePlanName(source.deviceId, name?.trim() || `${source.name} copy`),
+          tasks: source.tasks.map((task) => ({ ...task, id: randomUUID(), params: { ...task.params } })),
+          createdAt: now,
+          updatedAt: now,
+        };
+        yield* workspace.addPlan(copy);
+        plans = [...(yield* workspace.getPlans)];
+        emitPlans();
+        return copy;
+      });
+
+    const renamePlan = (planId: string, name: string) =>
+      Effect.gen(function* () {
+        const trimmed = name.trim();
+        if (trimmed === "") return yield* maaxError("计划名称不能为空");
+        const plan = yield* workspace.getPlan(planId);
+        if (!plan) return yield* maaxError("任务计划不存在");
+        const saved = yield* workspace.savePlan({ ...plan, name: trimmed });
+        plans = plans.map((item) => (item.id === saved.id ? saved : item));
+        emitPlans();
+        return saved;
+      });
+
+    const PlanImportSchema = Schema.Struct({
+      name: Schema.optional(Schema.String),
+      tasks: Schema.Array(TaskConfigSchema),
+    });
+
+    const importPlan = (deviceId: string) =>
+      Effect.gen(function* () {
+        if (!profiles.has(deviceId)) return yield* maaxError("设备不存在");
+        const window = BrowserWindow.getFocusedWindow();
+        const options = {
+          title: "导入任务计划",
+          filters: [{ name: "JSON", extensions: ["json"] }],
+          properties: ["openFile" as const],
+        };
+        const picked = yield* Effect.tryPromise({
+          try: () => (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options)),
+          catch: (cause) => maaxError("打开文件对话框失败", cause),
+        });
+        const path = picked.filePaths[0];
+        if (picked.canceled || path === undefined) return null;
+
+        const raw = yield* Effect.tryPromise({
+          try: async (): Promise<unknown> => JSON.parse(await readFile(path, "utf8")) as unknown,
+          catch: (cause) => maaxError("读取计划文件失败", cause),
+        });
+        const imported = yield* Schema.decodeUnknownEffect(PlanImportSchema)(raw).pipe(
+          Effect.mapError((cause) => maaxError("计划文件格式无效", cause)),
+        );
+        const now = Date.now();
+        const plan: TaskPlan = {
+          id: randomUUID(),
+          deviceId,
+          name: uniquePlanName(deviceId, imported.name?.trim() || basename(path, extname(path))),
+          tasks: imported.tasks.map((task) => ({ ...task, id: randomUUID() })),
+          createdAt: now,
+          updatedAt: now,
+        };
+        yield* workspace.addPlan(plan);
+        plans = [...(yield* workspace.getPlans)];
+        emitPlans();
+        yield* setActivePlan(deviceId, plan.id);
+        return plan;
+      });
+
+    const exportPlan = (planId: string) =>
+      Effect.gen(function* () {
+        const plan = yield* workspace.getPlan(planId);
+        if (!plan) return yield* maaxError("任务计划不存在");
+        const window = BrowserWindow.getFocusedWindow();
+        const options = {
+          title: "导出任务计划",
+          defaultPath: `${plan.name.replace(/[^\w\u4e00-\u9fa5-]+/gu, "-")}.json`,
+          filters: [{ name: "JSON", extensions: ["json"] }],
+        };
+        const picked = yield* Effect.tryPromise({
+          try: () => (window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options)),
+          catch: (cause) => maaxError("打开保存对话框失败", cause),
+        });
+        if (picked.canceled || !picked.filePath) return null;
+        const payload = { version: 1, name: plan.name, tasks: plan.tasks };
+        yield* Effect.tryPromise({
+          try: () => writeFile(picked.filePath!, JSON.stringify(payload, null, 2), "utf8"),
+          catch: (cause) => maaxError("写入计划文件失败", cause),
+        });
+        return picked.filePath;
+      });
+
+    /** Import a copilot JSON into the app data directory and return its path. */
+    const importCopilotFile: Effect.Effect<CopilotFile | null, MaaxError> = Effect.gen(function* () {
+      const window = BrowserWindow.getFocusedWindow();
+      const options = {
+        title: "导入作业文件",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        properties: ["openFile" as const],
+      };
+      const picked = yield* Effect.tryPromise({
+        try: () => (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options)),
+        catch: (cause) => maaxError("打开文件对话框失败", cause),
+      });
+      const path = picked.filePaths[0];
+      if (picked.canceled || path === undefined) return null;
+
+      const text = yield* Effect.tryPromise({
+        try: () => readFile(path, "utf8"),
+        catch: (cause) => maaxError("读取作业文件失败", cause),
+      });
+      yield* Effect.try(() => JSON.parse(text) as unknown).pipe(
+        Effect.mapError(() => maaxError("作业文件不是有效的 JSON", path)),
+      );
+
+      const base = basename(path, extname(path)).replace(/[^\w\u4e00-\u9fa5.-]+/gu, "-") || "copilot";
+      yield* Effect.promise(() => mkdir(paths.copilotDir, { recursive: true }));
+      for (let index = 1; index < 100; index += 1) {
+        const name = index === 1 ? base : `${base}-${index}`;
+        const target = join(paths.copilotDir, `${name}.json`);
+        const exists = yield* Effect.promise(() =>
+          readFile(target, "utf8").then(
+            () => true,
+            () => false,
+          ),
+        );
+        if (exists) continue;
+        yield* Effect.tryPromise({
+          try: () => writeFile(target, text, "utf8"),
+          catch: (cause) => maaxError("写入作业文件失败", cause),
+        });
+        return { filename: target, name };
+      }
+      return yield* maaxError("同名作业文件过多，请先清理", paths.copilotDir);
+    });
+
     const shutdown = Effect.gen(function* () {
       shuttingDown = true;
+      for (const deviceId of reconnectTimers.keys()) cancelReconnect(deviceId);
       for (const host of hosts.values()) {
         yield* Effect.tryPromise({ try: () => host.client.stop(), catch: () => undefined }).pipe(Effect.ignore);
       }
@@ -1041,6 +1561,7 @@ export const ApplicationLive: Layer.Layer<
       removeCore,
       refreshCores,
       downloadCore,
+      checkCoreUpdate,
       setActiveCore,
       addDevice,
       updateDevice,
@@ -1051,8 +1572,28 @@ export const ApplicationLive: Layer.Layer<
       stageCatalog,
       savePlan,
       removePlan,
+      createPlan,
+      duplicatePlan,
+      renamePlan,
+      importPlan,
+      exportPlan,
+      setActivePlan,
+      importCopilotFile,
+      resolveCopilot: prts.resolve,
+      searchCopilot: prts.search,
+      copilotLevels: prts.levels,
+      copilotOperators,
+      updateCopilotOptions: (patch) =>
+        copilotSetup.updateOptions(patch).pipe(Effect.tap((setup) => Effect.sync(() => emitCopilot(setup)))),
+      setCopilotItems: (items) =>
+        copilotSetup.setItems(items).pipe(Effect.tap((setup) => Effect.sync(() => emitCopilot(setup)))),
+      startCopilot,
       startRun,
       stopRun,
+      resourceStatus,
+      checkResourceUpdate,
+      updateResource,
+      rollbackResource,
       shutdown,
     };
     return api;

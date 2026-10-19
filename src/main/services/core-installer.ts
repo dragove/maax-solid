@@ -1,76 +1,18 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { app, BrowserWindow, dialog } from "electron";
-import { createWriteStream } from "node:fs";
 import { cp, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import type { CoreInfo } from "../../shared/schemas";
+import type { CoreInfo, CoreReleaseCheck } from "../../shared/schemas";
 import { maaxError, type MaaxError } from "../errors";
 import { EventBus } from "../events";
 import { CoreRegistry } from "./core-registry";
+import { CoreReleaseSchema, isNewerCoreVersion, pickCoreAsset, platformSuffixFor, publishedAtOf } from "./core-release";
+import { downloadFile } from "./download";
 import { AppPaths } from "./paths";
 import { Settings } from "./settings";
 
 const RELEASE_URL = "https://api.maa.plus/MaaAssistantArknights/api/version/stable.json";
-
-const ReleaseSchema = Schema.Struct({
-  version: Schema.String,
-  details: Schema.Struct({
-    assets: Schema.Array(
-      Schema.Struct({
-        name: Schema.String,
-        size: Schema.Finite,
-        browser_download_url: Schema.String,
-      }),
-    ),
-  }),
-});
-
-const platformSuffix = (): string | undefined => {
-  if (process.platform === "linux" && process.arch === "x64") return "linux-x86_64";
-  if (process.platform === "linux" && process.arch === "arm64") return "linux-aarch64";
-  return undefined;
-};
-
-const downloadFile = async (
-  url: string,
-  destination: string,
-  total: number,
-  onProgress: (received: number, total: number) => void,
-): Promise<void> => {
-  const response = await fetch(url, {
-    redirect: "follow",
-    signal: AbortSignal.timeout(15 * 60 * 1000),
-  });
-  if (!response.ok || !response.body) {
-    throw new Error(`HTTP ${response.status} while downloading MaaCore`);
-  }
-  const declared = Number(response.headers.get("content-length")) || total;
-  const output = createWriteStream(destination);
-  let received = 0;
-  let lastReport = 0;
-  try {
-    for await (const chunk of response.body) {
-      const bytes = chunk as Uint8Array;
-      received += bytes.byteLength;
-      if (!output.write(bytes)) {
-        await new Promise<void>((resolve) => output.once("drain", () => resolve()));
-      }
-      const now = Date.now();
-      if (now - lastReport > 200) {
-        lastReport = now;
-        onProgress(received, declared);
-      }
-    }
-    await new Promise<void>((resolve) => {
-      output.end(() => resolve());
-    });
-    onProgress(received, declared || received);
-  } catch (error) {
-    output.destroy();
-    throw error;
-  }
-};
 
 const extractTarGz = (archive: string, destination: string): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -117,6 +59,7 @@ const hasCoreFiles = async (directory: string): Promise<boolean> => {
 
 export interface CoreInstallerApi {
   readonly downloadStable: Effect.Effect<CoreInfo | null, MaaxError>;
+  readonly checkUpdate: Effect.Effect<CoreReleaseCheck, MaaxError>;
 }
 
 export class CoreInstaller extends Context.Service<CoreInstaller, CoreInstallerApi>()("maax/CoreInstaller") {}
@@ -141,34 +84,64 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
           phase,
           received,
           total,
+          source: "core",
           ...(message ? { message } : {}),
         });
       };
 
-      const downloadStable: Effect.Effect<CoreInfo | null, MaaxError> = Effect.gen(function* () {
-        const suffix = platformSuffix();
-        if (!suffix) {
-          return yield* maaxError("当前平台暂不支持一键下载 MaaCore", `${process.platform}/${process.arch}`);
-        }
+      const releaseUrl = (): string =>
+        !app.isPackaged && process.env.MAAX_CORE_RELEASE_URL ? process.env.MAAX_CORE_RELEASE_URL : RELEASE_URL;
 
-        progress("metadata", 0, 0);
-        const releaseUrl =
-          !app.isPackaged && process.env.MAAX_CORE_RELEASE_URL ? process.env.MAAX_CORE_RELEASE_URL : RELEASE_URL;
+      const fetchRelease = Effect.gen(function* () {
         const releaseJson = yield* Effect.tryPromise({
           try: async (): Promise<unknown> => {
-            const response = await fetch(releaseUrl, { signal: AbortSignal.timeout(30_000) });
+            const response = await fetch(releaseUrl(), { signal: AbortSignal.timeout(30_000) });
             if (!response.ok) throw new Error(`HTTP ${response.status} while reading release metadata`);
             return await response.json();
           },
           catch: (cause) => maaxError("无法获取 MaaCore 版本信息", cause),
         });
-        const release = yield* Schema.decodeUnknownEffect(ReleaseSchema)(releaseJson).pipe(
+        return yield* Schema.decodeUnknownEffect(CoreReleaseSchema)(releaseJson).pipe(
           Effect.mapError((cause) => maaxError("MaaCore 版本信息格式无效", cause)),
         );
+      });
 
-        const asset = release.details.assets.find(
-          (item) => item.name.endsWith(`-${suffix}.tar.gz`) && !item.name.includes("Component"),
-        );
+      const activeCoreVersion = Effect.gen(function* () {
+        const currentSettings = yield* settings.get;
+        const ready = (yield* registry.list).filter((core) => core.status === "ready");
+        const active = currentSettings.activeCoreId
+          ? ready.find((core) => core.id === currentSettings.activeCoreId)
+          : ready[0];
+        return active?.version;
+      });
+
+      const checkUpdate: Effect.Effect<CoreReleaseCheck, MaaxError> = Effect.gen(function* () {
+        const current = yield* activeCoreVersion;
+        const suffix = platformSuffixFor(process.platform, process.arch);
+        if (!suffix) {
+          return { ...(current === undefined ? {} : { current }), available: false };
+        }
+        const release = yield* fetchRelease;
+        const asset = pickCoreAsset(release, suffix);
+        const publishedAt = publishedAtOf(release);
+        return {
+          ...(current === undefined ? {} : { current }),
+          latest: release.version,
+          ...(publishedAt === undefined ? {} : { publishedAt }),
+          ...(asset === undefined ? {} : { sizeBytes: asset.size }),
+          available: asset !== undefined && isNewerCoreVersion(current, release.version),
+        };
+      });
+
+      const downloadStable: Effect.Effect<CoreInfo | null, MaaxError> = Effect.gen(function* () {
+        const suffix = platformSuffixFor(process.platform, process.arch);
+        if (!suffix) {
+          return yield* maaxError("当前平台暂不支持一键下载 MaaCore", `${process.platform}/${process.arch}`);
+        }
+
+        progress("metadata", 0, 0);
+        const release = yield* fetchRelease;
+        const asset = pickCoreAsset(release, suffix);
         if (!asset) return yield* maaxError(`这个版本没有 ${suffix} 的 tar.gz 包`);
 
         const window = BrowserWindow.getFocusedWindow();
@@ -181,7 +154,7 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
           cancelId: 1,
           title: "下载 MaaCore",
           message: `下载 MaaCore ${release.version}？`,
-          detail: `将下载 ${asset.name}（约 ${sizeMegabytes} MB）并解压到 MaaX 的用户数据目录。\n\n来源：${asset.browser_download_url}`,
+          detail: `将下载 ${asset.name}（约 ${sizeMegabytes} MB）并解压到 MaaX 的用户数据目录。\n\n来源：${asset.url}`,
         };
         const confirmation = autoConfirm
           ? { response: 0 }
@@ -230,8 +203,10 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
           progress("downloading", 0, asset.size);
           yield* Effect.tryPromise({
             try: () =>
-              downloadFile(asset.browser_download_url, archive, asset.size, (received, total) => {
-                progress("downloading", received, total);
+              downloadFile(asset.url, archive, {
+                total: asset.size,
+                label: "MaaCore",
+                onProgress: (received, total) => progress("downloading", received, total),
               }),
             catch: (cause) => maaxError("下载 MaaCore 失败", cause),
           });
@@ -259,11 +234,9 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
             catch: (cause) => maaxError("安装 MaaCore 失败", cause),
           });
 
+          // Activation is the application's decision: it is skipped while a
+          // device still holds a session on the previous core.
           const core = yield* registry.addLocal(target, "download", true);
-          const currentSettings = yield* settings.get;
-          if (!currentSettings.activeCoreId) {
-            yield* settings.update({ activeCoreId: core.id });
-          }
           progress("done", asset.size, asset.size);
           return core;
         } finally {
@@ -271,6 +244,6 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
         }
       });
 
-      return { downloadStable };
+      return { downloadStable, checkUpdate };
     }),
   );

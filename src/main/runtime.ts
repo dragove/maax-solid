@@ -4,6 +4,9 @@ import { ApplicationLive, type Application } from "./services/application";
 import { CoreRegistryLive } from "./services/core-registry";
 import { CoreInstallerLive } from "./services/core-installer";
 import { AppPathsLive } from "./services/paths";
+import { CopilotSetupLive } from "./services/copilot-setup";
+import { PrtsLibraryLive } from "./services/prts-library";
+import { ResourceUpdaterLive } from "./services/resource-updater";
 import { SettingsLive } from "./services/settings";
 import { WorkspaceLive } from "./services/workspace";
 import { EventBus, EventBusLive } from "./events";
@@ -25,6 +28,9 @@ const CoreInstallerWithDeps = CoreInstallerLive.pipe(
 );
 
 const AppLive = ApplicationLive.pipe(
+  Layer.provideMerge(CopilotSetupLive),
+  Layer.provideMerge(PrtsLibraryLive),
+  Layer.provideMerge(ResourceUpdaterLive),
   Layer.provideMerge(SettingsLive),
   Layer.provideMerge(WorkspaceLive),
   Layer.provideMerge(CoreRegistryLive),
