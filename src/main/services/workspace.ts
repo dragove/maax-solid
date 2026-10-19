@@ -25,9 +25,7 @@ const EMPTY_WORKSPACE: WorkspaceData = { devices: [], plans: [] };
 export interface WorkspaceApi {
   readonly getDevices: Effect.Effect<ReadonlyArray<DeviceProfile>>;
   readonly getPlans: Effect.Effect<ReadonlyArray<TaskPlan>>;
-  readonly addDevice: (
-    draft: DeviceDraft,
-  ) => Effect.Effect<{ device: DeviceProfile; plan: TaskPlan }>;
+  readonly addDevice: (draft: DeviceDraft) => Effect.Effect<{ device: DeviceProfile; plan: TaskPlan }>;
   readonly updateDevice: (
     id: string,
     patch: Partial<DeviceDraft>,
@@ -40,12 +38,8 @@ export interface WorkspaceApi {
     deviceId: string,
     planId: string,
   ) => Effect.Effect<DeviceProfile, import("../errors").MaaxError>;
-  readonly markConnected: (
-    id: string,
-  ) => Effect.Effect<DeviceProfile, import("../errors").MaaxError>;
-  readonly ensureActivePlan: (
-    deviceId: string,
-  ) => Effect.Effect<TaskPlan, import("../errors").MaaxError>;
+  readonly markConnected: (id: string) => Effect.Effect<DeviceProfile, import("../errors").MaaxError>;
+  readonly ensureActivePlan: (deviceId: string) => Effect.Effect<TaskPlan, import("../errors").MaaxError>;
 }
 
 export class Workspace extends Context.Service<Workspace, WorkspaceApi>()("maax/Workspace") {}
@@ -58,9 +52,7 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
   Effect.gen(function* () {
     const paths = yield* AppPaths;
     const fs = yield* FileSystem;
-    yield* fs
-      .makeDirectory(paths.configDir, { recursive: true })
-      .pipe(Effect.orElseSucceed(() => undefined));
+    yield* fs.makeDirectory(paths.configDir, { recursive: true }).pipe(Effect.orElseSucceed(() => undefined));
 
     const loaded = yield* readJson(paths.workspaceFile, WorkspaceSchema, EMPTY_WORKSPACE);
     const ref = yield* Ref.make<WorkspaceData>({
@@ -69,10 +61,7 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
     });
 
     const persist = (workspace: WorkspaceData) =>
-      writeJson(paths.workspaceFile, workspace).pipe(
-        Effect.asVoid,
-        Effect.provideService(FileSystem, fs),
-      );
+      writeJson(paths.workspaceFile, workspace).pipe(Effect.asVoid, Effect.provideService(FileSystem, fs));
 
     const modify = <A>(f: (workspace: WorkspaceData) => { workspace: WorkspaceData; result: A }) =>
       Effect.gen(function* () {
@@ -119,7 +108,7 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
       Effect.gen(function* () {
         const current = yield* Ref.get(ref);
         const existing = current.devices.find((device) => device.id === id);
-        if (!existing) return yield* Effect.fail(maaxError("设备不存在"));
+        if (!existing) return yield* maaxError("设备不存在");
         const next: DeviceProfile = {
           ...existing,
           ...patch,
@@ -146,7 +135,7 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
     const savePlan = (plan: TaskPlan) =>
       Effect.gen(function* () {
         const exists = (yield* Ref.get(ref)).plans.some((item) => item.id === plan.id);
-        if (!exists) return yield* Effect.fail(maaxError("任务计划不存在"));
+        if (!exists) return yield* maaxError("任务计划不存在");
         const next: TaskPlan = { ...plan, updatedAt: Date.now() };
         yield* modify((workspace) => ({
           workspace: {
@@ -166,9 +155,7 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
           const replacement = plans
             .filter((plan) => plan.deviceId === device.id)
             .sort((a, b) => a.createdAt - b.createdAt)[0];
-          return replacement
-            ? { ...device, activePlanId: replacement.id }
-            : { ...device, activePlanId: undefined };
+          return replacement ? { ...device, activePlanId: replacement.id } : { ...device, activePlanId: undefined };
         });
         return { workspace: { devices, plans }, result: sortPlans(plans) };
       });
@@ -180,9 +167,9 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
       Effect.gen(function* () {
         const current = yield* Ref.get(ref);
         const device = current.devices.find((item) => item.id === deviceId);
-        if (!device) return yield* Effect.fail(maaxError("设备不存在"));
+        if (!device) return yield* maaxError("设备不存在");
         const plan = current.plans.find((item) => item.id === planId && item.deviceId === deviceId);
-        if (!plan) return yield* Effect.fail(maaxError("任务计划不存在"));
+        if (!plan) return yield* maaxError("任务计划不存在");
         const next = { ...device, activePlanId: planId };
         yield* modify((workspace) => ({
           workspace: {
@@ -198,7 +185,7 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
       Effect.gen(function* () {
         const current = yield* Ref.get(ref);
         const device = current.devices.find((item) => item.id === id);
-        if (!device) return yield* Effect.fail(maaxError("设备不存在"));
+        if (!device) return yield* maaxError("设备不存在");
         const next: DeviceProfile = { ...device, lastConnectedAt: Date.now() };
         yield* modify((workspace) => ({
           workspace: {
@@ -214,7 +201,7 @@ export const WorkspaceLive: Layer.Layer<Workspace, never, AppPaths | FileSystem>
       Effect.gen(function* () {
         const current = yield* Ref.get(ref);
         const device = current.devices.find((item) => item.id === deviceId);
-        if (!device) return yield* Effect.fail(maaxError("设备不存在"));
+        if (!device) return yield* maaxError("设备不存在");
         const existing = current.plans.find((plan) => plan.id === device.activePlanId);
         if (existing) return existing;
         const first = current.plans

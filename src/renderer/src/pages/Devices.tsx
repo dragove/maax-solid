@@ -8,9 +8,7 @@ import { StatusPill } from "../components/ui/StatusPill";
 interface DevicesProps {
   readonly data: Bootstrap;
   readonly locale: Locale;
-  readonly screenshots: Readonly<
-    Record<string, { url: string; width: number; height: number; durationMs: number }>
-  >;
+  readonly screenshots: Readonly<Record<string, { url: string; width: number; height: number; durationMs: number }>>;
   readonly busy: boolean;
   readonly onAdd: () => void;
   readonly onConnect: (id: string) => void;
@@ -46,8 +44,7 @@ const lastConnected = (timestamp: number | undefined, locale: Locale): string =>
 
 export const Devices: Component<DevicesProps> = (props) => {
   const activeCore = () =>
-    props.data.cores.find((core) => core.id === props.data.settings.activeCoreId) ??
-    props.data.cores[0];
+    props.data.cores.find((core) => core.id === props.data.settings.activeCoreId) ?? props.data.cores[0];
   return (
     <div class="page page--devices">
       <header class="page-head">
@@ -93,11 +90,7 @@ export const Devices: Component<DevicesProps> = (props) => {
                       <h2>{device.profile.name}</h2>
                       <p class="mono-line">{device.profile.address}</p>
                     </div>
-                    <StatusPill
-                      status={device.status}
-                      label={statusText(device.status, props.locale)}
-                      compact
-                    />
+                    <StatusPill status={device.status} label={statusText(device.status, props.locale)} compact />
                   </header>
 
                   <div class="device-shot">
@@ -120,11 +113,7 @@ export const Devices: Component<DevicesProps> = (props) => {
                     >
                       {(shot) => (
                         <>
-                          <img
-                            class="device-shot-image"
-                            src={shot().url}
-                            alt={`${device.profile.name} screenshot`}
-                          />
+                          <img class="device-shot-image" src={shot().url} alt={`${device.profile.name} screenshot`} />
                           <span class="device-shot-meta">
                             <span>
                               {shot().width}×{shot().height} · {shot().durationMs} ms
@@ -164,11 +153,7 @@ export const Devices: Component<DevicesProps> = (props) => {
                     </div>
                     <div>
                       <dt>{t(props.locale, "devices.resolution")}</dt>
-                      <dd>
-                        {device.resolution
-                          ? `${device.resolution.width}×${device.resolution.height}`
-                          : "—"}
-                      </dd>
+                      <dd>{device.resolution ? `${device.resolution.width}×${device.resolution.height}` : "—"}</dd>
                     </div>
                     <div>
                       <dt>{t(props.locale, "devices.lastConnected")}</dt>
@@ -191,31 +176,17 @@ export const Devices: Component<DevicesProps> = (props) => {
                       variant={connected() ? "ghost" : "primary"}
                       disabled={props.busy || device.status === "connecting" || !activeCore()}
                       onClick={() =>
-                        connected()
-                          ? props.onDisconnect(device.profile.id)
-                          : props.onConnect(device.profile.id)
+                        connected() ? props.onDisconnect(device.profile.id) : props.onConnect(device.profile.id)
                       }
                     >
-                      <Icon
-                        name={
-                          connected()
-                            ? "wifi-off"
-                            : device.status === "connecting"
-                              ? "loader"
-                              : "wifi"
-                        }
-                      />
+                      <Icon name={connected() ? "wifi-off" : device.status === "connecting" ? "loader" : "wifi"} />
                       {connected()
                         ? t(props.locale, "common.disconnect")
                         : device.status === "connecting"
                           ? t(props.locale, "status.connecting")
                           : t(props.locale, "common.connect")}
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => props.onRemove(device.profile.id)}
-                    >
+                    <Button size="sm" variant="ghost" onClick={() => props.onRemove(device.profile.id)}>
                       <Icon name="trash-2" />
                       {t(props.locale, "common.remove")}
                     </Button>

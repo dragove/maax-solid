@@ -26,9 +26,7 @@ export class CoreHostClient {
   constructor(private readonly options: CoreHostOptions) {
     const hostEntry = join(__dirname, "core-host.js");
     const env = Object.fromEntries(
-      Object.entries(process.env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
+      Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
     );
     this.child = utilityProcess.fork(hostEntry, [], {
       serviceName: "Maax Core Host",

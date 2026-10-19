@@ -10,12 +10,9 @@ interface PackageManifest {
   devDependencies?: Record<string, string>;
 }
 
-const manifest = JSON.parse(
-  readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
-) as PackageManifest;
+const manifest = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as PackageManifest;
 
-const versionOf = (version: string | undefined): string =>
-  version?.replace(/^[~^]/, "") ?? "unknown";
+const versionOf = (version: string | undefined): string => version?.replace(/^[~^]/, "") ?? "unknown";
 
 const buildMetadata = {
   hostNode: process.version,

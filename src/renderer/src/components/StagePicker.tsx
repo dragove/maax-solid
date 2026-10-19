@@ -28,9 +28,7 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
     const needle = (query() ?? "").trim().toLowerCase();
     const filtered = props.stages.filter((entry) => {
       if (needle === "") return true;
-      return (
-        entry.value.toLowerCase().includes(needle) || entry.label.toLowerCase().includes(needle)
-      );
+      return entry.value.toLowerCase().includes(needle) || entry.label.toLowerCase().includes(needle);
     });
     const order = new Map<string, StageGroup>();
     for (const entry of filtered) {
@@ -149,10 +147,7 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
           role="listbox"
           onMouseDown={(event) => event.preventDefault()}
         >
-          <Show
-            when={groups().length > 0}
-            fallback={<p class="stage-empty">{t(props.locale, "common.noData")}</p>}
-          >
+          <Show when={groups().length > 0} fallback={<p class="stage-empty">{t(props.locale, "common.noData")}</p>}>
             <For each={groups()}>
               {(group) => (
                 <div class="stage-group">
@@ -161,11 +156,7 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
                     {(entry) => (
                       <button
                         type="button"
-                        class={
-                          entry.value === props.value
-                            ? "stage-option stage-option--active"
-                            : "stage-option"
-                        }
+                        class={entry.value === props.value ? "stage-option stage-option--active" : "stage-option"}
                         role="option"
                         aria-selected={entry.value === props.value ? "true" : "false"}
                         onClick={() => select(entry.value)}

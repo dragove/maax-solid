@@ -539,15 +539,10 @@ export function getTaskDefaults(type: TaskType): Record<string, unknown> {
 }
 
 export function taskDisplayName(type: TaskType, customName = ""): LocalizedText {
-  return customName.trim() === ""
-    ? TASK_DEFINITIONS[type].name
-    : { zh: customName, en: customName };
+  return customName.trim() === "" ? TASK_DEFINITIONS[type].name : { zh: customName, en: customName };
 }
 
-export function buildMaaTaskParams(
-  task: TaskConfig,
-  settings: AppSettings,
-): Record<string, unknown> {
+export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Record<string, unknown> {
   const common: Record<string, unknown> = {
     enable: true,
     client_type: settings.clientType,

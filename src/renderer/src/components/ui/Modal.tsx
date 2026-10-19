@@ -30,9 +30,7 @@ export const Modal: Component<ModalProps> = (props) => (
         <header class="modal-head">
           <div>
             <h2>{props.title}</h2>
-            <Show when={props.description}>
-              {(description) => <p class="modal-description">{description()}</p>}
-            </Show>
+            <Show when={props.description}>{(description) => <p class="modal-description">{description()}</p>}</Show>
           </div>
           <button class="icon-button" type="button" aria-label="Close" onClick={props.onClose}>
             ×

@@ -1,11 +1,7 @@
 import { Show, createSignal, onSettled, type Component } from "solid-js";
 import type { Bootstrap } from "../../shared/schemas";
 import { AppShell } from "./shell/AppShell";
-import {
-  DesktopBridgeError,
-  DesktopBridgeLive,
-  bootstrap as bootstrapEffect,
-} from "./effect/desktop";
+import { DesktopBridgeError, DesktopBridgeLive, bootstrap as bootstrapEffect } from "./effect/desktop";
 import { RuntimeContext, createRuntime, useAppRuntime } from "./effect/solid-effect";
 import { Toaster } from "./components/ui/Toaster";
 import { Icon } from "./components/ui/Icon";

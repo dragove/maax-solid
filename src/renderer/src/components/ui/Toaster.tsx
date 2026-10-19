@@ -108,12 +108,7 @@ export const Toaster: Component = () => (
               <span class="toast-title">{toast.title}</span>
               {toast.message ? <span class="toast-message">{toast.message}</span> : null}
             </span>
-            <button
-              type="button"
-              class="toast-close"
-              aria-label="Close"
-              onClick={() => dismiss(toast.id)}
-            >
+            <button type="button" class="toast-close" aria-label="Close" onClick={() => dismiss(toast.id)}>
               <Icon name="x" />
             </button>
           </li>

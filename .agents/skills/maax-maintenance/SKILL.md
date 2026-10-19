@@ -34,9 +34,7 @@ whose rows are edited in place, use `keyed={false}` so the row survives updates:
 <For each={rows()} keyed={false}>
   {(row, index) => {
     const value = () => row();
-    return (
-      <Row item={value()} onRemove={() => remove(value().id)} onDragStart={() => setFrom(index)} />
-    );
+    return <Row item={value()} onRemove={() => remove(value().id)} onDragStart={() => setFrom(index)} />;
   }}
 </For>
 ```
@@ -128,6 +126,13 @@ or transforms it. A missing `case` returns `undefined` and surfaces later as
   the adapter boundary instead of throwing unknown values through services.
 - `Effect.runPromise` / `runtime.runPromise` belong at IPC handlers, event
   handlers, `onSettled`, and tests, not in render computation.
+- `effect/FileSystem` is the only filesystem service in Effect 4 and is
+  annotated `@stability unstable` upstream. `.oxlintrc.json` scopes the
+  `unstable-api-usage` diagnostic to the modules that own that boundary
+  (`json-store`, `settings`, `core-registry`, `workspace`, `runtime`); put new
+  filesystem code in one of them instead of adding another exception.
+- Cross-boundary numbers use `Schema.Finite`, not `Schema.Number`, so `NaN`,
+  `Infinity` and `-Infinity` are rejected at the IPC edge.
 
 ## IPC and shared contracts
 

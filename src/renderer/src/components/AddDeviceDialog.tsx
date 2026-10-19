@@ -13,24 +13,9 @@ interface AddDeviceDialogProps {
   readonly onSubmit: (draft: DeviceDraft) => void;
 }
 
-const CLIENT_TYPES: ReadonlyArray<ClientType> = [
-  "Official",
-  "Bilibili",
-  "txwy",
-  "YoStarEN",
-  "YoStarJP",
-  "YoStarKR",
-];
+const CLIENT_TYPES: ReadonlyArray<ClientType> = ["Official", "Bilibili", "txwy", "YoStarEN", "YoStarJP", "YoStarKR"];
 
-const CONNECTION_PROFILES = [
-  "General",
-  "MuMuEmulator12",
-  "LDPlayer",
-  "Nox",
-  "XYAZ",
-  "WSA",
-  "Androws",
-];
+const CONNECTION_PROFILES = ["General", "MuMuEmulator12", "LDPlayer", "Nox", "XYAZ", "WSA", "Androws"];
 
 export const AddDeviceDialog: Component<AddDeviceDialogProps> = (props) => {
   const [name, setName] = createSignal("");
@@ -111,11 +96,7 @@ export const AddDeviceDialog: Component<AddDeviceDialogProps> = (props) => {
         <div class="form-grid">
           <label class="field">
             <span class="field-label">{t(props.locale, "common.connectionConfig")}</span>
-            <select
-              class="input"
-              value={config()}
-              onChange={(event) => setConfig(event.currentTarget.value)}
-            >
+            <select class="input" value={config()} onChange={(event) => setConfig(event.currentTarget.value)}>
               {CONNECTION_PROFILES.map((profile) => (
                 <option value={profile}>{profile}</option>
               ))}

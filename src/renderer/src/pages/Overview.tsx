@@ -40,12 +40,10 @@ const statusText = (status: DeviceView["status"], locale: Locale): string => {
 export const Overview: Component<OverviewProps> = (props) => {
   const enabledTasks = () => props.plan?.tasks.filter((task) => task.enabled) ?? [];
   const activeCore = () =>
-    props.data.cores.find((core) => core.id === props.data.settings.activeCoreId) ??
-    props.data.cores[0];
+    props.data.cores.find((core) => core.id === props.data.settings.activeCoreId) ?? props.data.cores[0];
   const connected = () => props.device?.status === "online" || props.device?.status === "running";
   const lastLogs = () => props.logs.slice(-80).reverse();
-  const completedCount = () =>
-    props.run?.tasks.filter((task) => task.status === "completed").length ?? 0;
+  const completedCount = () => props.run?.tasks.filter((task) => task.status === "completed").length ?? 0;
   const primaryLabel = () => {
     if (!props.device) return t(props.locale, "devices.add");
     if (!connected()) return t(props.locale, "overview.connectFirst");
@@ -85,12 +83,7 @@ export const Overview: Component<OverviewProps> = (props) => {
           <span class="status-cell-value">
             <span>{props.device?.profile.name ?? t(props.locale, "overview.noDevice")}</span>
             <Show when={props.device}>
-              {(device) => (
-                <StatusPill
-                  status={device().status}
-                  label={statusText(device().status, props.locale)}
-                />
-              )}
+              {(device) => <StatusPill status={device().status} label={statusText(device().status, props.locale)} />}
             </Show>
           </span>
           <span class="status-cell-meta">
@@ -103,9 +96,7 @@ export const Overview: Component<OverviewProps> = (props) => {
           <span class="status-cell-value">
             <span>{activeCore()?.version ?? t(props.locale, "overview.noCore")}</span>
           </span>
-          <span class="status-cell-meta">
-            {t(props.locale, enginePhaseKey(props.data.engine.phase))}
-          </span>
+          <span class="status-cell-meta">{t(props.locale, enginePhaseKey(props.data.engine.phase))}</span>
         </div>
 
         <div class="status-cell">
@@ -122,9 +113,7 @@ export const Overview: Component<OverviewProps> = (props) => {
           <span class="status-cell-label">{t(props.locale, "overview.lastRun")}</span>
           <span class="status-cell-value">
             <span>
-              {props.run
-                ? t(props.locale, runStatusKey(props.run.status))
-                : t(props.locale, "overview.noRun")}
+              {props.run ? t(props.locale, runStatusKey(props.run.status)) : t(props.locale, "overview.noRun")}
             </span>
           </span>
           <span class="status-cell-meta">
@@ -178,9 +167,7 @@ export const Overview: Component<OverviewProps> = (props) => {
                       <span class="queue-type">{task.type}</span>
                       <Show when={runTask()} fallback={<span class="queue-state" />}>
                         {(entry) => (
-                          <span class="queue-state">
-                            {t(props.locale, runTaskStatusKey(entry().status))}
-                          </span>
+                          <span class="queue-state">{t(props.locale, runTaskStatusKey(entry().status))}</span>
                         )}
                       </Show>
                     </li>

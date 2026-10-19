@@ -5,5 +5,21 @@
     "typeAware": true,
     "typeCheck": true
   },
-  "ignorePatterns": ["dist/**", "out/**", "docs/**", "build/icon.svg"]
+  "ignorePatterns": ["dist/**", "out/**", "docs/**", "build/icon.svg"],
+  // `effect/FileSystem` is the only filesystem service in Effect 4.0.x and is
+  // annotated `@stability unstable` upstream; these modules own that boundary.
+  "overrides": [
+    {
+      "files": [
+        "src/main/runtime.ts",
+        "src/main/services/core-registry.ts",
+        "src/main/services/json-store.ts",
+        "src/main/services/settings.ts",
+        "src/main/services/workspace.ts"
+      ],
+      "rules": {
+        "effecttsgo/unstable-api-usage": "off"
+      }
+    }
+  ]
 }

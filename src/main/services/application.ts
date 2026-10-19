@@ -22,23 +22,17 @@ import type {
   TaskPlan,
   RuntimeInfo,
 } from "../../shared/schemas";
-import type {
-  AppendTaskResult,
-  ConnectResult,
-  EngineCallback,
-  InitResult,
-} from "../../shared/engine";
+import type { AppendTaskResult, ConnectResult, EngineCallback, InitResult } from "../../shared/engine";
 import { buildMaaTaskParams } from "../../shared/tasks";
 
-const STAGE_ACTIVITY_URL =
-  "https://api.maa.plus/MaaAssistantArknights/api/gui/StageActivityV2.json";
+const STAGE_ACTIVITY_URL = "https://api.maa.plus/MaaAssistantArknights/api/gui/StageActivityV2.json";
 
 const ActivityInfoSchema = Schema.Struct({
   Tip: Schema.optional(Schema.String),
   StageName: Schema.optional(Schema.String),
   UtcStartTime: Schema.optional(Schema.String),
   UtcExpireTime: Schema.optional(Schema.String),
-  TimeZone: Schema.optional(Schema.Number),
+  TimeZone: Schema.optional(Schema.Finite),
 });
 const ActivityStageSchema = Schema.Struct({
   Display: Schema.optional(Schema.String),
@@ -72,12 +66,7 @@ const permanentStageEntries = (locale: string): ReadonlyArray<StageCatalogEntry>
     resource: zh ? "资源关卡" : "Resource stages",
     annihilation: zh ? "剿灭作战" : "Annihilation",
   };
-  const entry = (
-    value: string,
-    label: string,
-    groupLabel: string,
-    tip?: string,
-  ): StageCatalogEntry => ({
+  const entry = (value: string, label: string, groupLabel: string, tip?: string): StageCatalogEntry => ({
     value,
     label,
     group: groupLabel,
@@ -108,20 +97,14 @@ const permanentStageEntries = (locale: string): ReadonlyArray<StageCatalogEntry>
     entry("PR-C-2", "PR-C-2", group.resource, zh ? "医疗/辅助芯片" : "Medic/Supporter chips"),
     entry("PR-D-1", "PR-D-1", group.resource, zh ? "先锋/特种芯片" : "Vanguard/Specialist chips"),
     entry("PR-D-2", "PR-D-2", group.resource, zh ? "先锋/特种芯片" : "Vanguard/Specialist chips"),
-    entry(
-      "Annihilation",
-      "Annihilation",
-      group.annihilation,
-      zh ? "当前剿灭" : "Current annihilation",
-    ),
+    entry("Annihilation", "Annihilation", group.annihilation, zh ? "当前剿灭" : "Current annihilation"),
     entry("Chernobog@Annihilation", "Chernobog", group.annihilation),
     entry("LungmenOutskirts@Annihilation", "Lungmen Outskirts", group.annihilation),
     entry("LungmenDowntown@Annihilation", "Lungmen Downtown", group.annihilation),
   ];
 };
 
-const clientKeyFor = (clientType: string): string =>
-  clientType === "Bilibili" ? "Official" : clientType;
+const clientKeyFor = (clientType: string): string => (clientType === "Bilibili" ? "Official" : clientType);
 
 interface StageCache {
   readonly key: string;
@@ -175,10 +158,7 @@ export interface ApplicationApi {
     id: string,
   ) => Effect.Effect<{ settings: AppSettings; cores: ReadonlyArray<CoreInfo> }, MaaxError>;
   readonly addDevice: (draft: DeviceDraft) => Effect.Effect<DeviceView, MaaxError>;
-  readonly updateDevice: (
-    id: string,
-    patch: Partial<DeviceDraft>,
-  ) => Effect.Effect<DeviceView, MaaxError>;
+  readonly updateDevice: (id: string, patch: Partial<DeviceDraft>) => Effect.Effect<DeviceView, MaaxError>;
   readonly removeDevice: (id: string) => Effect.Effect<ReadonlyArray<DeviceView>>;
   readonly connectDevice: (id: string) => Effect.Effect<DeviceView, MaaxError>;
   readonly disconnectDevice: (id: string) => Effect.Effect<DeviceView, MaaxError>;
@@ -191,9 +171,7 @@ export interface ApplicationApi {
   readonly shutdown: Effect.Effect<void>;
 }
 
-export class Application extends Context.Service<Application, ApplicationApi>()(
-  "maax/Application",
-) {}
+export class Application extends Context.Service<Application, ApplicationApi>()("maax/Application") {}
 
 const readRuntimeInfo = (): RuntimeInfo => ({
   app: {
@@ -317,16 +295,12 @@ export const ApplicationLive: Layer.Layer<
       const activeHost = [...hosts.values()][0];
       const running = [...runs.values()].some((run) => run.snapshot.status === "running");
       const anyStarting = [...hosts.values()].some((host) => host.version === "");
-      const phase =
-        hosts.size === 0 ? "idle" : running ? "running" : anyStarting ? "starting" : "ready";
+      const phase = hosts.size === 0 ? "idle" : running ? "running" : anyStarting ? "starting" : "ready";
       const message = phase === "starting" ? "正在加载 MaaCore…" : undefined;
       return {
         phase,
-        ...(activeHost
-          ? { coreId: activeHost.core.id, coreVersion: activeHost.version || undefined }
-          : {}),
-        sessionCount: [...runtime.values()].filter((device) => device.sessionId !== undefined)
-          .length,
+        ...(activeHost ? { coreId: activeHost.core.id, coreVersion: activeHost.version || undefined } : {}),
+        sessionCount: [...runtime.values()].filter((device) => device.sessionId !== undefined).length,
         ...(message ? { message } : {}),
       };
     };
@@ -432,9 +406,7 @@ export const ApplicationLive: Layer.Layer<
           status: "running",
           currentTaskId: taskId,
           tasks: run.snapshot.tasks.map((entry) =>
-            entry.taskId === taskId
-              ? { ...entry, status: "running", startedAt: Date.now() }
-              : entry,
+            entry.taskId === taskId ? { ...entry, status: "running", startedAt: Date.now() } : entry,
           ),
         };
         setDeviceState(deviceId, { status: "running" });
@@ -445,9 +417,7 @@ export const ApplicationLive: Layer.Layer<
         run.snapshot = {
           ...run.snapshot,
           tasks: run.snapshot.tasks.map((entry) =>
-            entry.taskId === taskId
-              ? { ...entry, status: "completed", endedAt: Date.now() }
-              : entry,
+            entry.taskId === taskId ? { ...entry, status: "completed", endedAt: Date.now() } : entry,
           ),
         };
         emitRun(run);
@@ -457,9 +427,7 @@ export const ApplicationLive: Layer.Layer<
           ...run.snapshot,
           message,
           tasks: run.snapshot.tasks.map((entry) =>
-            entry.taskId === taskId
-              ? { ...entry, status: "failed", endedAt: Date.now(), message }
-              : entry,
+            entry.taskId === taskId ? { ...entry, status: "failed", endedAt: Date.now(), message } : entry,
           ),
         };
         emitRun(run);
@@ -472,13 +440,7 @@ export const ApplicationLive: Layer.Layer<
           const device = profiles.get(deviceId)?.name ?? "MAAX";
           const chinese = settingsCache.locale === "zh-CN";
           new Notification({
-            title: failed
-              ? chinese
-                ? "任务失败"
-                : "Task failed"
-              : chinese
-                ? "任务完成"
-                : "Task completed",
+            title: failed ? (chinese ? "任务失败" : "Task failed") : chinese ? "任务完成" : "Task completed",
             body: failed
               ? chinese
                 ? `${device} 的任务队列已结束，其中存在失败任务。`
@@ -521,7 +483,7 @@ export const ApplicationLive: Layer.Layer<
         const cores = yield* registry.list;
         const ready = cores.filter((core) => core.status === "ready");
         if (ready.length === 0) {
-          return yield* Effect.fail(maaxError("还没有可用的 MaaCore，请先在设置中导入或下载核心"));
+          return yield* maaxError("还没有可用的 MaaCore，请先在设置中导入或下载核心");
         }
         const active = currentSettings.activeCoreId
           ? ready.find((core) => core.id === currentSettings.activeCoreId)
@@ -539,7 +501,7 @@ export const ApplicationLive: Layer.Layer<
         }
 
         if (existing) {
-          return yield* Effect.fail(maaxError("核心正在启动，请稍候"));
+          return yield* maaxError("核心正在启动，请稍候");
         }
 
         engine = { ...engine, phase: "starting", coreId: core.id, message: "正在加载 MaaCore…" };
@@ -583,10 +545,7 @@ export const ApplicationLive: Layer.Layer<
         return entry;
       });
 
-    const ensureSession = (
-      device: DeviceProfile,
-      host: HostEntry,
-    ): Effect.Effect<string, MaaxError> =>
+    const ensureSession = (device: DeviceProfile, host: HostEntry): Effect.Effect<string, MaaxError> =>
       Effect.gen(function* () {
         const state = runtime.get(device.id);
         if (state?.sessionId && state.hostKey === host.key) return state.sessionId;
@@ -594,8 +553,7 @@ export const ApplicationLive: Layer.Layer<
           const old = hosts.get(state.hostKey ?? "");
           if (old) {
             yield* Effect.tryPromise({
-              try: () =>
-                old.client.request({ id: 0, op: "destroy-session", sessionId: state.sessionId! }),
+              try: () => old.client.request({ id: 0, op: "destroy-session", sessionId: state.sessionId! }),
               catch: () => undefined,
             }).pipe(Effect.ignore);
           }
@@ -641,20 +599,20 @@ export const ApplicationLive: Layer.Layer<
     const getConnectedDevice = (deviceId: string) =>
       Effect.gen(function* () {
         const profile = profiles.get(deviceId);
-        if (!profile) return yield* Effect.fail(maaxError("设备不存在"));
+        if (!profile) return yield* maaxError("设备不存在");
         const state = runtime.get(deviceId);
         if (!state?.sessionId || !state.hostKey) {
-          return yield* Effect.fail(maaxError("设备未连接"));
+          return yield* maaxError("设备未连接");
         }
         const host = hosts.get(state.hostKey);
-        if (!host) return yield* Effect.fail(maaxError("MaaCore 会话已失效，请重新连接"));
+        if (!host) return yield* maaxError("MaaCore 会话已失效，请重新连接");
         return { profile, state, host };
       });
 
     const connectDevice = (deviceId: string) =>
       Effect.gen(function* () {
         const profile = profiles.get(deviceId);
-        if (!profile) return yield* Effect.fail(maaxError("设备不存在"));
+        if (!profile) return yield* maaxError("设备不存在");
         const current = runtime.get(deviceId);
         if (current?.status === "online" || current?.status === "running") {
           const view = viewFor(deviceId);
@@ -689,7 +647,7 @@ export const ApplicationLive: Layer.Layer<
           cancelConnectWaiter(deviceId);
           setDeviceState(deviceId, { status: "error", lastError: "连接请求被 MaaCore 拒绝" });
           emitDevice(deviceId);
-          return yield* Effect.fail(maaxError("连接请求被 MaaCore 拒绝"));
+          return yield* maaxError("连接请求被 MaaCore 拒绝");
         }
         const result = yield* Effect.tryPromise({
           try: () => waiter,
@@ -699,7 +657,7 @@ export const ApplicationLive: Layer.Layer<
           const message = result.message || "ADB 连接失败";
           setDeviceState(deviceId, { status: "error", lastError: message });
           emitDevice(deviceId);
-          return yield* Effect.fail(maaxError("连接失败", message));
+          return yield* maaxError("连接失败", message);
         }
         const nextProfile = yield* workspace.markConnected(deviceId);
         profiles.set(deviceId, nextProfile);
@@ -712,7 +670,7 @@ export const ApplicationLive: Layer.Layer<
         engine = computeEngine();
         bus.emit({ _tag: "engine-updated", engine });
         const view = viewFor(deviceId);
-        if (!view) return yield* Effect.fail(maaxError("设备状态丢失"));
+        if (!view) return yield* maaxError("设备状态丢失");
         return view;
       });
 
@@ -727,8 +685,7 @@ export const ApplicationLive: Layer.Layer<
           const host = hosts.get(state.hostKey);
           if (host) {
             yield* Effect.tryPromise({
-              try: () =>
-                host.client.request({ id: 0, op: "destroy-session", sessionId: state.sessionId! }),
+              try: () => host.client.request({ id: 0, op: "destroy-session", sessionId: state.sessionId! }),
               catch: () => undefined,
             }).pipe(Effect.ignore);
           }
@@ -737,7 +694,7 @@ export const ApplicationLive: Layer.Layer<
         emitDevice(deviceId);
         emitEngine();
         const view = viewFor(deviceId);
-        if (!view) return yield* Effect.fail(maaxError("设备不存在"));
+        if (!view) return yield* maaxError("设备不存在");
         return view;
       });
 
@@ -759,10 +716,10 @@ export const ApplicationLive: Layer.Layer<
     const stopRunInternal = (deviceId: string): Effect.Effect<RunSnapshot, MaaxError> =>
       Effect.gen(function* () {
         const run = runs.get(deviceId);
-        if (!run) return yield* Effect.fail(maaxError("当前没有运行中的任务"));
+        if (!run) return yield* maaxError("当前没有运行中的任务");
         const { host } = yield* getConnectedDevice(deviceId);
         if (run.hostKey !== host.key) {
-          return yield* Effect.fail(maaxError("运行中的核心已经切换，请重新连接"));
+          return yield* maaxError("运行中的核心已经切换，请重新连接");
         }
         yield* Effect.tryPromise({
           try: () =>
@@ -794,18 +751,13 @@ export const ApplicationLive: Layer.Layer<
     const startRun = (deviceId: string, planId: string) =>
       Effect.gen(function* () {
         const existing = runs.get(deviceId);
-        if (
-          existing &&
-          (existing.snapshot.status === "running" || existing.snapshot.status === "preparing")
-        ) {
-          return yield* Effect.fail(maaxError("这个设备已经在运行任务"));
+        if (existing && (existing.snapshot.status === "running" || existing.snapshot.status === "preparing")) {
+          return yield* maaxError("这个设备已经在运行任务");
         }
         const plan = yield* workspace.getPlan(planId);
-        if (!plan || plan.deviceId !== deviceId)
-          return yield* Effect.fail(maaxError("任务计划不存在"));
+        if (!plan || plan.deviceId !== deviceId) return yield* maaxError("任务计划不存在");
         const tasks = plan.tasks.filter((task) => task.enabled);
-        if (tasks.length === 0)
-          return yield* Effect.fail(maaxError("没有启用的任务，请至少启用一个"));
+        if (tasks.length === 0) return yield* maaxError("没有启用的任务，请至少启用一个");
         const { state, host } = yield* getConnectedDevice(deviceId);
         const sessionId = state.sessionId!;
         const runId = randomUUID();
@@ -849,9 +801,7 @@ export const ApplicationLive: Layer.Layer<
           run.taskConfigIds.set(taskId, task.id);
           run.snapshot = {
             ...run.snapshot,
-            tasks: run.snapshot.tasks.map((item) =>
-              item.configId === task.id ? { ...item, taskId } : item,
-            ),
+            tasks: run.snapshot.tasks.map((item) => (item.configId === task.id ? { ...item, taskId } : item)),
           };
         }
 
@@ -865,7 +815,7 @@ export const ApplicationLive: Layer.Layer<
             : true;
         if (!ok) {
           runs.delete(deviceId);
-          return yield* Effect.fail(maaxError("MaaCore 拒绝启动任务"));
+          return yield* maaxError("MaaCore 拒绝启动任务");
         }
         run.snapshot = { ...run.snapshot, status: "running" };
         setDeviceState(deviceId, { status: "running" });
@@ -878,7 +828,7 @@ export const ApplicationLive: Layer.Layer<
     const stopRun = (deviceId: string) =>
       Effect.gen(function* () {
         const run = runs.get(deviceId);
-        if (!run) return yield* Effect.fail(maaxError("当前没有运行中的任务"));
+        if (!run) return yield* maaxError("当前没有运行中的任务");
         return yield* stopRunInternal(deviceId);
       });
 
@@ -942,48 +892,50 @@ export const ApplicationLive: Layer.Layer<
       }
 
       const permanent = permanentStageEntries(locale);
-      const activity = yield* Effect.tryPromise({
-        try: async (): Promise<StageActivityData> => {
-          const response = await fetch(STAGE_ACTIVITY_URL, { signal: AbortSignal.timeout(20_000) });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return Schema.decodeUnknownSync(StageActivityResponseSchema)(await response.json());
-        },
-        catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
-      }).pipe(
-        Effect.map((data: StageActivityData) => {
-          const zh = locale === "zh-CN";
-          const entries: StageCatalogEntry[] = [];
-          const now = Date.now();
-          for (const story of Object.values(data[client]?.sideStoryStage ?? {})) {
-            const info = story.Activity;
-            const start = parseActivityDate(info?.UtcStartTime, info?.TimeZone);
-            const expire = parseActivityDate(info?.UtcExpireTime, info?.TimeZone);
-            if (start > 0 && now < start) continue;
-            if (expire > 0 && now > expire) continue;
-            const groupLabel =
-              `${zh ? "活动" : "Event"} · ${info?.StageName || info?.Tip || ""}`.trim();
-            for (const stage of story.Stages ?? []) {
-              if (!stage.Value) continue;
-              entries.push({
-                value: stage.Value,
-                label: stage.Display || stage.Value,
-                group: "activity",
-                groupLabel,
-                ...(stage.Drop ? { tip: `${zh ? "掉落" : "Drop"}: ${stage.Drop}` } : {}),
-              });
-            }
+      const activity = yield* Effect.gen(function* () {
+        const raw = yield* Effect.tryPromise({
+          try: async (): Promise<unknown> => {
+            const response = await fetch(STAGE_ACTIVITY_URL, {
+              signal: AbortSignal.timeout(20_000),
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.json();
+          },
+          catch: (cause) => maaxError("活动关卡获取失败", cause),
+        });
+        const data: StageActivityData = yield* Schema.decodeUnknownEffect(StageActivityResponseSchema)(raw).pipe(
+          Effect.mapError((cause) => maaxError("活动关卡数据格式无效", cause)),
+        );
+        const zh = locale === "zh-CN";
+        const entries: StageCatalogEntry[] = [];
+        const now = Date.now();
+        for (const story of Object.values(data[client]?.sideStoryStage ?? {})) {
+          const info = story.Activity;
+          const start = parseActivityDate(info?.UtcStartTime, info?.TimeZone);
+          const expire = parseActivityDate(info?.UtcExpireTime, info?.TimeZone);
+          if (start > 0 && now < start) continue;
+          if (expire > 0 && now > expire) continue;
+          const groupLabel = `${zh ? "活动" : "Event"} · ${info?.StageName || info?.Tip || ""}`.trim();
+          for (const stage of story.Stages ?? []) {
+            if (!stage.Value) continue;
+            entries.push({
+              value: stage.Value,
+              label: stage.Display || stage.Value,
+              group: "activity",
+              groupLabel,
+              ...(stage.Drop ? { tip: `${zh ? "掉落" : "Drop"}: ${stage.Drop}` } : {}),
+            });
           }
-          return { entries, warning: undefined as string | undefined };
-        }),
-        Effect.catch(() =>
-          Effect.succeed({
-            entries: [] as StageCatalogEntry[],
-            warning:
-              locale === "zh-CN"
-                ? "活动关卡获取失败，已显示常驻推荐关卡。"
-                : "Could not load event stages; showing permanent recommendations.",
-          }),
-        ),
+        }
+        return { entries, warning: undefined as string | undefined };
+      }).pipe(
+        Effect.orElseSucceed(() => ({
+          entries: [] as StageCatalogEntry[],
+          warning:
+            locale === "zh-CN"
+              ? "活动关卡获取失败，已显示常驻推荐关卡。"
+              : "Could not load event stages; showing permanent recommendations.",
+        })),
       );
 
       const catalog: StageCatalog = {
@@ -1008,7 +960,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const cores = yield* registry.list;
         if (!cores.some((core) => core.id === id && core.status === "ready")) {
-          return yield* Effect.fail(maaxError("核心不可用"));
+          return yield* maaxError("核心不可用");
         }
         const next = yield* settings.update({ activeCoreId: id });
         bus.emit({ _tag: "cores-updated", cores });
@@ -1023,7 +975,7 @@ export const ApplicationLive: Layer.Layer<
         runtime.set(device.id, { status: "offline" });
         emitDevice(device.id);
         const view = viewFor(device.id);
-        if (!view) return yield* Effect.fail(maaxError("创建设备失败"));
+        if (!view) return yield* maaxError("创建设备失败");
         return view;
       });
 
@@ -1033,7 +985,7 @@ export const ApplicationLive: Layer.Layer<
         profiles.set(id, profile);
         emitDevice(id);
         const view = viewFor(id);
-        if (!view) return yield* Effect.fail(maaxError("设备不存在"));
+        if (!view) return yield* maaxError("设备不存在");
         return view;
       });
 
@@ -1044,8 +996,7 @@ export const ApplicationLive: Layer.Layer<
           const host = hosts.get(state.hostKey);
           if (host) {
             yield* Effect.tryPromise({
-              try: () =>
-                host.client.request({ id: 0, op: "destroy-session", sessionId: state.sessionId! }),
+              try: () => host.client.request({ id: 0, op: "destroy-session", sessionId: state.sessionId! }),
               catch: () => undefined,
             }).pipe(Effect.ignore);
           }
@@ -1076,9 +1027,7 @@ export const ApplicationLive: Layer.Layer<
     const shutdown = Effect.gen(function* () {
       shuttingDown = true;
       for (const host of hosts.values()) {
-        yield* Effect.tryPromise({ try: () => host.client.stop(), catch: () => undefined }).pipe(
-          Effect.ignore,
-        );
+        yield* Effect.tryPromise({ try: () => host.client.stop(), catch: () => undefined }).pipe(Effect.ignore);
       }
       hosts.clear();
     });

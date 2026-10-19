@@ -27,25 +27,10 @@ interface SettingsProps {
   readonly onRefreshCores: () => void;
 }
 
-const clientTypes: ReadonlyArray<ClientType> = [
-  "Official",
-  "Bilibili",
-  "txwy",
-  "YoStarEN",
-  "YoStarJP",
-  "YoStarKR",
-];
+const clientTypes: ReadonlyArray<ClientType> = ["Official", "Bilibili", "txwy", "YoStarEN", "YoStarJP", "YoStarKR"];
 
 const touchModes: ReadonlyArray<TouchMode> = ["maatouch", "minitouch", "adb"];
-const connectionProfiles = [
-  "General",
-  "MuMuEmulator12",
-  "LDPlayer",
-  "Nox",
-  "XYAZ",
-  "WSA",
-  "Androws",
-];
+const connectionProfiles = ["General", "MuMuEmulator12", "LDPlayer", "Nox", "XYAZ", "WSA", "Androws"];
 
 const coreStatusLabel = (core: CoreInfo, locale: Locale): string => {
   if (core.status === "ready") return t(locale, "settings.coreReady");
@@ -94,11 +79,7 @@ export const Settings: Component<SettingsProps> = (props) => {
                   {(option) => (
                     <button
                       type="button"
-                      class={
-                        settings().theme === option.value
-                          ? "segmented-item segmented-item--on"
-                          : "segmented-item"
-                      }
+                      class={settings().theme === option.value ? "segmented-item segmented-item--on" : "segmented-item"}
                       onClick={() => props.onUpdateSettings({ theme: option.value })}
                     >
                       {t(props.locale, option.key)}
@@ -112,22 +93,14 @@ export const Settings: Component<SettingsProps> = (props) => {
               <div class="segmented">
                 <button
                   type="button"
-                  class={
-                    settings().locale === "zh-CN"
-                      ? "segmented-item segmented-item--on"
-                      : "segmented-item"
-                  }
+                  class={settings().locale === "zh-CN" ? "segmented-item segmented-item--on" : "segmented-item"}
                   onClick={() => props.onUpdateSettings({ locale: "zh-CN" })}
                 >
                   {t(props.locale, "settings.zh")}
                 </button>
                 <button
                   type="button"
-                  class={
-                    settings().locale === "en-US"
-                      ? "segmented-item segmented-item--on"
-                      : "segmented-item"
-                  }
+                  class={settings().locale === "en-US" ? "segmented-item segmented-item--on" : "segmented-item"}
                   onClick={() => props.onUpdateSettings({ locale: "en-US" })}
                 >
                   {t(props.locale, "settings.en")}
@@ -209,11 +182,7 @@ export const Settings: Component<SettingsProps> = (props) => {
                           >
                             {t(props.locale, "settings.setActive")}
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => props.onRemoveCore(core.id)}
-                          >
+                          <Button size="sm" variant="ghost" onClick={() => props.onRemoveCore(core.id)}>
                             <Icon name="trash-2" />
                           </Button>
                         </div>
@@ -241,9 +210,7 @@ export const Settings: Component<SettingsProps> = (props) => {
                 class="input input--mono"
                 value={settings().adbPath}
                 placeholder="adb"
-                onChange={(event) =>
-                  props.onUpdateSettings({ adbPath: event.currentTarget.value.trim() })
-                }
+                onChange={(event) => props.onUpdateSettings({ adbPath: event.currentTarget.value.trim() })}
               />
             </label>
             <div class="form-grid">
@@ -252,13 +219,9 @@ export const Settings: Component<SettingsProps> = (props) => {
                 <select
                   class="input"
                   value={settings().clientType}
-                  onChange={(event) =>
-                    props.onUpdateSettings({ clientType: event.currentTarget.value as ClientType })
-                  }
+                  onChange={(event) => props.onUpdateSettings({ clientType: event.currentTarget.value as ClientType })}
                 >
-                  <For each={clientTypes}>
-                    {(client) => <option value={client}>{client}</option>}
-                  </For>
+                  <For each={clientTypes}>{(client) => <option value={client}>{client}</option>}</For>
                 </select>
               </label>
               <label class="field">
@@ -266,9 +229,7 @@ export const Settings: Component<SettingsProps> = (props) => {
                 <select
                   class="input"
                   value={settings().touchMode}
-                  onChange={(event) =>
-                    props.onUpdateSettings({ touchMode: event.currentTarget.value as TouchMode })
-                  }
+                  onChange={(event) => props.onUpdateSettings({ touchMode: event.currentTarget.value as TouchMode })}
                 >
                   <For each={touchModes}>{(mode) => <option value={mode}>{mode}</option>}</For>
                 </select>
@@ -279,13 +240,9 @@ export const Settings: Component<SettingsProps> = (props) => {
               <select
                 class="input"
                 value={settings().connectionConfig}
-                onChange={(event) =>
-                  props.onUpdateSettings({ connectionConfig: event.currentTarget.value })
-                }
+                onChange={(event) => props.onUpdateSettings({ connectionConfig: event.currentTarget.value })}
               >
-                <For each={connectionProfiles}>
-                  {(profile) => <option value={profile}>{profile}</option>}
-                </For>
+                <For each={connectionProfiles}>{(profile) => <option value={profile}>{profile}</option>}</For>
               </select>
             </label>
           </section>
@@ -359,9 +316,7 @@ export const Settings: Component<SettingsProps> = (props) => {
                 <dd>{__MAAX_BUILD__.effect}</dd>
               </div>
             </dl>
-            <p class="license-note">
-              AGPL-3.0-or-later · MaaCore is licensed separately under AGPL-3.0.
-            </p>
+            <p class="license-note">AGPL-3.0-or-later · MaaCore is licensed separately under AGPL-3.0.</p>
           </section>
 
           <section class="settings-card">

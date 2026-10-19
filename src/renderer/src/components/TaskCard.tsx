@@ -65,8 +65,7 @@ const summaryFor = (task: TaskConfig, locale: Locale): string => {
 
 const optionValue = (option: FieldOption): string | number => option.value;
 
-const sameOption = (left: string | number, right: string | number): boolean =>
-  String(left) === String(right);
+const sameOption = (left: string | number, right: string | number): boolean => String(left) === String(right);
 
 const FieldControl: Component<{
   field: TaskField;
@@ -76,8 +75,7 @@ const FieldControl: Component<{
   onChange: (value: unknown) => void;
 }> = (props) => {
   const label = () => pick(props.locale, props.field.label);
-  const description = () =>
-    props.field.description ? pick(props.locale, props.field.description) : undefined;
+  const description = () => (props.field.description ? pick(props.locale, props.field.description) : undefined);
 
   switch (props.field.kind) {
     case "switch":
@@ -113,9 +111,7 @@ const FieldControl: Component<{
             value={typeof props.value === "string" ? props.value : ""}
             stages={props.stages}
             locale={props.locale}
-            placeholder={
-              props.field.placeholder ? pick(props.locale, props.field.placeholder) : undefined
-            }
+            placeholder={props.field.placeholder ? pick(props.locale, props.field.placeholder) : undefined}
             onChange={props.onChange}
           />
         </label>
@@ -127,9 +123,7 @@ const FieldControl: Component<{
           <input
             class="input"
             value={typeof props.value === "string" ? props.value : ""}
-            placeholder={
-              props.field.placeholder ? pick(props.locale, props.field.placeholder) : undefined
-            }
+            placeholder={props.field.placeholder ? pick(props.locale, props.field.placeholder) : undefined}
             onInput={(event) => props.onChange(event.currentTarget.value)}
           />
         </label>
@@ -137,9 +131,7 @@ const FieldControl: Component<{
     case "select": {
       const options = props.field.options ?? [];
       const current =
-        typeof props.value === "string" || typeof props.value === "number"
-          ? props.value
-          : (options[0]?.value ?? "");
+        typeof props.value === "string" || typeof props.value === "number" ? props.value : (options[0]?.value ?? "");
       return (
         <label class="field" title={description()}>
           <span class="field-label">{label()}</span>
@@ -147,16 +139,12 @@ const FieldControl: Component<{
             class="input"
             value={String(current)}
             onChange={(event) => {
-              const selected = options.find(
-                (option) => String(option.value) === event.currentTarget.value,
-              );
+              const selected = options.find((option) => String(option.value) === event.currentTarget.value);
               props.onChange(selected ? optionValue(selected) : event.currentTarget.value);
             }}
           >
             <For each={options}>
-              {(option) => (
-                <option value={String(option.value)}>{pick(props.locale, option.label)}</option>
-              )}
+              {(option) => <option value={String(option.value)}>{pick(props.locale, option.label)}</option>}
             </For>
           </select>
         </label>
@@ -201,9 +189,7 @@ const FieldControl: Component<{
           <input
             class="input"
             value={Array.isArray(props.value) ? props.value.join(", ") : ""}
-            placeholder={
-              props.field.placeholder ? pick(props.locale, props.field.placeholder) : undefined
-            }
+            placeholder={props.field.placeholder ? pick(props.locale, props.field.placeholder) : undefined}
             onChange={(event) =>
               props.onChange(
                 event.currentTarget.value
@@ -256,9 +242,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
         </span>
         <span class="task-heading">
           <span class="task-title-row">
-            <span class="task-title">
-              {props.task.name || pick(props.locale, definition().name)}
-            </span>
+            <span class="task-title">{props.task.name || pick(props.locale, definition().name)}</span>
             <Show when={props.runTask}>
               {(runTask) => (
                 <span class={`task-state task-state--${runTask().status}`}>
@@ -312,11 +296,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
             </For>
           </div>
           <Show when={advancedFields().length > 0}>
-            <button
-              type="button"
-              class="advanced-toggle"
-              onClick={() => setShowAdvanced((value) => !value)}
-            >
+            <button type="button" class="advanced-toggle" onClick={() => setShowAdvanced((value) => !value)}>
               <Icon name={showAdvanced() ? "chevron-down" : "chevron-right"} />
               {t(props.locale, "tasks.advanced")}
             </button>

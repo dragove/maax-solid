@@ -113,8 +113,7 @@ const init = (request: InitRequest): unknown => {
 
 const createSession = (request: CreateSessionRequest): unknown => {
   const core = requireLibrary();
-  if (sessions.has(request.sessionId))
-    throw new Error(`Session already exists: ${request.sessionId}`);
+  if (sessions.has(request.sessionId)) throw new Error(`Session already exists: ${request.sessionId}`);
   const { handle, callback } = core.create((payload) => {
     if (callbackQueue.length >= 20_000) callbackQueue.shift();
     callbackQueue.push({
@@ -141,12 +140,7 @@ const createSession = (request: CreateSessionRequest): unknown => {
 const connect = (request: ConnectRequest): unknown => {
   const core = requireLibrary();
   const session = requireSession(request.sessionId);
-  const callId = core.asyncConnect(
-    session.handle,
-    request.adbPath,
-    request.address,
-    request.config,
-  );
+  const callId = core.asyncConnect(session.handle, request.adbPath, request.address, request.config);
   if (callId <= 0) throw new Error("AsstAsyncConnect did not return a call id");
   return { callId };
 };
@@ -156,9 +150,7 @@ const appendTask = (request: AppendTaskRequest): unknown => {
   const session = requireSession(request.sessionId);
   const taskId = core.appendTask(session.handle, request.type, JSON.stringify(request.params));
   if (taskId <= 0) {
-    throw new Error(
-      `MaaCore rejected task ${request.type}; check its parameters and resource version.`,
-    );
+    throw new Error(`MaaCore rejected task ${request.type}; check its parameters and resource version.`);
   }
   return { taskId };
 };

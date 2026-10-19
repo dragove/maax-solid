@@ -29,7 +29,7 @@ export class DesktopBridge extends Context.Service<
   }
 >()("maax/DesktopBridge") {}
 
-export class DesktopBridgeError extends Schema.TaggedError<DesktopBridgeError>()(
+export class DesktopBridgeError extends Schema.TaggedError<DesktopBridgeError, { readonly brand: unique symbol }>()(
   "DesktopBridgeError",
   {
     operation: Schema.String,
@@ -84,29 +84,22 @@ export function command<C extends CommandName>(
         }),
     });
 
-    const envelope = yield* Effect.try({
-      try: () => Schema.decodeUnknownSync(IpcEnvelopeSchema)(raw),
-      catch: (cause) =>
-        new DesktopBridgeError({ operation: `${name}/envelope`, reason: String(cause) }),
-    });
+    const envelope = yield* Schema.decodeUnknownEffect(IpcEnvelopeSchema)(raw).pipe(
+      Effect.mapError((cause) => new DesktopBridgeError({ operation: `${name}/envelope`, reason: cause.message })),
+    );
 
     if (!envelope.ok) {
       return yield* new DesktopBridgeError({
         operation: envelope.error.tag,
-        reason: envelope.error.detail
-          ? `${envelope.error.message} (${envelope.error.detail})`
-          : envelope.error.message,
+        reason: envelope.error.detail ? `${envelope.error.message} (${envelope.error.detail})` : envelope.error.message,
       });
     }
 
-    const value = yield* Effect.try({
-      try: () =>
-        Schema.decodeUnknownSync(
-          resultSchemas[name] as unknown as Schema.ConstraintDecoder<unknown>,
-        )(envelope.value),
-      catch: (cause) =>
-        new DesktopBridgeError({ operation: `${name}/result`, reason: String(cause) }),
-    });
+    const value = yield* Schema.decodeUnknownEffect(
+      resultSchemas[name] as unknown as Schema.ConstraintDecoder<unknown>,
+    )(envelope.value).pipe(
+      Effect.mapError((cause) => new DesktopBridgeError({ operation: `${name}/result`, reason: cause.message })),
+    );
     return value as CommandResults[C];
   });
 }

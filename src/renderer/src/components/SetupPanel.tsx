@@ -54,12 +54,7 @@ export const SetupPanel: Component<SetupPanelProps> = (props) => {
                 <strong>{step.title}</strong>
                 <span>{step.hint}</span>
               </span>
-              <Button
-                size="sm"
-                variant={step.done ? "ghost" : "secondary"}
-                disabled={step.done}
-                onClick={step.onClick}
-              >
+              <Button size="sm" variant={step.done ? "ghost" : "secondary"} disabled={step.done} onClick={step.onClick}>
                 {step.done ? t(props.locale, "setup.done") : step.action}
               </Button>
             </li>

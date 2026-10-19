@@ -53,18 +53,12 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
   const asstLoadResource = lib.func("uint8 AsstLoadResource(const char *path)");
   const asstCreateEx = lib.func("void *AsstCreateEx(void *callback, void *arg)");
   const asstDestroy = lib.func("void AsstDestroy(void *handle)");
-  const asstSetInstanceOption = lib.func(
-    "uint8 AsstSetInstanceOption(void *handle, int32 key, const char *value)",
-  );
+  const asstSetInstanceOption = lib.func("uint8 AsstSetInstanceOption(void *handle, int32 key, const char *value)");
   const asstAsyncConnect = lib.func(
     "int32 AsstAsyncConnect(void *handle, const char *adb, const char *address, const char *config, uint8 block)",
   );
-  const asstAppendTask = lib.func(
-    "int32 AsstAppendTask(void *handle, const char *type, const char *params)",
-  );
-  const asstSetTaskParams = lib.func(
-    "uint8 AsstSetTaskParams(void *handle, int32 taskId, const char *params)",
-  );
+  const asstAppendTask = lib.func("int32 AsstAppendTask(void *handle, const char *type, const char *params)");
+  const asstSetTaskParams = lib.func("uint8 AsstSetTaskParams(void *handle, int32 taskId, const char *params)");
   const asstStart = lib.func("uint8 AsstStart(void *handle)");
   const asstStop = lib.func("uint8 AsstStop(void *handle)");
   const asstRunning = lib.func("uint8 AsstRunning(void *handle)");
@@ -74,9 +68,7 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
   const asstGetVersion = lib.func("const char *AsstGetVersion()");
 
   const version = String(asstGetVersion() ?? "unknown");
-  const callbackProto = koffi.proto(
-    "void AsstApiCallback(int32 msg, const char *details_json, void *custom_arg)",
-  );
+  const callbackProto = koffi.proto("void AsstApiCallback(int32 msg, const char *details_json, void *custom_arg)");
 
   const bool = (value: unknown): boolean => Number(value) === 1;
 
@@ -85,8 +77,7 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
     version,
     setUserDir: (userDir) => bool(asstSetUserDir(userDir)),
     loadResource: (resourceRoot) => bool(asstLoadResource(resourceRoot)),
-    loadGlobalResource: (server) =>
-      bool(asstLoadResource(join(root, "resource", "global", server))),
+    loadGlobalResource: (server) => bool(asstLoadResource(join(root, "resource", "global", server))),
     create: (onCallback) => {
       const callback = koffi.register((msg: number, details: string) => {
         try {
@@ -103,8 +94,7 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
       koffi.unregister(callback as never);
     },
     setInstanceOption: (handle, key, value) => bool(asstSetInstanceOption(handle, key, value)),
-    asyncConnect: (handle, adbPath, address, config) =>
-      Number(asstAsyncConnect(handle, adbPath, address, config, 0)),
+    asyncConnect: (handle, adbPath, address, config) => Number(asstAsyncConnect(handle, adbPath, address, config, 0)),
     appendTask: (handle, type, params) => Number(asstAppendTask(handle, type, params)),
     setTaskParams: (handle, taskId, params) => bool(asstSetTaskParams(handle, taskId, params)),
     start: (handle) => bool(asstStart(handle)),
@@ -120,8 +110,7 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
         const written = asstGetImage(handle, buffer, BigInt(size));
         if (written === NULL_SIZE) continue;
         const length = Number(written);
-        if (length <= 0)
-          throw new Error("MaaCore did not return a screenshot (is the device connected?)");
+        if (length <= 0) throw new Error("MaaCore did not return a screenshot (is the device connected?)");
         const png = new Uint8Array(buffer.buffer, buffer.byteOffset, length).slice();
         return { png, ...pngSize(png), durationMs: Date.now() - startedAt };
       }

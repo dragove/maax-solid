@@ -114,11 +114,7 @@ const escapeAttribute = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
 
 const renderNode = (node: IconNode[number]): string => {
-  const [tag, attrs, children] = node as unknown as [
-    string,
-    Record<string, unknown>,
-    IconNode | undefined,
-  ];
+  const [tag, attrs, children] = node as unknown as [string, Record<string, unknown>, IconNode | undefined];
   const attributes = Object.entries(attrs ?? {})
     .map(([key, value]) => {
       const name = key.replaceAll(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);

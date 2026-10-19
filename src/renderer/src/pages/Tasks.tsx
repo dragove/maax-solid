@@ -61,12 +61,9 @@ export const Tasks: Component<TasksProps> = (props) => {
   const connected = () => props.device?.status === "online" || props.device?.status === "running";
   const enabledTasks = () => props.plan?.tasks.filter((task) => task.enabled) ?? [];
   const isRunning = () => props.run?.status === "running" || props.run?.status === "preparing";
-  const completedCount = () =>
-    props.run?.tasks.filter((task) => task.status === "completed").length ?? 0;
+  const completedCount = () => props.run?.tasks.filter((task) => task.status === "completed").length ?? 0;
   const progress = () =>
-    props.run && props.run.tasks.length > 0
-      ? Math.round((completedCount() / props.run.tasks.length) * 100)
-      : 0;
+    props.run && props.run.tasks.length > 0 ? Math.round((completedCount() / props.run.tasks.length) * 100) : 0;
 
   createEffect(
     () => props.logs.length,
@@ -93,11 +90,7 @@ export const Tasks: Component<TasksProps> = (props) => {
           <Show
             when={connected()}
             fallback={
-              <Button
-                variant="secondary"
-                disabled={!props.device || props.busy}
-                onClick={props.onConnect}
-              >
+              <Button variant="secondary" disabled={!props.device || props.busy} onClick={props.onConnect}>
                 <Icon name={props.device?.status === "connecting" ? "loader" : "wifi"} />
                 {props.device?.status === "connecting"
                   ? t(props.locale, "status.connecting")
@@ -135,13 +128,9 @@ export const Tasks: Component<TasksProps> = (props) => {
                 <Icon name="smartphone" />
               </span>
               <div>
-                <strong>
-                  {props.device?.profile.name ?? t(props.locale, "overview.noDevice")}
-                </strong>
+                <strong>{props.device?.profile.name ?? t(props.locale, "overview.noDevice")}</strong>
                 <span class="queue-meta">
-                  {props.device
-                    ? statusText(props.device.status, props.locale)
-                    : t(props.locale, "status.offline")}
+                  {props.device ? statusText(props.device.status, props.locale) : t(props.locale, "status.offline")}
                   <span class="dot-sep">·</span>
                   {enabledTasks().length} {t(props.locale, "tasks.tasksCount")}
                   <Show when={props.saving}>
@@ -154,11 +143,7 @@ export const Tasks: Component<TasksProps> = (props) => {
             <div class="queue-tools">
               <Show when={props.device}>
                 {(device) => (
-                  <StatusPill
-                    status={device().status}
-                    label={statusText(device().status, props.locale)}
-                    compact
-                  />
+                  <StatusPill status={device().status} label={statusText(device().status, props.locale)} compact />
                 )}
               </Show>
               <Button size="sm" variant="ghost" onClick={() => setPaletteOpen((open) => !open)}>
@@ -222,8 +207,7 @@ export const Tasks: Component<TasksProps> = (props) => {
               <For each={props.plan!.tasks} keyed={false}>
                 {(taskAccessor, index) => {
                   const task = () => taskAccessor();
-                  const runTask = () =>
-                    props.run?.tasks.find((item) => item.configId === task().id);
+                  const runTask = () => props.run?.tasks.find((item) => item.configId === task().id);
                   return (
                     <div
                       class="task-slot"
@@ -242,9 +226,7 @@ export const Tasks: Component<TasksProps> = (props) => {
                         expanded={expandedId() === task().id}
                         runTask={runTask()}
                         disabled={isRunning()}
-                        onToggleExpanded={() =>
-                          setExpandedId((current) => (current === task().id ? null : task().id))
-                        }
+                        onToggleExpanded={() => setExpandedId((current) => (current === task().id ? null : task().id))}
                         onEnabledChange={(enabled) => props.onEnabledChange(task().id, enabled)}
                         onParamChange={(key, value) => props.onParamChange(task().id, key, value)}
                         onRemove={() => props.onRemoveTask(task().id)}
@@ -265,20 +247,14 @@ export const Tasks: Component<TasksProps> = (props) => {
             <div class="panel-head">
               <div>
                 <p class="panel-kicker">{t(props.locale, "tasks.live")}</p>
-                <h3>
-                  {props.run
-                    ? t(props.locale, runStatusKey(props.run.status))
-                    : t(props.locale, "tasks.noLogs")}
-                </h3>
+                <h3>{props.run ? t(props.locale, runStatusKey(props.run.status)) : t(props.locale, "tasks.noLogs")}</h3>
               </div>
             </div>
             <Show
               when={props.run}
               fallback={
                 <p class="muted">
-                  {connected()
-                    ? t(props.locale, "tasks.noLogs")
-                    : t(props.locale, "tasks.offlineHint")}
+                  {connected() ? t(props.locale, "tasks.noLogs") : t(props.locale, "tasks.offlineHint")}
                 </p>
               }
             >
@@ -302,9 +278,7 @@ export const Tasks: Component<TasksProps> = (props) => {
                               ? task.name
                               : pick(props.locale, TASK_DEFINITIONS[task.type].name)}
                           </span>
-                          <span class="run-task-state">
-                            {t(props.locale, runTaskStatusKey(task.status))}
-                          </span>
+                          <span class="run-task-state">{t(props.locale, runTaskStatusKey(task.status))}</span>
                         </li>
                       )}
                     </For>
@@ -319,12 +293,7 @@ export const Tasks: Component<TasksProps> = (props) => {
               <div>
                 <h3>{t(props.locale, "tasks.logs")}</h3>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={props.onClearLogs}
-                disabled={props.logs.length === 0}
-              >
+              <Button size="sm" variant="ghost" onClick={props.onClearLogs} disabled={props.logs.length === 0}>
                 <Icon name="trash-2" />
                 {t(props.locale, "tasks.clearLogs")}
               </Button>

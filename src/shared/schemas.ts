@@ -46,14 +46,7 @@ export type Theme = Schema.Schema.Type<typeof ThemeSchema>;
 export const LocaleSchema = Schema.Literals(["zh-CN", "en-US"]);
 export type Locale = Schema.Schema.Type<typeof LocaleSchema>;
 
-export const ClientTypeSchema = Schema.Literals([
-  "Official",
-  "Bilibili",
-  "txwy",
-  "YoStarEN",
-  "YoStarJP",
-  "YoStarKR",
-]);
+export const ClientTypeSchema = Schema.Literals(["Official", "Bilibili", "txwy", "YoStarEN", "YoStarJP", "YoStarKR"]);
 export type ClientType = Schema.Schema.Type<typeof ClientTypeSchema>;
 
 export const TouchModeSchema = Schema.Literals(["minitouch", "maatouch", "adb"]);
@@ -126,7 +119,7 @@ export const CoreInfoSchema = Schema.Struct({
   resourcePath: Schema.NonEmptyString,
   managed: Schema.Boolean,
   status: CoreStatusSchema,
-  sizeBytes: Schema.optional(Schema.Number),
+  sizeBytes: Schema.optional(Schema.Finite),
 });
 export type CoreInfo = Schema.Schema.Type<typeof CoreInfoSchema>;
 
@@ -144,8 +137,8 @@ export const DeviceProfileSchema = Schema.Struct({
   remark: Schema.String,
   uuid: Schema.optional(Schema.String),
   activePlanId: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
-  lastConnectedAt: Schema.optional(Schema.Number),
+  createdAt: Schema.Finite,
+  lastConnectedAt: Schema.optional(Schema.Finite),
 });
 export type DeviceProfile = Schema.Schema.Type<typeof DeviceProfileSchema>;
 
@@ -172,13 +165,7 @@ export const DeviceUpdateSchema = Schema.Struct({
 });
 export type DeviceUpdate = Schema.Schema.Type<typeof DeviceUpdateSchema>;
 
-export const DeviceStatusSchema = Schema.Literals([
-  "offline",
-  "connecting",
-  "online",
-  "running",
-  "error",
-]);
+export const DeviceStatusSchema = Schema.Literals(["offline", "connecting", "online", "running", "error"]);
 export type DeviceStatus = Schema.Schema.Type<typeof DeviceStatusSchema>;
 
 export const ResolutionSchema = Schema.Struct({
@@ -187,9 +174,9 @@ export const ResolutionSchema = Schema.Struct({
 });
 
 export const ScreencapCostSchema = Schema.Struct({
-  min: Schema.Number,
-  avg: Schema.Number,
-  max: Schema.Number,
+  min: Schema.Finite,
+  avg: Schema.Finite,
+  max: Schema.Finite,
 });
 export type ScreencapCost = Schema.Schema.Type<typeof ScreencapCostSchema>;
 export type Resolution = Schema.Schema.Type<typeof ResolutionSchema>;
@@ -208,15 +195,7 @@ export type DeviceView = Schema.Schema.Type<typeof DeviceViewSchema>;
 /* Task plans                                                                 */
 /* -------------------------------------------------------------------------- */
 
-export const TaskTypeSchema = Schema.Literals([
-  "StartUp",
-  "Fight",
-  "Recruit",
-  "Infrast",
-  "Mall",
-  "Award",
-  "CloseDown",
-]);
+export const TaskTypeSchema = Schema.Literals(["StartUp", "Fight", "Recruit", "Infrast", "Mall", "Award", "CloseDown"]);
 export type TaskType = Schema.Schema.Type<typeof TaskTypeSchema>;
 
 export const TaskConfigSchema = Schema.Struct({
@@ -225,7 +204,7 @@ export const TaskConfigSchema = Schema.Struct({
   enabled: Schema.Boolean,
   name: Schema.String,
   params: Schema.Record(Schema.String, Schema.Unknown),
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
 });
 export type TaskConfig = Schema.Schema.Type<typeof TaskConfigSchema>;
 
@@ -234,8 +213,8 @@ export const TaskPlanSchema = Schema.Struct({
   deviceId: Schema.NonEmptyString,
   name: Schema.NonEmptyString,
   tasks: Schema.Array(TaskConfigSchema),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
 });
 export type TaskPlan = Schema.Schema.Type<typeof TaskPlanSchema>;
 
@@ -243,14 +222,7 @@ export type TaskPlan = Schema.Schema.Type<typeof TaskPlanSchema>;
 /* Engine + runs                                                              */
 /* -------------------------------------------------------------------------- */
 
-export const EnginePhaseSchema = Schema.Literals([
-  "idle",
-  "starting",
-  "ready",
-  "running",
-  "crashed",
-  "stopped",
-]);
+export const EnginePhaseSchema = Schema.Literals(["idle", "starting", "ready", "running", "crashed", "stopped"]);
 export type EnginePhase = Schema.Schema.Type<typeof EnginePhaseSchema>;
 
 export const EngineInfoSchema = Schema.Struct({
@@ -267,33 +239,20 @@ export const DEFAULT_ENGINE_INFO: EngineInfo = {
   sessionCount: 0,
 };
 
-export const RunStatusSchema = Schema.Literals([
-  "idle",
-  "preparing",
-  "running",
-  "completed",
-  "stopped",
-  "failed",
-]);
+export const RunStatusSchema = Schema.Literals(["idle", "preparing", "running", "completed", "stopped", "failed"]);
 export type RunStatus = Schema.Schema.Type<typeof RunStatusSchema>;
 
-export const RunTaskStatusSchema = Schema.Literals([
-  "pending",
-  "running",
-  "completed",
-  "stopped",
-  "failed",
-]);
+export const RunTaskStatusSchema = Schema.Literals(["pending", "running", "completed", "stopped", "failed"]);
 export type RunTaskStatus = Schema.Schema.Type<typeof RunTaskStatusSchema>;
 
 export const RunTaskStateSchema = Schema.Struct({
-  taskId: Schema.Number,
+  taskId: Schema.Finite,
   configId: Schema.String,
   type: TaskTypeSchema,
   name: Schema.String,
   status: RunTaskStatusSchema,
-  startedAt: Schema.optional(Schema.Number),
-  endedAt: Schema.optional(Schema.Number),
+  startedAt: Schema.optional(Schema.Finite),
+  endedAt: Schema.optional(Schema.Finite),
   message: Schema.optional(Schema.String),
 });
 export type RunTaskState = Schema.Schema.Type<typeof RunTaskStateSchema>;
@@ -303,10 +262,10 @@ export const RunSnapshotSchema = Schema.Struct({
   deviceId: Schema.NonEmptyString,
   planId: Schema.NonEmptyString,
   status: RunStatusSchema,
-  startedAt: Schema.Number,
-  endedAt: Schema.optional(Schema.Number),
+  startedAt: Schema.Finite,
+  endedAt: Schema.optional(Schema.Finite),
   tasks: Schema.Array(RunTaskStateSchema),
-  currentTaskId: Schema.optional(Schema.Number),
+  currentTaskId: Schema.optional(Schema.Finite),
   message: Schema.optional(Schema.String),
 });
 export type RunSnapshot = Schema.Schema.Type<typeof RunSnapshotSchema>;
@@ -331,7 +290,7 @@ export const CoreCallbackEventSchema = Schema.TaggedStruct("core-callback", {
   msg: Schema.Int,
   payload: Schema.Unknown,
   raw: Schema.String,
-  at: Schema.Number,
+  at: Schema.Finite,
 });
 export type CoreCallbackEvent = Schema.Schema.Type<typeof CoreCallbackEventSchema>;
 
@@ -353,7 +312,7 @@ export const SettingsUpdatedEventSchema = Schema.TaggedStruct("settings-updated"
 export const LogEventSchema = Schema.TaggedStruct("log", {
   level: Schema.Literals(["debug", "info", "warn", "error"]),
   message: Schema.String,
-  at: Schema.Number,
+  at: Schema.Finite,
 });
 export const ToastEventSchema = Schema.TaggedStruct("toast", {
   kind: Schema.Literals(["info", "success", "warning", "error"]),
@@ -362,8 +321,8 @@ export const ToastEventSchema = Schema.TaggedStruct("toast", {
 });
 export const DownloadProgressEventSchema = Schema.TaggedStruct("download-progress", {
   phase: Schema.Literals(["metadata", "downloading", "extracting", "installing", "done", "failed"]),
-  received: Schema.Number,
-  total: Schema.Number,
+  received: Schema.Finite,
+  total: Schema.Finite,
   message: Schema.optional(Schema.String),
 });
 
@@ -417,7 +376,7 @@ export type StageCatalogEntry = Schema.Schema.Type<typeof StageCatalogEntrySchem
 
 export const StageCatalogSchema = Schema.Struct({
   entries: Schema.Array(StageCatalogEntrySchema),
-  updatedAt: Schema.Number,
+  updatedAt: Schema.Finite,
   warning: Schema.optional(Schema.String),
 });
 export type StageCatalog = Schema.Schema.Type<typeof StageCatalogSchema>;
@@ -426,6 +385,6 @@ export const ScreenshotSchema = Schema.Struct({
   png: Schema.Uint8Array,
   width: Schema.Int,
   height: Schema.Int,
-  durationMs: Schema.Number,
+  durationMs: Schema.Finite,
 });
 export type Screenshot = Schema.Schema.Type<typeof ScreenshotSchema>;

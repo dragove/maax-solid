@@ -1,20 +1,25 @@
 import { Schema } from "effect";
 import type { IpcError } from "../shared/schemas";
 
-export class MaaxError extends Schema.TaggedError<MaaxError, { readonly brand: unique symbol }>()(
-  "MaaxError",
-  {
-    message: Schema.String,
-    detail: Schema.optional(Schema.String),
-  },
-) {}
+export class MaaxError extends Schema.TaggedError<MaaxError, { readonly brand: unique symbol }>()("MaaxError", {
+  message: Schema.String,
+  detail: Schema.optional(Schema.String),
+}) {}
+
+/** `cause` is untrusted at every adapter boundary, so format it without throwing. */
+const describeCause = (cause: unknown): string | undefined => {
+  if (cause === undefined) return undefined;
+  if (typeof cause === "string") return cause;
+  if (cause instanceof Error) return cause.message;
+  try {
+    return JSON.stringify(cause) ?? Object.prototype.toString.call(cause);
+  } catch {
+    return Object.prototype.toString.call(cause);
+  }
+};
 
 export const maaxError = (message: string, cause?: unknown): MaaxError =>
-  new MaaxError({
-    message,
-    detail:
-      cause instanceof Error ? cause.message : cause === undefined ? undefined : String(cause),
-  });
+  new MaaxError({ message, detail: describeCause(cause) });
 
 export function describeError(error: unknown): IpcError {
   if (error instanceof MaaxError) {
@@ -25,5 +30,5 @@ export function describeError(error: unknown): IpcError {
     return { tag: error.name || "Error", message: error.message, detail: error.stack };
   }
 
-  return { tag: "Error", message: String(error) };
+  return { tag: "Error", message: describeCause(error) ?? "未知错误" };
 }

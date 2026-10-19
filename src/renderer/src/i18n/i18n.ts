@@ -171,8 +171,7 @@ const zh = {
   "settings.confirmDownload": "下载前确认",
   "settings.developerMode": "显示调试日志",
   "settings.about": "关于",
-  "settings.aboutText":
-    "MAAX 是一个面向 MaaAssistantArknights 的现代桌面客户端，使用 Solid 与 Effect 构建。",
+  "settings.aboutText": "MAAX 是一个面向 MaaAssistantArknights 的现代桌面客户端，使用 Solid 与 Effect 构建。",
   "settings.appVersion": "应用版本",
   "settings.electronVersion": "Electron",
   "settings.nodeVersion": "Node",
@@ -400,8 +399,7 @@ const en: Record<MessageKey, string> = {
   "settings.confirmDownload": "Confirm before downloads",
   "settings.developerMode": "Show debug logs",
   "settings.about": "About",
-  "settings.aboutText":
-    "MAAX is a modern desktop client for MaaAssistantArknights built with Solid and Effect.",
+  "settings.aboutText": "MAAX is a modern desktop client for MaaAssistantArknights built with Solid and Effect.",
   "settings.appVersion": "App version",
   "settings.electronVersion": "Electron",
   "settings.nodeVersion": "Node",

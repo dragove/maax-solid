@@ -19,7 +19,7 @@ const ReleaseSchema = Schema.Struct({
     assets: Schema.Array(
       Schema.Struct({
         name: Schema.String,
-        size: Schema.Number,
+        size: Schema.Finite,
         browser_download_url: Schema.String,
       }),
     ),
@@ -119,167 +119,158 @@ export interface CoreInstallerApi {
   readonly downloadStable: Effect.Effect<CoreInfo | null, MaaxError>;
 }
 
-export class CoreInstaller extends Context.Service<CoreInstaller, CoreInstallerApi>()(
-  "maax/CoreInstaller",
-) {}
+export class CoreInstaller extends Context.Service<CoreInstaller, CoreInstallerApi>()("maax/CoreInstaller") {}
 
-export const CoreInstallerLive: Layer.Layer<
-  CoreInstaller,
-  never,
-  AppPaths | CoreRegistry | EventBus | Settings
-> = Layer.effect(
-  CoreInstaller,
-  Effect.gen(function* () {
-    const paths = yield* AppPaths;
-    const registry = yield* CoreRegistry;
-    const bus = yield* EventBus;
-    const settings = yield* Settings;
+export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | CoreRegistry | EventBus | Settings> =
+  Layer.effect(
+    CoreInstaller,
+    Effect.gen(function* () {
+      const paths = yield* AppPaths;
+      const registry = yield* CoreRegistry;
+      const bus = yield* EventBus;
+      const settings = yield* Settings;
 
-    const progress = (
-      phase: "metadata" | "downloading" | "extracting" | "installing" | "done" | "failed",
-      received: number,
-      total: number,
-      message?: string,
-    ): void => {
-      bus.emit({
-        _tag: "download-progress",
-        phase,
-        received,
-        total,
-        ...(message ? { message } : {}),
-      });
-    };
-
-    const downloadStable: Effect.Effect<CoreInfo | null, MaaxError> = Effect.gen(function* () {
-      const suffix = platformSuffix();
-      if (!suffix) {
-        return yield* Effect.fail(
-          maaxError("当前平台暂不支持一键下载 MaaCore", `${process.platform}/${process.arch}`),
-        );
-      }
-
-      progress("metadata", 0, 0);
-      const releaseUrl =
-        !app.isPackaged && process.env.MAAX_CORE_RELEASE_URL
-          ? process.env.MAAX_CORE_RELEASE_URL
-          : RELEASE_URL;
-      const release = yield* Effect.tryPromise({
-        try: async () => {
-          const response = await fetch(releaseUrl, { signal: AbortSignal.timeout(30_000) });
-          if (!response.ok)
-            throw new Error(`HTTP ${response.status} while reading release metadata`);
-          return Schema.decodeUnknownSync(ReleaseSchema)(await response.json());
-        },
-        catch: (cause) => maaxError("无法获取 MaaCore 版本信息", cause),
-      });
-
-      const asset = release.details.assets.find(
-        (item) => item.name.endsWith(`-${suffix}.tar.gz`) && !item.name.includes("Component"),
-      );
-      if (!asset) return yield* Effect.fail(maaxError(`这个版本没有 ${suffix} 的 tar.gz 包`));
-
-      const window = BrowserWindow.getFocusedWindow();
-      const sizeMegabytes = Math.ceil(asset.size / 1024 / 1024);
-      const autoConfirm = !app.isPackaged && process.env.MAAX_AUTO_CONFIRM_DOWNLOAD === "1";
-      const options = {
-        type: "question" as const,
-        buttons: ["下载并安装", "取消"],
-        defaultId: 0,
-        cancelId: 1,
-        title: "下载 MaaCore",
-        message: `下载 MaaCore ${release.version}？`,
-        detail: `将下载 ${asset.name}（约 ${sizeMegabytes} MB）并解压到 MaaX 的用户数据目录。\n\n来源：${asset.browser_download_url}`,
+      const progress = (
+        phase: "metadata" | "downloading" | "extracting" | "installing" | "done" | "failed",
+        received: number,
+        total: number,
+        message?: string,
+      ): void => {
+        bus.emit({
+          _tag: "download-progress",
+          phase,
+          received,
+          total,
+          ...(message ? { message } : {}),
+        });
       };
-      const confirmation = autoConfirm
-        ? { response: 0 }
-        : window
-          ? yield* Effect.tryPromise({
-              try: () => dialog.showMessageBox(window, options),
-              catch: (cause) => maaxError("确认对话框失败", cause),
-            })
-          : yield* Effect.tryPromise({
-              try: () => dialog.showMessageBox(options),
-              catch: (cause) => maaxError("确认对话框失败", cause),
-            });
-      if (confirmation.response !== 0) return null;
 
-      const safeVersion = release.version.replace(/[^a-zA-Z0-9._-]+/gu, "-");
-      const target = join(paths.coresDir, safeVersion);
-      const alreadyInstalled = yield* Effect.tryPromise({
-        try: async () => {
-          try {
-            await stat(join(target, "libMaaCore.so"));
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        catch: () => maaxError("检查核心目录失败"),
-      });
-      if (alreadyInstalled) {
-        progress("done", asset.size, asset.size);
-        return yield* registry.addLocal(target, "download", true);
-      }
+      const downloadStable: Effect.Effect<CoreInfo | null, MaaxError> = Effect.gen(function* () {
+        const suffix = platformSuffix();
+        if (!suffix) {
+          return yield* maaxError("当前平台暂不支持一键下载 MaaCore", `${process.platform}/${process.arch}`);
+        }
 
-      yield* Effect.tryPromise({
-        try: () => mkdir(paths.coresDir, { recursive: true }),
-        catch: (cause) => maaxError("创建核心目录失败", cause),
-      });
-      const workspace = join(paths.coresDir, `.install-${safeVersion}-${process.pid}`);
-      const archive = join(workspace, asset.name);
-      const extracted = join(workspace, "extracted");
-      yield* Effect.tryPromise({
-        try: () => mkdir(extracted, { recursive: true }),
-        catch: (cause) => maaxError("创建临时目录失败", cause),
-      });
-
-      try {
-        progress("downloading", 0, asset.size);
-        yield* Effect.tryPromise({
-          try: () =>
-            downloadFile(asset.browser_download_url, archive, asset.size, (received, total) => {
-              progress("downloading", received, total);
-            }),
-          catch: (cause) => maaxError("下载 MaaCore 失败", cause),
+        progress("metadata", 0, 0);
+        const releaseUrl =
+          !app.isPackaged && process.env.MAAX_CORE_RELEASE_URL ? process.env.MAAX_CORE_RELEASE_URL : RELEASE_URL;
+        const releaseJson = yield* Effect.tryPromise({
+          try: async (): Promise<unknown> => {
+            const response = await fetch(releaseUrl, { signal: AbortSignal.timeout(30_000) });
+            if (!response.ok) throw new Error(`HTTP ${response.status} while reading release metadata`);
+            return await response.json();
+          },
+          catch: (cause) => maaxError("无法获取 MaaCore 版本信息", cause),
         });
+        const release = yield* Schema.decodeUnknownEffect(ReleaseSchema)(releaseJson).pipe(
+          Effect.mapError((cause) => maaxError("MaaCore 版本信息格式无效", cause)),
+        );
 
-        progress("extracting", asset.size, asset.size);
-        yield* Effect.tryPromise({
-          try: () => extractTarGz(archive, extracted),
-          catch: (cause) => maaxError("解压 MaaCore 失败", cause),
-        });
+        const asset = release.details.assets.find(
+          (item) => item.name.endsWith(`-${suffix}.tar.gz`) && !item.name.includes("Component"),
+        );
+        if (!asset) return yield* maaxError(`这个版本没有 ${suffix} 的 tar.gz 包`);
 
-        const root = yield* Effect.tryPromise({
-          try: () => findExtractedRoot(extracted),
-          catch: (cause) => maaxError("找不到解压后的 MaaCore", cause),
-        });
+        const window = BrowserWindow.getFocusedWindow();
+        const sizeMegabytes = Math.ceil(asset.size / 1024 / 1024);
+        const autoConfirm = !app.isPackaged && process.env.MAAX_AUTO_CONFIRM_DOWNLOAD === "1";
+        const options = {
+          type: "question" as const,
+          buttons: ["下载并安装", "取消"],
+          defaultId: 0,
+          cancelId: 1,
+          title: "下载 MaaCore",
+          message: `下载 MaaCore ${release.version}？`,
+          detail: `将下载 ${asset.name}（约 ${sizeMegabytes} MB）并解压到 MaaX 的用户数据目录。\n\n来源：${asset.browser_download_url}`,
+        };
+        const confirmation = autoConfirm
+          ? { response: 0 }
+          : window
+            ? yield* Effect.tryPromise({
+                try: () => dialog.showMessageBox(window, options),
+                catch: (cause) => maaxError("确认对话框失败", cause),
+              })
+            : yield* Effect.tryPromise({
+                try: () => dialog.showMessageBox(options),
+                catch: (cause) => maaxError("确认对话框失败", cause),
+              });
+        if (confirmation.response !== 0) return null;
 
-        progress("installing", asset.size, asset.size);
-        yield* Effect.tryPromise({
+        const safeVersion = release.version.replace(/[^a-zA-Z0-9._-]+/gu, "-");
+        const target = join(paths.coresDir, safeVersion);
+        const alreadyInstalled = yield* Effect.tryPromise({
           try: async () => {
-            if (root === extracted) {
-              await cp(root, target, { recursive: true, force: false, errorOnExist: true });
-            } else {
-              await rename(root, target);
+            try {
+              await stat(join(target, "libMaaCore.so"));
+              return true;
+            } catch {
+              return false;
             }
           },
-          catch: (cause) => maaxError("安装 MaaCore 失败", cause),
+          catch: () => maaxError("检查核心目录失败"),
+        });
+        if (alreadyInstalled) {
+          progress("done", asset.size, asset.size);
+          return yield* registry.addLocal(target, "download", true);
+        }
+
+        yield* Effect.tryPromise({
+          try: () => mkdir(paths.coresDir, { recursive: true }),
+          catch: (cause) => maaxError("创建核心目录失败", cause),
+        });
+        const workspace = join(paths.coresDir, `.install-${safeVersion}-${process.pid}`);
+        const archive = join(workspace, asset.name);
+        const extracted = join(workspace, "extracted");
+        yield* Effect.tryPromise({
+          try: () => mkdir(extracted, { recursive: true }),
+          catch: (cause) => maaxError("创建临时目录失败", cause),
         });
 
-        const core = yield* registry.addLocal(target, "download", true);
-        const currentSettings = yield* settings.get;
-        if (!currentSettings.activeCoreId) {
-          yield* settings.update({ activeCoreId: core.id });
-        }
-        progress("done", asset.size, asset.size);
-        return core;
-      } finally {
-        yield* Effect.promise(() =>
-          rm(workspace, { recursive: true, force: true }).catch(() => undefined),
-        );
-      }
-    });
+        try {
+          progress("downloading", 0, asset.size);
+          yield* Effect.tryPromise({
+            try: () =>
+              downloadFile(asset.browser_download_url, archive, asset.size, (received, total) => {
+                progress("downloading", received, total);
+              }),
+            catch: (cause) => maaxError("下载 MaaCore 失败", cause),
+          });
 
-    return { downloadStable };
-  }),
-);
+          progress("extracting", asset.size, asset.size);
+          yield* Effect.tryPromise({
+            try: () => extractTarGz(archive, extracted),
+            catch: (cause) => maaxError("解压 MaaCore 失败", cause),
+          });
+
+          const root = yield* Effect.tryPromise({
+            try: () => findExtractedRoot(extracted),
+            catch: (cause) => maaxError("找不到解压后的 MaaCore", cause),
+          });
+
+          progress("installing", asset.size, asset.size);
+          yield* Effect.tryPromise({
+            try: async () => {
+              if (root === extracted) {
+                await cp(root, target, { recursive: true, force: false, errorOnExist: true });
+              } else {
+                await rename(root, target);
+              }
+            },
+            catch: (cause) => maaxError("安装 MaaCore 失败", cause),
+          });
+
+          const core = yield* registry.addLocal(target, "download", true);
+          const currentSettings = yield* settings.get;
+          if (!currentSettings.activeCoreId) {
+            yield* settings.update({ activeCoreId: core.id });
+          }
+          progress("done", asset.size, asset.size);
+          return core;
+        } finally {
+          yield* Effect.promise(() => rm(workspace, { recursive: true, force: true }).catch(() => undefined));
+        }
+      });
+
+      return { downloadStable };
+    }),
+  );

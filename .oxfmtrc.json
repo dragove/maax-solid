@@ -1,13 +1,6 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "printWidth": 100,
+  "printWidth": 120,
   "trailingComma": "all",
-  "ignorePatterns": [
-    "dist/**",
-    "out/**",
-    "docs/**",
-    "build/icon.png",
-    "build/icon.svg",
-    "pnpm-lock.yaml"
-  ]
+  "ignorePatterns": ["dist/**", "out/**", "docs/**", "build/icon.png", "build/icon.svg", "pnpm-lock.yaml"]
 }

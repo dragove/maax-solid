@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 /** Read JSON with a schema; corrupt or missing files fall back gracefully. */
 export const readJson = <A>(
   path: string,
-  schema: Schema.ConstraintDecoder<unknown>,
+  schema: Schema.ConstraintDecoder<A>,
   fallback: A,
 ): Effect.Effect<A, never, FileSystem> =>
   Effect.gen(function* () {
@@ -16,12 +16,12 @@ export const readJson = <A>(
     const text = yield* fs.readFileString(path).pipe(Effect.orElseSucceed(() => undefined));
     if (text === undefined) return fallback;
 
-    try {
-      const decode = Schema.decodeUnknownSync(schema);
-      return decode(JSON.parse(text)) as A;
-    } catch {
-      return fallback;
-    }
+    const parsed = yield* Effect.try(() => JSON.parse(text) as unknown).pipe(Effect.orElseSucceed(() => undefined));
+    if (parsed === undefined) return fallback;
+
+    // `ConstraintDecoder` decodes from `unknown`, so the input is already the
+    // schema's encoded type; decoding failures fall back instead of throwing.
+    return yield* Schema.decodeEffect(schema)(parsed).pipe(Effect.orElseSucceed(() => fallback));
   });
 
 /** Write JSON through a temporary sibling file, then rename atomically. */
@@ -29,9 +29,7 @@ export const writeJson = <A>(path: string, value: A): Effect.Effect<void, never,
   Effect.gen(function* () {
     const fs = yield* FileSystem;
     const directory = dirname(path);
-    yield* fs
-      .makeDirectory(directory, { recursive: true })
-      .pipe(Effect.orElseSucceed(() => undefined));
+    yield* fs.makeDirectory(directory, { recursive: true }).pipe(Effect.orElseSucceed(() => undefined));
     const text = JSON.stringify(value, null, 2);
     const temp = `${path}.${process.pid}.tmp`;
     yield* fs.writeFileString(temp, text).pipe(Effect.orElseSucceed(() => undefined));

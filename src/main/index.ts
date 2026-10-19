@@ -91,9 +91,7 @@ async function createWindow(): Promise<void> {
 
   if (isDevelopment) {
     window.webContents.on("console-message", (event) => {
-      console.log(
-        `[renderer:${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`,
-      );
+      console.log(`[renderer:${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`);
     });
   }
 
@@ -151,9 +149,7 @@ if (!hasSingleInstanceLock) {
       runtime = makeRuntime();
       registerIpcHandlers(runtime, () => mainWindow);
 
-      session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
-        callback(false),
-      );
+      session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
       session.defaultSession.setPermissionCheckHandler(() => false);
 
       await createWindow();
