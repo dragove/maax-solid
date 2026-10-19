@@ -27,7 +27,6 @@
     "@effect/platform-node": "4.0.5",
     "@effect/tsgo": "0.53.4",
     "@effect/vitest": "4.0.5",
-    "@kobalte/core": "2.0.0-alpha.3",
     "@solidjs/vite-plugin": "3.0.0-next.50",
     "@solidjs/web": "2.0.0-rc.15",
     "@types/node": "26.6.5",
