@@ -63,11 +63,11 @@ async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
     width: 1400,
     height: 940,
-    minWidth: 1040,
-    minHeight: 720,
+    minWidth: 960,
+    minHeight: 640,
     show: false,
     title: "Maax",
-    backgroundColor: "#07090e",
+    backgroundColor: "#1b1b1b",
     autoHideMenuBar: true,
     ...(process.platform === "linux" ? { icon: appIcon } : {}),
     webPreferences: {
@@ -82,10 +82,6 @@ async function createWindow(): Promise<void> {
   });
 
   mainWindow = window;
-
-  window.once("ready-to-show", () => {
-    window.show();
-  });
 
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
@@ -108,6 +104,12 @@ async function createWindow(): Promise<void> {
   } else {
     await window.loadFile(join(__dirname, "../renderer/index.html"));
   }
+
+  // Showing on did-finish-load instead of ready-to-show removes a compositor
+  // round trip: hidden windows throttle frame production, so ready-to-show can
+  // lag the first paint by >100ms on Wayland. The window background already
+  // matches the app shell, so there is no white flash.
+  window.show();
 }
 
 async function shutdown(): Promise<void> {

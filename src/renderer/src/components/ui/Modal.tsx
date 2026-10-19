@@ -29,7 +29,6 @@ export const Modal: Component<ModalProps> = (props) => (
       >
         <header class="modal-head">
           <div>
-            <p class="eyebrow">MAAX</p>
             <h2>{props.title}</h2>
             <Show when={props.description}>
               {(description) => <p class="modal-description">{description()}</p>}

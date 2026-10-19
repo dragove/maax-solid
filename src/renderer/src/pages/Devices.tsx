@@ -52,10 +52,6 @@ export const Devices: Component<DevicesProps> = (props) => {
     <div class="page page--devices">
       <header class="page-head">
         <div>
-          <p class="eyebrow">
-            <span class="eyebrow-line" />
-            DEVICES / ADB
-          </p>
           <h1>{t(props.locale, "devices.title")}</h1>
           <p class="page-subtitle">{t(props.locale, "devices.subtitle")}</p>
         </div>

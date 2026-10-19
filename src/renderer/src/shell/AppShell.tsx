@@ -130,8 +130,6 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const activeCore = createMemo(
     () => data().cores.find((core) => core.id === data().settings.activeCoreId) ?? data().cores[0],
   );
-  const connected = () =>
-    selectedDevice()?.status === "online" || selectedDevice()?.status === "running";
   const deviceLogs = createMemo(() => {
     const id = effectiveDeviceId();
     if (!id) return logs();
@@ -555,7 +553,6 @@ export const AppShell: Component<AppShellProps> = (props) => {
           </span>
           <span class="brand-lockup">
             <strong>{tr("app.name")}</strong>
-            <small>{tr("app.tagline")}</small>
           </span>
         </div>
 
@@ -575,32 +572,23 @@ export const AppShell: Component<AppShellProps> = (props) => {
         </nav>
 
         <div class="sidebar-foot">
-          <div class="core-status">
-            <span class={`core-status-orb core-status-orb--${activeCore()?.status ?? "missing"}`} />
+          <button type="button" class="core-status" onClick={() => setView("settings")}>
             <div>
               <span class="mono-label">MaaCore</span>
               <strong>{activeCore()?.version ?? tr("overview.noCore")}</strong>
             </div>
             <span class="engine-mini">{tr(enginePhaseKey(data().engine.phase))}</span>
-          </div>
-          <div class="sidebar-version">
-            <span>v{data().runtime.app.version}</span>
-            <span>·</span>
-            <span>AGPL</span>
-          </div>
+          </button>
         </div>
       </aside>
 
       <div class="shell-main">
         <header class="topbar">
           <div class="topbar-crumb">
-            <span class="mono-label">MAAX</span>
-            <span class="crumb-slash">/</span>
             <span>{tr(NAV.find((item) => item.view === view())?.key ?? "nav.overview")}</span>
           </div>
           <div class="topbar-actions">
             <button type="button" class="device-pill" onClick={() => setView("devices")}>
-              <span class={`connection-dot ${connected() ? "is-online" : ""}`} />
               <span>{selectedDevice()?.profile.name ?? tr("overview.noDevice")}</span>
               <StatusPill
                 status={selectedDevice()?.status ?? "offline"}
@@ -608,13 +596,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
                 compact
               />
             </button>
-            <button type="button" class="engine-pill" onClick={() => setView("settings")}>
-              <Icon name="cpu" />
-              <span>{tr(enginePhaseKey(data().engine.phase))}</span>
-            </button>
             <button
               type="button"
-              class="icon-button theme-button"
+              class="icon-button"
               onClick={() => void cycleTheme()}
               title={tr("settings.theme")}
             >

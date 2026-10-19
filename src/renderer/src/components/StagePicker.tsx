@@ -18,7 +18,10 @@ interface StageGroup {
 
 export const StagePicker: Component<StagePickerProps> = (props) => {
   const [open, setOpen] = createSignal(false);
+  const [dropUp, setDropUp] = createSignal(false);
+  const [menuMax, setMenuMax] = createSignal(300);
   const [query, setQuery] = createSignal<string | null>(null);
+  let inputEl: HTMLInputElement | undefined;
   let closeTimer: number | undefined;
 
   const groups = createMemo<ReadonlyArray<StageGroup>>(() => {
@@ -50,6 +53,32 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
     closeTimer = undefined;
   };
 
+  // Measure against the scrolling list so the menu cannot be clipped by it.
+  const boundaryOf = (element: HTMLElement): { top: number; bottom: number } => {
+    let node = element.parentElement;
+    while (node) {
+      if (/(auto|scroll)/u.test(getComputedStyle(node).overflowY)) {
+        const box = node.getBoundingClientRect();
+        return { top: box.top, bottom: box.bottom };
+      }
+      node = node.parentElement;
+    }
+    return { top: 0, bottom: window.innerHeight };
+  };
+
+  const openMenu = (): void => {
+    if (inputEl) {
+      const rect = inputEl.getBoundingClientRect();
+      const boundary = boundaryOf(inputEl);
+      const below = boundary.bottom - rect.bottom - 8;
+      const above = rect.top - boundary.top - 8;
+      const up = below < 320 && above > below;
+      setDropUp(up);
+      setMenuMax(Math.max(160, Math.min(300, up ? above : below)));
+    }
+    setOpen(true);
+  };
+
   const select = (value: string): void => {
     cancelClose();
     setQuery(null);
@@ -67,15 +96,18 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
           placeholder={props.placeholder}
           autocomplete="off"
           spellcheck={false}
+          ref={(element) => {
+            inputEl = element;
+          }}
           onFocus={() => {
             cancelClose();
             setQuery("");
-            setOpen(true);
+            openMenu();
           }}
           onClick={() => {
             cancelClose();
             setQuery("");
-            setOpen(true);
+            openMenu();
           }}
           onBlur={() => {
             setQuery(null);
@@ -84,7 +116,7 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
           onInput={(event) => {
             cancelClose();
             setQuery(event.currentTarget.value);
-            setOpen(true);
+            openMenu();
             props.onChange(event.currentTarget.value);
           }}
           onKeyDown={(event) => {
@@ -103,14 +135,20 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
           onClick={() => {
             cancelClose();
             setQuery("");
-            setOpen((value) => !value);
+            if (open()) setOpen(false);
+            else openMenu();
           }}
         >
           <Icon name={open() ? "chevron-down" : "chevron-right"} />
         </button>
       </div>
       <Show when={open()}>
-        <div class="stage-menu" role="listbox" onMouseDown={(event) => event.preventDefault()}>
+        <div
+          class={dropUp() ? "stage-menu stage-menu--up" : "stage-menu"}
+          style={{ "max-height": `${menuMax()}px` }}
+          role="listbox"
+          onMouseDown={(event) => event.preventDefault()}
+        >
           <Show
             when={groups().length > 0}
             fallback={<p class="stage-empty">{t(props.locale, "common.noData")}</p>}

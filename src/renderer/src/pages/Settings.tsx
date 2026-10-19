@@ -68,10 +68,6 @@ export const Settings: Component<SettingsProps> = (props) => {
     <div class="page page--settings">
       <header class="page-head">
         <div>
-          <p class="eyebrow">
-            <span class="eyebrow-line" />
-            SETTINGS / LOCAL
-          </p>
           <h1>{t(props.locale, "settings.title")}</h1>
           <p class="page-subtitle">{t(props.locale, "settings.subtitle")}</p>
         </div>
@@ -189,9 +185,6 @@ export const Settings: Component<SettingsProps> = (props) => {
                       (!props.data.settings.activeCoreId && props.data.cores[0]?.id === core.id);
                     return (
                       <li class={active() ? "core-row core-row--active" : "core-row"}>
-                        <span
-                          class={core.status === "ready" ? "core-orb core-orb--ready" : "core-orb"}
-                        />
                         <div class="core-main">
                           <div class="core-title">
                             <strong>{core.version}</strong>
@@ -307,32 +300,34 @@ export const Settings: Component<SettingsProps> = (props) => {
                 <p>{t(props.locale, "settings.notifications")}</p>
               </div>
             </header>
-            <div class="switch-row">
-              <span>{t(props.locale, "settings.notifications")}</span>
-              <Switch
-                checked={settings().notifyOnComplete}
-                onChange={(value) => props.onUpdateSettings({ notifyOnComplete: value })}
-              />
-            </div>
-            <div class="switch-row">
-              <span>{t(props.locale, "settings.confirmDownload")}</span>
-              <Switch
-                checked={settings().confirmBeforeDownload}
-                onChange={(value) => props.onUpdateSettings({ confirmBeforeDownload: value })}
-              />
-            </div>
-            <div class="switch-row">
-              <span>{t(props.locale, "settings.developerMode")}</span>
-              <Switch
-                checked={settings().developerMode}
-                onChange={(value) => props.onUpdateSettings({ developerMode: value })}
-              />
+            <div class="switch-grid">
+              <div class="switch-row">
+                <span>{t(props.locale, "settings.notifications")}</span>
+                <Switch
+                  checked={settings().notifyOnComplete}
+                  onChange={(value) => props.onUpdateSettings({ notifyOnComplete: value })}
+                />
+              </div>
+              <div class="switch-row">
+                <span>{t(props.locale, "settings.confirmDownload")}</span>
+                <Switch
+                  checked={settings().confirmBeforeDownload}
+                  onChange={(value) => props.onUpdateSettings({ confirmBeforeDownload: value })}
+                />
+              </div>
+              <div class="switch-row">
+                <span>{t(props.locale, "settings.developerMode")}</span>
+                <Switch
+                  checked={settings().developerMode}
+                  onChange={(value) => props.onUpdateSettings({ developerMode: value })}
+                />
+              </div>
             </div>
           </section>
         </div>
 
         <aside class="settings-column settings-column--side">
-          <section class="settings-card about-card">
+          <section class="settings-card">
             <header class="settings-card-head">
               <span class="settings-icon">
                 <Icon name="info" />

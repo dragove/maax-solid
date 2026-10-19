@@ -23,7 +23,6 @@ const BootScreen: Component = () => (
       <span class="boot-mark">
         <span>M</span>
       </span>
-      <p class="eyebrow">MAAX / DESKTOP</p>
       <h1 class="boot-title">Starting the workbench</h1>
       <div class="boot-progress" aria-hidden="true">
         <span />
@@ -45,7 +44,6 @@ const FatalScreen: Component<{ error: unknown; onRetry: () => void }> = (props) 
           <small>Runtime failure</small>
         </span>
       </div>
-      <p class="eyebrow">BOOT / FAILED</p>
       <h1>The workbench could not start.</h1>
       <p class="fatal-message">{describeError(props.error)}</p>
       <button class="btn btn--primary btn--md" type="button" onClick={props.onRetry}>

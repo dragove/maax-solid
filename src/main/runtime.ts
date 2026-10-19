@@ -1,4 +1,4 @@
-import { layer as NodeServicesLive } from "@effect/platform-node/NodeServices";
+import { layer as NodeFileSystemLive } from "@effect/platform-node/NodeFileSystem";
 import { Layer, ManagedRuntime } from "effect";
 import { ApplicationLive, type Application } from "./services/application";
 import { CoreRegistryLive } from "./services/core-registry";
@@ -11,13 +11,17 @@ import { EventBus, EventBusLive } from "./events";
 /**
  * Layer graph for the Electron main process. Native/Electron APIs stay at the
  * edges; everything below is ordinary Effect code with typed errors.
+ *
+ * Only the Node services the app actually consumes are provided: the aggregate
+ * NodeServices layer also builds child-process, crypto, stdio and terminal
+ * services, which cost startup time and bundle size here.
  */
 const CoreInstallerWithDeps = CoreInstallerLive.pipe(
   Layer.provideMerge(SettingsLive),
   Layer.provideMerge(CoreRegistryLive),
   Layer.provideMerge(EventBusLive),
   Layer.provideMerge(AppPathsLive),
-  Layer.provideMerge(NodeServicesLive),
+  Layer.provideMerge(NodeFileSystemLive),
 );
 
 const AppLive = ApplicationLive.pipe(
@@ -27,7 +31,7 @@ const AppLive = ApplicationLive.pipe(
   Layer.provideMerge(CoreInstallerWithDeps),
   Layer.provideMerge(EventBusLive),
   Layer.provideMerge(AppPathsLive),
-  Layer.provideMerge(NodeServicesLive),
+  Layer.provideMerge(NodeFileSystemLive),
 );
 
 export type AppRuntime = ManagedRuntime.ManagedRuntime<Application | EventBus, never>;

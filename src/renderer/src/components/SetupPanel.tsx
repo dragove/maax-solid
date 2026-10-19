@@ -22,7 +22,6 @@ export const SetupPanel: Component<SetupPanelProps> = (props) => {
       done: props.hasCore,
       action: t(props.locale, "setup.import"),
       onClick: props.onImportCore,
-      icon: "hard-drive",
     },
     {
       title: t(props.locale, "setup.step2"),
@@ -30,7 +29,6 @@ export const SetupPanel: Component<SetupPanelProps> = (props) => {
       done: props.hasDevice,
       action: t(props.locale, "setup.addDevice"),
       onClick: props.onAddDevice,
-      icon: "smartphone",
     },
     {
       title: t(props.locale, "setup.step3"),
@@ -38,14 +36,12 @@ export const SetupPanel: Component<SetupPanelProps> = (props) => {
       done: props.connected,
       action: t(props.locale, "setup.connect"),
       onClick: props.onConnect,
-      icon: "play",
     },
   ];
 
   return (
     <section class="setup-panel">
       <div class="setup-head">
-        <p class="eyebrow">FIRST RUN</p>
         <h2>{t(props.locale, "setup.title")}</h2>
         <p>{t(props.locale, "setup.subtitle")}</p>
       </div>
@@ -54,16 +50,13 @@ export const SetupPanel: Component<SetupPanelProps> = (props) => {
           {(step, index) => (
             <li class={step.done ? "setup-step setup-step--done" : "setup-step"}>
               <span class="setup-index">{step.done ? <Icon name="check" /> : index() + 1}</span>
-              <span class="setup-icon">
-                <Icon name={step.icon} />
-              </span>
               <span class="setup-copy">
                 <strong>{step.title}</strong>
                 <span>{step.hint}</span>
               </span>
               <Button
                 size="sm"
-                variant={step.done ? "ghost" : "primary"}
+                variant={step.done ? "ghost" : "secondary"}
                 disabled={step.done}
                 onClick={step.onClick}
               >

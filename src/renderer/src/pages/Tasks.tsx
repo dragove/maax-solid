@@ -86,10 +86,6 @@ export const Tasks: Component<TasksProps> = (props) => {
     <div class="page page--tasks">
       <header class="page-head">
         <div>
-          <p class="eyebrow">
-            <span class="eyebrow-line" />
-            QUEUE / {props.plan?.name ?? "—"}
-          </p>
           <h1>{t(props.locale, "tasks.title")}</h1>
           <p class="page-subtitle">{t(props.locale, "tasks.subtitle")}</p>
         </div>
@@ -275,7 +271,6 @@ export const Tasks: Component<TasksProps> = (props) => {
                     : t(props.locale, "tasks.noLogs")}
                 </h3>
               </div>
-              <span class={`run-orb run-orb--${props.run?.status ?? "idle"}`} />
             </div>
             <Show
               when={props.run}
@@ -302,7 +297,6 @@ export const Tasks: Component<TasksProps> = (props) => {
                     <For each={run().tasks}>
                       {(task) => (
                         <li class={`run-task run-task--${task.status}`}>
-                          <span class="run-task-dot" />
                           <span class="run-task-name">
                             {task.name && task.name !== task.type
                               ? task.name
@@ -323,8 +317,7 @@ export const Tasks: Component<TasksProps> = (props) => {
           <section class="panel log-panel">
             <div class="panel-head">
               <div>
-                <p class="panel-kicker">{t(props.locale, "tasks.logs")}</p>
-                <h3>{t(props.locale, "overview.activity")}</h3>
+                <h3>{t(props.locale, "tasks.logs")}</h3>
               </div>
               <Button
                 size="sm"
