@@ -1443,6 +1443,7 @@ select.input {
   display: flex;
   align-items: flex-start;
   gap: 9px;
+  min-width: 0;
   padding: 10px;
   text-align: left;
   background: var(--inset);
@@ -1471,6 +1472,12 @@ select.input {
 
 .palette-icon .icon {
   font-size: 15px;
+}
+
+/* The text column must be allowed to shrink below its content width, otherwise
+   the non-wrapping description pushes the grid track wider than the palette. */
+.palette-item > span:last-child {
+  min-width: 0;
 }
 
 .palette-item strong {
