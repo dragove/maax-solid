@@ -27,6 +27,8 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
 - **`<For>` 默认按对象引用 key**。位置型列表若原地编辑，用 `keyed={false}`；该模式给 item accessor 和普通 number 索引，不要写 `index()`。否则更新会重建行并丢失输入焦点。
 - **组件体只运行一次**。不要把 `props.value` 缓存进普通常量；多选状态、当前选项等必须经 accessor/memo 读取，否则数据已保存但视觉状态不更新。
 - **动态原生 `<select>`** 不要只绑定静态 `value`；用响应式 current 比较 `<option selected={...}>`，避免选项挂载前设置 value 导致显示错误。
+- **Solid dev 诊断即缺陷**。`pnpm dev` 控制台不允许残留 `STRICT_READ_UNTRACKED` / `PENDING_ASYNC_*`：组件体和 `createEffect` 的 apply 段都不是追踪作用域，一次性快照写 `untrack(() => props.x)`，其余读值移入 JSX / memo / compute。诊断报出的名字可能是 props getter 穿透到的父信号，不一定是当前 prop。
+- **改 `styles.css` 后核对类名**。组件用到的每个类都要在样式表里有定义：整块样式被删不会编译报错，只会表现为控件错位或菜单变内联块。
 - **Effect 4** 使用 `Effect.catch`，不是 v3 的 `catchAll`；Service 方法内部提供依赖，对外保持 `R = never`。
 - **原生库宿主**必须放在 utilityProcess/worker，不能在 Electron 主进程加载；callback 只入队，禁止生命周期调用、阻塞 FFI 或跨线程回调内同步工作。
 - **回调消息 ID 不等于日志级别**。在统一 formatter 中按 payload 语义分级：预期分支退出用 debug/info，可操作失败才用 error，并优先显示 `first`/`subtask`/`taskchain`，不要输出 `unknown`。

@@ -1,4 +1,4 @@
-import { For, Show, createSignal, type Component } from "solid-js";
+import { For, Show, createSignal, untrack, type Component } from "solid-js";
 import type { Locale, RunTaskState, StageCatalogEntry, TaskConfig } from "../../../shared/schemas";
 import type { FieldOption, TaskField } from "../../../shared/tasks";
 import { TASK_DEFINITIONS } from "../../../shared/tasks";
@@ -77,7 +77,9 @@ const FieldControl: Component<{
   const label = () => pick(props.locale, props.field.label);
   const description = () => (props.field.description ? pick(props.locale, props.field.description) : undefined);
 
-  switch (props.field.kind) {
+  // A task field keeps its kind for the row's lifetime, so the branch is picked
+  // once; everything inside a branch still reads its props reactively.
+  switch (untrack(() => props.field.kind)) {
     case "switch":
       return (
         <div class="field field--switch" title={description()}>
@@ -129,21 +131,21 @@ const FieldControl: Component<{
         </label>
       );
     case "select": {
-      const options = props.field.options ?? [];
-      const current =
-        typeof props.value === "string" || typeof props.value === "number" ? props.value : (options[0]?.value ?? "");
+      const options = () => props.field.options ?? [];
+      const current = () =>
+        typeof props.value === "string" || typeof props.value === "number" ? props.value : (options()[0]?.value ?? "");
       return (
         <label class="field" title={description()}>
           <span class="field-label">{label()}</span>
           <select
             class="input"
-            value={String(current)}
+            value={String(current())}
             onChange={(event) => {
-              const selected = options.find((option) => String(option.value) === event.currentTarget.value);
+              const selected = options().find((option) => String(option.value) === event.currentTarget.value);
               props.onChange(selected ? optionValue(selected) : event.currentTarget.value);
             }}
           >
-            <For each={options}>
+            <For each={options()}>
               {(option) => <option value={String(option.value)}>{pick(props.locale, option.label)}</option>}
             </For>
           </select>
@@ -153,12 +155,12 @@ const FieldControl: Component<{
     case "multi-select": {
       const selected = (): Array<string | number> =>
         Array.isArray(props.value) ? (props.value as Array<string | number>) : [];
-      const options = props.field.options ?? [];
+      const options = () => props.field.options ?? [];
       return (
         <div class="field field--wide" title={description()}>
           <span class="field-label">{label()}</span>
           <div class="chip-row">
-            <For each={options}>
+            <For each={options()}>
               {(option) => {
                 const on = () => selected().some((value) => sameOption(value, option.value));
                 return (

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, type Component } from "solid-js";
+import { createEffect, createSignal, untrack, type Component } from "solid-js";
 import type { AppSettings, ClientType, Locale } from "../../../shared/schemas";
 import type { DeviceDraft } from "../../../shared/schemas";
 import { t } from "../i18n/i18n";
@@ -25,18 +25,25 @@ export const AddDeviceDialog: Component<AddDeviceDialogProps> = (props) => {
   const [clientType, setClientType] = createSignal<ClientType>("Official");
   const [remark, setRemark] = createSignal("");
   const [error, setError] = createSignal("");
+  let addressEl: HTMLInputElement | undefined;
 
+  // Seed the form when the dialog opens: `open` is the tracked trigger, and the
+  // settings are deliberately a snapshot taken at that moment.
   createEffect(
     () => props.open,
     (open) => {
       if (!open) return;
+      const settings = untrack(() => props.settings);
       setName("");
       setAddress("");
       setAdbPath("");
-      setConfig(props.settings.connectionConfig);
-      setClientType(props.settings.clientType);
+      setConfig(settings.connectionConfig);
+      setClientType(settings.clientType);
       setRemark("");
       setError("");
+      // Focus explicitly: an `autofocus` attribute is rejected by Chromium when the
+      // launcher button still holds focus ("Autofocus processing was blocked").
+      addressEl?.focus();
     },
   );
 
@@ -89,7 +96,9 @@ export const AddDeviceDialog: Component<AddDeviceDialogProps> = (props) => {
             class="input input--mono"
             value={address()}
             placeholder={t(props.locale, "devices.addressPlaceholder")}
-            autofocus
+            ref={(element) => {
+              addressEl = element;
+            }}
             onInput={(event) => setAddress(event.currentTarget.value)}
           />
         </label>

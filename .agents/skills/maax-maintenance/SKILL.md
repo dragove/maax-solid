@@ -66,6 +66,72 @@ Use accessors or memos for anything that can change: chip state, selected
 options, derived labels, and handlers that read the latest value. A summary
 that updates while the control next to it does not is the usual signature.
 
+### Untracked reads and effect callbacks
+
+`STRICT_READ_UNTRACKED` means the read happened in a scope that will never
+re-run: a component body, an effect's **apply** phase
+(`createEffect(compute, apply)`), or another imperative callback. `compute`
+and JSX are tracked; `apply` is not.
+
+The report names the signal that was read, which is not always the prop you
+touched. A prop getter such as `settings={data().settings}` is
+`() => data().settings`, so reading `props.settings` in an apply reports
+`"data"` and sends you looking for the wrong component.
+
+```tsx
+// Wrong: the apply phase is not a tracking scope
+createEffect(
+  () => props.open,
+  (open) => {
+    setConfig(props.settings.connectionConfig);
+  },
+);
+
+// Right: one explicit snapshot at open time
+createEffect(
+  () => props.open,
+  (open) => {
+    const settings = untrack(() => props.settings);
+    setConfig(settings.connectionConfig);
+  },
+);
+```
+
+Use `untrack()` when a one-time snapshot is the intended semantics; otherwise
+move the read into JSX, a memo, or the compute function.
+
+### Branching on a prop inside a component body
+
+A `switch` on a prop in the body picks the render branch once. That is
+intentional, so say so (`switch (untrack(() => props.field.kind))`) and keep
+everything inside the chosen branch reactive:
+
+```tsx
+const options = () => props.field.options ?? []; // not `const options = props.field.options`
+<For each={options()}>…</For>;
+```
+
+Snapshotting inside the branch freezes the control: the native `<select>` keeps
+its old option list and displayed value after the data changes.
+
+### Modal dialogs
+
+- `Modal` renders `<dialog>` and calls `showModal()`, so the dimming and blur
+  belong on `dialog.modal::backdrop`; the sibling `.modal-backdrop` button sits
+  under the top layer and only provides the click target.
+- Do not use the `autofocus` attribute. Chromium rejects it while the launcher
+  button still holds focus and logs `Autofocus processing was blocked`; focus
+  the intended field from a ref inside the open effect instead.
+
+### Theme switching
+
+One effect owns `document.documentElement.dataset.theme`. The first application
+is the boot palette and lands instantly; later swaps cross-fade through
+`document.startViewTransition` (styled on `::view-transition-old/new(root)`),
+and `prefers-reduced-motion` keeps the hard switch. The topbar button is a
+binary dark/light toggle because `"system"` is owned by the Settings segmented
+control — a three-state cycle makes light look stuck when the OS is light.
+
 ### Dynamic native controls
 
 When options are rendered dynamically, setting a native `<select value={...}>`
@@ -92,6 +158,10 @@ Do not read an async bootstrap value in a shell component body; the framework's
 untracked-read diagnostic is legitimate. Resolve bootstrap in the outer
 component, then render the shell with the resolved snapshot.
 
+The flow callback that renders the shell (`<Show when={initial()}>`) runs
+untracked, so the shell must take one explicit snapshot
+(`const initial = untrack(() => props.initial)`) and own its state from then on.
+
 ### Exhaustive branches
 
 When adding a member to a discriminated union, update every switch that renders
@@ -106,6 +176,24 @@ or transforms it. A missing `case` returns `undefined` and surfaces later as
   `(itemAccessor, number)`.
 - Avoid reactive reads at the top of a component body; read in JSX, a memo, or
   `untrack`.
+
+## Renderer diagnostics and styling
+
+`pnpm dev` prints `[renderer:warning]` diagnostics from Solid's dev build.
+Treat each code as a defect, not console noise.
+
+To reproduce without Electron, point a browser at the running Vite dev server
+and stub the bridge in an `addInitScript`: `window.maax.invoke` answers
+`{ ok: true, value }` envelopes (a schema-valid `Bootstrap`, plus the results of
+the commands the screen exercises), and `subscribe` returns an unsubscribe
+function. Click through the screens, then read `console` — a stub that returns
+`{ ok: false, error }` for everything else is enough to reach most UI.
+
+Class names are the other silent failure. After a stylesheet rewrite, every class
+used by `src/renderer/src/**/*.tsx` must still have a rule: a deleted block
+compiles cleanly and only shows up as a misplaced control, an unstyled menu, or
+an icon in the wrong corner. Extract the class names from the TSX files and diff
+them against `styles.css` instead of eyeballing the CSS.
 
 ## Effect 4
 
@@ -200,15 +288,18 @@ levels in one formatter:
 
 ## Verification matrix
 
-| Change           | Minimum check                                                     |
-| ---------------- | ----------------------------------------------------------------- |
-| Reactive control | update twice; verify focus, visual selection, and persisted value |
-| Dynamic list     | add/remove/reorder; confirm no unexpected remount                 |
-| Effect service   | type check, layer boot, and one failure path                      |
-| IPC contract     | invalid payload is rejected; valid payload round-trips            |
-| Native host      | connect, perform one operation, stop; inspect native log          |
-| Log formatter    | expected branch is not error; real failure is error               |
-| Packaging        | build, launch unpacked app, load a core/resource                  |
+| Change             | Minimum check                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------ |
+| Reactive control   | update twice; verify focus, visual selection, and persisted value                                |
+| Reactive warning   | `pnpm dev` console stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen |
+| Stylesheet rewrite | every class used by TSX still has a rule; screenshot affected screens in both themes             |
+| Modal              | open it from a focused launcher: focus lands inside, Esc and backdrop close                      |
+| Dynamic list       | add/remove/reorder; confirm no unexpected remount                                                |
+| Effect service     | type check, layer boot, and one failure path                                                     |
+| IPC contract       | invalid payload is rejected; valid payload round-trips                                           |
+| Native host        | connect, perform one operation, stop; inspect native log                                         |
+| Log formatter      | expected branch is not error; real failure is error                                              |
+| Packaging          | build, launch unpacked app, load a core/resource                                                 |
 
 Add tests only where the contract is stable: schemas, pure mappers, severity
 classification, parser output. Avoid brittle DOM tests for screens that are
