@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, onSettled, type Component } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onSettled, untrack, type Component } from "solid-js";
 import type {
   AppSettingsPatch,
   Bootstrap,
@@ -10,25 +10,14 @@ import type {
   RunSnapshot,
   TaskPlan,
   TaskType,
-  Theme,
 } from "../../../shared/schemas";
-import {
-  COMMANDS,
-  type CommandName,
-  type CommandPayloads,
-  type CommandResults,
-} from "../../../shared/ipc";
+import { COMMANDS, type CommandName, type CommandPayloads, type CommandResults } from "../../../shared/ipc";
 import { createTask } from "../../../shared/tasks";
 import { AddDeviceDialog } from "../components/AddDeviceDialog";
 import { Icon } from "../components/ui/Icon";
 import { notify } from "../components/ui/Toaster";
 import { StatusPill } from "../components/ui/StatusPill";
-import {
-  DesktopBridgeError,
-  bootstrap as loadBootstrap,
-  command,
-  subscribeEvents,
-} from "../effect/desktop";
+import { DesktopBridgeError, bootstrap as loadBootstrap, command, subscribeEvents } from "../effect/desktop";
 import { useAppRuntime } from "../effect/solid-effect";
 import { enginePhaseKey, t } from "../i18n/i18n";
 import { formatCoreCallback, type UiLogEntry } from "../log-format";
@@ -69,24 +58,16 @@ const statusText = (status: DeviceView["status"], locale: Locale): string => {
   }
 };
 
-const nextTheme = (theme: Theme): Theme => {
-  if (theme === "dark") return "light";
-  if (theme === "light") return "system";
-  return "dark";
-};
-
 export const AppShell: Component<AppShellProps> = (props) => {
   const runtime = useAppRuntime();
-  const [data, setData] = createSignal<Bootstrap>(props.initial);
-  const [view, setView] = createSignal<View>(
-    props.initial.cores.length === 0 || props.initial.devices.length === 0
-      ? "overview"
-      : "overview",
-  );
+  // The shell owns its state after mount: `initial` is a one-time seed, so read it
+  // once instead of leaving an untracked reactive read in the component body.
+  const initial = untrack(() => props.initial);
+  const [data, setData] = createSignal<Bootstrap>(initial);
+  const [view, setView] = createSignal<View>("overview");
   const [selectedDeviceId, setSelectedDeviceId] = createSignal<string | undefined>(
-    props.initial.devices.find(
-      (device) => device.status === "online" || device.status === "running",
-    )?.profile.id ?? props.initial.devices[0]?.profile.id,
+    initial.devices.find((device) => device.status === "online" || device.status === "running")?.profile.id ??
+      initial.devices[0]?.profile.id,
   );
   const [runs, setRuns] = createSignal<Record<string, RunSnapshot>>({});
   const [logs, setLogs] = createSignal<ReadonlyArray<UiLogEntry>>([]);
@@ -96,13 +77,12 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const [busy, setBusy] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
   const [addDeviceOpen, setAddDeviceOpen] = createSignal(false);
-  const [systemDark, setSystemDark] = createSignal(
-    window.matchMedia("(prefers-color-scheme: dark)").matches,
-  );
+  const [systemDark, setSystemDark] = createSignal(window.matchMedia("(prefers-color-scheme: dark)").matches);
   const [download, setDownload] = createSignal<DownloadProgress>();
   const [stages, setStages] = createSignal<ReadonlyArray<StageCatalogEntry>>([]);
 
   let logId = 0;
+  let themePending = false;
   let contentRef: HTMLElement | undefined;
   let saveTimer: number | undefined;
   let pendingPlan: TaskPlan | undefined;
@@ -142,10 +122,24 @@ export const AppShell: Component<AppShellProps> = (props) => {
     return systemDark() ? "dark" : "light";
   });
 
+  // A theme swap cross-fades instead of snapping, so light/dark does not flash.
+  // The first application is the boot palette and lands instantly.
+  let themeApplied = false;
   createEffect(
     () => resolvedTheme(),
     (theme) => {
-      document.documentElement.dataset.theme = theme;
+      const root = document.documentElement;
+      const booting = !themeApplied;
+      themeApplied = true;
+      if (root.dataset.theme === theme) return;
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (booting || reduced || typeof document.startViewTransition !== "function") {
+        root.dataset.theme = theme;
+        return;
+      }
+      document.startViewTransition(() => {
+        root.dataset.theme = theme;
+      });
     },
   );
   createEffect(
@@ -172,15 +166,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
     switch (event._tag) {
       case "device-updated": {
         setData((current) => {
-          const exists = current.devices.some(
-            (device) => device.profile.id === event.device.profile.id,
-          );
+          const exists = current.devices.some((device) => device.profile.id === event.device.profile.id);
           return {
             ...current,
             devices: exists
-              ? current.devices.map((device) =>
-                  device.profile.id === event.device.profile.id ? event.device : device,
-                )
+              ? current.devices.map((device) => (device.profile.id === event.device.profile.id ? event.device : device))
               : [...current.devices, event.device],
           };
         });
@@ -202,17 +192,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
         if (
           previous &&
           previous.status !== event.run.status &&
-          (event.run.status === "completed" ||
-            event.run.status === "failed" ||
-            event.run.status === "stopped")
+          (event.run.status === "completed" || event.run.status === "failed" || event.run.status === "stopped")
         ) {
           notify({
-            kind:
-              event.run.status === "completed"
-                ? "success"
-                : event.run.status === "failed"
-                  ? "error"
-                  : "info",
+            kind: event.run.status === "completed" ? "success" : event.run.status === "failed" ? "error" : "info",
             title:
               event.run.status === "completed"
                 ? tr("tasks.completed")
@@ -253,11 +236,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
       kind: "error",
       title: tr("toast.error"),
       message:
-        error instanceof DesktopBridgeError
-          ? error.reason
-          : error instanceof Error
-            ? error.message
-            : String(error),
+        error instanceof DesktopBridgeError ? error.reason : error instanceof Error ? error.message : String(error),
     });
   };
 
@@ -416,9 +395,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     if (!device) return;
     setData((current) => ({
       ...current,
-      devices: current.devices.map((item) =>
-        item.profile.id === device.profile.id ? device : item,
-      ),
+      devices: current.devices.map((item) => (item.profile.id === device.profile.id ? device : item)),
     }));
     notify({ kind: "success", title: tr("toast.connected"), message: device.profile.name });
   };
@@ -428,9 +405,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     if (!device) return;
     setData((current) => ({
       ...current,
-      devices: current.devices.map((item) =>
-        item.profile.id === device.profile.id ? device : item,
-      ),
+      devices: current.devices.map((item) => (item.profile.id === device.profile.id ? device : item)),
     }));
     notify({ kind: "info", title: tr("toast.disconnected"), message: device.profile.name });
   };
@@ -536,8 +511,16 @@ export const AppShell: Component<AppShellProps> = (props) => {
     });
   };
 
-  const cycleTheme = async (): Promise<void> => {
-    await updateSettings({ theme: nextTheme(data().settings.theme) });
+  // The topbar control is a two-state switch (the Settings page owns "system");
+  // a third cycle step made light look "stuck" until a second click.
+  const toggleTheme = async (): Promise<void> => {
+    if (themePending) return;
+    themePending = true;
+    try {
+      await updateSettings({ theme: resolvedTheme() === "dark" ? "light" : "dark" });
+    } finally {
+      themePending = false;
+    }
   };
 
   const clearLogs = (): void => {
@@ -596,12 +579,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
                 compact
               />
             </button>
-            <button
-              type="button"
-              class="icon-button"
-              onClick={() => void cycleTheme()}
-              title={tr("settings.theme")}
-            >
+            <button type="button" class="icon-button" onClick={() => void toggleTheme()} title={tr("settings.theme")}>
               <Icon name={resolvedTheme() === "dark" ? "sun" : "moon"} />
             </button>
           </div>
@@ -686,11 +664,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
             <span class="download-icon">
               <Icon
                 name={
-                  progress().phase === "done"
-                    ? "check"
-                    : progress().phase === "failed"
-                      ? "alert-triangle"
-                      : "download"
+                  progress().phase === "done" ? "check" : progress().phase === "failed" ? "alert-triangle" : "download"
                 }
               />
             </span>

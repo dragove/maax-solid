@@ -10,9 +10,7 @@
   /* Keep Latin and CJK families explicit. Generic fallbacks can resolve to very
      large CJK collections, which Chromium copies into shared memory for the
      sandboxed renderer. */
-  --sans:
-    "Inter Variable", "Segoe UI", "DengXian", system-ui, "Microsoft YaHei", "Noto Sans CJK SC",
-    sans-serif;
+  --sans: "Inter Variable", "Segoe UI", "DengXian", system-ui, "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --mono: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Consolas, "DengXian", monospace;
 
   --sidebar-w: 216px;
@@ -88,6 +86,14 @@
   --ok-soft: rgba(64, 160, 43, 0.12);
 
   --shadow-flyout: 0 10px 26px rgba(76, 79, 105, 0.16);
+}
+
+/* Theme flips run as a View Transition cross-fade (see AppShell): both snapshots
+   fade over 220ms so the palette change does not flash. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 220ms;
+  animation-timing-function: var(--ease);
 }
 
 *,
