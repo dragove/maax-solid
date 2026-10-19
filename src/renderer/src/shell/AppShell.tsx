@@ -2,31 +2,37 @@ import { Show, createEffect, createMemo, createSignal, onSettled, untrack, type 
 import type {
   AppSettingsPatch,
   Bootstrap,
+  CoreReleaseCheck,
   DeviceDraft,
   DeviceView,
   DownloadProgress,
   Locale,
+  ResourceStatus,
   StageCatalogEntry,
   RunSnapshot,
   TaskPlan,
   TaskType,
 } from "../../../shared/schemas";
 import { COMMANDS, type CommandName, type CommandPayloads, type CommandResults } from "../../../shared/ipc";
+import { formatResourceStamp } from "../../../shared/resource-version";
 import { createTask } from "../../../shared/tasks";
 import { AddDeviceDialog } from "../components/AddDeviceDialog";
+import { CopilotBrowser } from "../components/CopilotBrowser";
 import { Icon } from "../components/ui/Icon";
+import { ProgressBar } from "../components/ui/ProgressBar";
 import { notify } from "../components/ui/Toaster";
 import { StatusPill } from "../components/ui/StatusPill";
 import { DesktopBridgeError, bootstrap as loadBootstrap, command, subscribeEvents } from "../effect/desktop";
 import { useAppRuntime } from "../effect/solid-effect";
 import { enginePhaseKey, t } from "../i18n/i18n";
 import { formatCoreCallback, type UiLogEntry } from "../log-format";
+import { Copilot } from "../pages/Copilot";
 import { Devices } from "../pages/Devices";
 import { Overview } from "../pages/Overview";
 import { Settings } from "../pages/Settings";
 import { Tasks } from "../pages/Tasks";
 
-type View = "overview" | "tasks" | "devices" | "settings";
+type View = "overview" | "tasks" | "copilot" | "devices" | "settings";
 
 interface AppShellProps {
   readonly initial: Bootstrap;
@@ -35,10 +41,13 @@ interface AppShellProps {
 const NAV: ReadonlyArray<{
   view: View;
   icon: string;
-  key: "nav.overview" | "nav.tasks" | "nav.devices" | "nav.settings";
+  key: "nav.overview" | "nav.tasks" | "nav.copilot" | "nav.devices" | "nav.settings";
 }> = [
   { view: "overview", icon: "dashboard", key: "nav.overview" },
   { view: "tasks", icon: "list-todo", key: "nav.tasks" },
+  // Clearing a stage with a copilot is a one-off action, so it sits beside the
+  // daily queue instead of inside it.
+  { view: "copilot", icon: "swords", key: "nav.copilot" },
   { view: "devices", icon: "smartphone", key: "nav.devices" },
   { view: "settings", icon: "settings", key: "nav.settings" },
 ];
@@ -79,6 +88,13 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const [addDeviceOpen, setAddDeviceOpen] = createSignal(false);
   const [systemDark, setSystemDark] = createSignal(window.matchMedia("(prefers-color-scheme: dark)").matches);
   const [download, setDownload] = createSignal<DownloadProgress>();
+  const [resourceProgress, setResourceProgress] = createSignal<DownloadProgress>();
+  const [resourceStatuses, setResourceStatuses] = createSignal<Readonly<Record<string, ResourceStatus>>>({});
+  const [resourceBusy, setResourceBusy] = createSignal(false);
+  const [coreRelease, setCoreRelease] = createSignal<CoreReleaseCheck>();
+  const [browserTaskId, setBrowserTaskId] = createSignal<string | null>(null);
+  const [copilotBrowseOpen, setCopilotBrowseOpen] = createSignal(false);
+  let progressTick = 0;
   const [stages, setStages] = createSignal<ReadonlyArray<StageCatalogEntry>>([]);
 
   let logId = 0;
@@ -102,6 +118,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
       data().plans.find((plan) => plan.id === device.profile.activePlanId) ??
       data().plans.find((plan) => plan.deviceId === device.profile.id)
     );
+  });
+  const devicePlans = createMemo(() => {
+    const id = effectiveDeviceId();
+    return id ? data().plans.filter((plan) => plan.deviceId === id) : [];
   });
   const selectedRun = createMemo(() => {
     const id = effectiveDeviceId();
@@ -183,6 +203,12 @@ export const AppShell: Component<AppShellProps> = (props) => {
       case "cores-updated":
         setData((current) => ({ ...current, cores: [...event.cores] }));
         break;
+      case "plans-updated":
+        setData((current) => ({ ...current, plans: [...event.plans] }));
+        break;
+      case "copilot-updated":
+        setData((current) => ({ ...current, copilot: event.copilot }));
+        break;
       case "settings-updated":
         setData((current) => ({ ...current, settings: event.settings }));
         break;
@@ -213,9 +239,27 @@ export const AppShell: Component<AppShellProps> = (props) => {
       case "toast":
         notify({ kind: event.kind, title: event.title, message: event.message });
         break;
-      case "download-progress":
-        setDownload(event);
+      case "download-progress": {
+        // Terminal phases clear themselves; the caller cannot know which event
+        // arrives last, so the bar owns its own lifetime.
+        const tick = ++progressTick;
+        const clear = (reset: () => void): void => {
+          window.setTimeout(
+            () => {
+              if (progressTick === tick) reset();
+            },
+            event.phase === "done" ? 1600 : 4000,
+          );
+        };
+        if (event.source === "resource") {
+          setResourceProgress(event);
+          if (event.phase === "done" || event.phase === "failed") clear(() => setResourceProgress(undefined));
+        } else {
+          setDownload(event);
+          if (event.phase === "done" || event.phase === "failed") clear(() => setDownload(undefined));
+        }
         break;
+      }
       case "core-callback": {
         const formatted = formatCoreCallback(event, locale());
         if (!formatted) break;
@@ -447,13 +491,88 @@ export const AppShell: Component<AppShellProps> = (props) => {
     if (core) {
       notify({ kind: "success", title: tr("toast.coreAdded"), message: core.version });
       await reload();
+      await loadCoreRelease();
     }
-    window.setTimeout(() => setDownload(undefined), core ? 1800 : 0);
   };
 
   const refreshCores = async (): Promise<void> => {
     const cores = await send(COMMANDS.refreshCores, undefined, { busy: false });
     if (cores) setData((current) => ({ ...current, cores: [...cores] }));
+  };
+
+  const loadResourceStatus = async (coreId: string): Promise<void> => {
+    try {
+      const status = await runtime.runPromise(command(COMMANDS.resourceStatus, { coreId }));
+      setResourceStatuses((current) => ({ ...current, [coreId]: status }));
+    } catch (error) {
+      console.warn("Resource status unavailable", error);
+    }
+  };
+
+  const loadCoreRelease = async (): Promise<void> => {
+    try {
+      setCoreRelease(await runtime.runPromise(command(COMMANDS.checkCoreUpdate, undefined)));
+    } catch (error) {
+      console.warn("Core release check failed", error);
+    }
+  };
+
+  // Resource rows and the release banner live on the settings page; refresh them
+  // when it opens or the core list changes, and never poll in the background.
+  createEffect(
+    () =>
+      view() === "settings"
+        ? data()
+            .cores.map((core) => core.id)
+            .join("|")
+        : "",
+    (coreIds) => {
+      if (coreIds === "") return;
+      void loadCoreRelease();
+      for (const coreId of coreIds.split("|")) void loadResourceStatus(coreId);
+    },
+  );
+
+  const checkResource = async (coreId: string): Promise<void> => {
+    const result = await send(COMMANDS.checkResourceUpdate, { coreId }, { busy: false });
+    if (!result) return;
+    notify({
+      kind: result.available ? "info" : "success",
+      title: tr(result.available ? "resource.available" : "resource.upToDate"),
+      message: result.remote ? formatResourceStamp(result.remote, locale()) : undefined,
+    });
+  };
+
+  const updateResource = async (coreId: string): Promise<void> => {
+    setResourceBusy(true);
+    setResourceProgress({ _tag: "download-progress", phase: "metadata", received: 0, total: 0, source: "resource" });
+    const result = await send(COMMANDS.updateResource, { coreId }, { busy: false });
+    setResourceBusy(false);
+    if (result) {
+      notify({
+        kind: "success",
+        title: tr("resource.updated"),
+        message: formatResourceStamp(result.stamp, locale()),
+      });
+      await reload();
+      await loadResourceStatus(coreId);
+    }
+  };
+
+  const rollbackResource = async (coreId: string, backupId: string): Promise<void> => {
+    if (!window.confirm(tr("resource.rollback"))) return;
+    setResourceBusy(true);
+    const result = await send(COMMANDS.rollbackResource, { coreId, backupId }, { busy: false });
+    setResourceBusy(false);
+    if (result) {
+      notify({
+        kind: "info",
+        title: tr("resource.rolledBack"),
+        message: formatResourceStamp(result.stamp, locale()),
+      });
+      await reload();
+      await loadResourceStatus(coreId);
+    }
   };
 
   const startRun = async (): Promise<void> => {
@@ -499,6 +618,155 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
   const removeTask = (taskId: string): void => {
     updatePlan((plan) => ({ ...plan, tasks: plan.tasks.filter((task) => task.id !== taskId) }));
+  };
+
+  const createPlan = async (): Promise<void> => {
+    const device = selectedDevice();
+    if (!device) return;
+    await flushSave();
+    const plan = await send(COMMANDS.createPlan, { deviceId: device.profile.id, name: tr("plans.defaultName") });
+    if (!plan) return;
+    await reload();
+    notify({ kind: "success", title: tr("plans.created"), message: plan.name });
+  };
+
+  const selectPlan = async (planId: string): Promise<void> => {
+    const device = selectedDevice();
+    if (!device || device.profile.activePlanId === planId) return;
+    await flushSave();
+    const view = await send(COMMANDS.setActivePlan, { deviceId: device.profile.id, planId });
+    if (!view) return;
+    setData((current) => ({
+      ...current,
+      devices: current.devices.map((item) => (item.profile.id === view.profile.id ? view : item)),
+    }));
+  };
+
+  const duplicatePlan = async (): Promise<void> => {
+    const plan = selectedPlan();
+    if (!plan) return;
+    await flushSave();
+    const copy = await send(COMMANDS.duplicatePlan, { planId: plan.id });
+    if (!copy) return;
+    await reload();
+    notify({ kind: "success", title: tr("plans.duplicated"), message: copy.name });
+  };
+
+  const renamePlan = async (name: string): Promise<void> => {
+    const plan = selectedPlan();
+    if (!plan || name.trim() === "" || name.trim() === plan.name) return;
+    const saved = await send(COMMANDS.renamePlan, { planId: plan.id, name });
+    if (!saved) return;
+    setData((current) => ({
+      ...current,
+      plans: current.plans.map((item) => (item.id === saved.id ? saved : item)),
+    }));
+  };
+
+  const importPlan = async (): Promise<void> => {
+    const device = selectedDevice();
+    if (!device) return;
+    const plan = await send(COMMANDS.importPlan, { deviceId: device.profile.id });
+    if (!plan) return;
+    await reload();
+    notify({ kind: "success", title: tr("plans.imported"), message: plan.name });
+  };
+
+  const exportPlan = async (): Promise<void> => {
+    const plan = selectedPlan();
+    if (!plan) return;
+    const path = await send(COMMANDS.exportPlan, { planId: plan.id });
+    if (!path) return;
+    notify({ kind: "success", title: tr("plans.exported"), message: path });
+  };
+
+  const deletePlan = async (): Promise<void> => {
+    const plan = selectedPlan();
+    if (!plan) return;
+    if (!window.confirm(tr("plans.deleteConfirm"))) return;
+    const next = await send(COMMANDS.removePlan, { id: plan.id });
+    if (!next) return;
+    await reload();
+    notify({ kind: "info", title: tr("plans.deleted"), message: plan.name });
+  };
+
+  const resolveCopilotFor = async (taskId: string, input: string): Promise<boolean> => {
+    const result = await send(COMMANDS.resolveCopilot, { input }, { busy: false });
+    if (!result) return false;
+    const plan = selectedPlan();
+    const task = plan?.tasks.find((item) => item.id === taskId);
+    if (!task) return false;
+    const existing = Array.isArray(task.params.copilot_list) ? task.params.copilot_list : [];
+    updateTaskParam(taskId, "copilot_list", [...existing, ...result.items]);
+    notify({
+      kind: "success",
+      title: tr(result.kind === "set" ? "copilot.setAdded" : "copilot.added"),
+      message: result.title,
+    });
+    return true;
+  };
+
+  const updateCopilotOptions = async (
+    patch: Partial<import("../../../shared/schemas").CopilotOptions>,
+  ): Promise<void> => {
+    const setup = await send(COMMANDS.updateCopilotOptions, patch, { busy: false });
+    if (!setup) return;
+    setData((current) => ({ ...current, copilot: setup }));
+  };
+
+  const setCopilotItems = async (
+    items: ReadonlyArray<import("../../../shared/schemas").CopilotItem>,
+  ): Promise<void> => {
+    const setup = await send(COMMANDS.setCopilotItems, { items }, { busy: false });
+    if (!setup) return;
+    setData((current) => ({ ...current, copilot: setup }));
+  };
+
+  const resolveCopilotGlobal = async (input: string): Promise<boolean> => {
+    const result = await send(COMMANDS.resolveCopilot, { input }, { busy: false });
+    if (!result) return false;
+    await setCopilotItems([...data().copilot.items, ...result.items]);
+    notify({
+      kind: "success",
+      title: tr(result.kind === "set" ? "copilot.setAdded" : "copilot.added"),
+      message: result.title,
+    });
+    return true;
+  };
+
+  const addBrowsedCopilotGlobal = async (id: number): Promise<boolean> => resolveCopilotGlobal(String(id));
+
+  const startCopilot = async (): Promise<void> => {
+    const device = selectedDevice();
+    if (!device) return;
+    const run = await send(COMMANDS.startCopilot, { deviceId: device.profile.id });
+    if (!run) return;
+    setRuns((current) => ({ ...current, [run.deviceId]: run }));
+    notify({ kind: "success", title: tr("copilotPage.started"), message: device.profile.name });
+  };
+
+  const addBrowsedCopilot = async (id: number): Promise<boolean> => {
+    const taskId = browserTaskId();
+    if (taskId === null) return false;
+    return await resolveCopilotFor(taskId, String(id));
+  };
+
+  const pickCopilotFile = async (taskId: string, key: string): Promise<void> => {
+    const file = await send(COMMANDS.importCopilot, undefined, { busy: false });
+    if (!file) return;
+    const plan = selectedPlan();
+    const task = plan?.tasks.find((item) => item.id === taskId);
+    const batch = Array.isArray(task?.params.copilot_list) ? task.params.copilot_list : [];
+    if (batch.length === 0) {
+      updateTaskParam(taskId, key, file.filename);
+      return;
+    }
+    // A batch is already running the show; a local file joins it instead of
+    // silently replacing the legacy single-file parameter.
+    updateTaskParam(taskId, "copilot_list", [
+      ...batch,
+      { id: crypto.randomUUID(), copilotId: 0, filename: file.filename, stage: "", title: file.name, isRaid: false },
+    ]);
   };
 
   const moveTask = (from: number, to: number): void => {
@@ -625,7 +893,35 @@ export const AppShell: Component<AppShellProps> = (props) => {
               onEnabledChange={toggleTask}
               onParamChange={updateTaskParam}
               onMoveTask={moveTask}
+              plans={devicePlans()}
+              onSelectPlan={(id) => void selectPlan(id)}
+              onCreatePlan={() => void createPlan()}
+              onDuplicatePlan={() => void duplicatePlan()}
+              onRenamePlan={(name) => void renamePlan(name)}
+              onImportPlan={() => void importPlan()}
+              onExportPlan={() => void exportPlan()}
+              onDeletePlan={() => void deletePlan()}
+              onPickFile={(taskId, key) => void pickCopilotFile(taskId, key)}
+              onResolveCopilot={(taskId, input) => resolveCopilotFor(taskId, input)}
+              onBrowseCopilot={(taskId) => setBrowserTaskId(taskId)}
               onClearLogs={clearLogs}
+            />
+          </Show>
+          <Show when={view() === "copilot"}>
+            <Copilot
+              device={selectedDevice()}
+              run={selectedRun()}
+              items={data().copilot.items}
+              options={data().copilot.options}
+              locale={locale()}
+              busy={busy()}
+              onConnect={() => void connectDevice()}
+              onStart={() => void startCopilot()}
+              onStop={() => void stopRun()}
+              onOptions={(patch) => void updateCopilotOptions(patch)}
+              onItems={(items) => void setCopilotItems(items)}
+              onResolve={resolveCopilotGlobal}
+              onBrowse={() => setCopilotBrowseOpen(true)}
             />
           </Show>
           <Show when={view() === "devices"}>
@@ -653,49 +949,39 @@ export const AppShell: Component<AppShellProps> = (props) => {
               onSetActiveCore={(id) => void setActiveCore(id)}
               onRemoveCore={(id) => void removeCore(id)}
               onRefreshCores={() => void refreshCores()}
+              coreRelease={coreRelease()}
+              onCheckCoreUpdate={() => void loadCoreRelease()}
+              resourceStatuses={resourceStatuses()}
+              resourceBusy={resourceBusy()}
+              onCheckResource={(id) => void checkResource(id)}
+              onUpdateResource={(id) => void updateResource(id)}
+              onRollbackResource={(id, backupId) => void rollbackResource(id, backupId)}
             />
           </Show>
         </main>
       </div>
 
       <Show when={download()}>
-        {(progress) => (
-          <div class="download-bar">
-            <span class="download-icon">
-              <Icon
-                name={
-                  progress().phase === "done" ? "check" : progress().phase === "failed" ? "alert-triangle" : "download"
-                }
-              />
-            </span>
-            <div class="download-copy">
-              <div class="download-head">
-                <strong>{tr("download.title")}</strong>
-                <span>
-                  {progress().phase === "downloading" && progress().total > 0
-                    ? `${Math.round((progress().received / progress().total) * 100)}%`
-                    : t(locale(), `download.${progress().phase}` as Parameters<typeof t>[1])}
-                </span>
-              </div>
-              <div class="download-track">
-                <span
-                  style={{
-                    width:
-                      progress().total > 0
-                        ? `${Math.min(100, Math.round((progress().received / progress().total) * 100))}%`
-                        : "12%",
-                  }}
-                />
-              </div>
-              <span class="download-meta">
-                {progress().phase === "downloading"
-                  ? `${(progress().received / 1024 / 1024).toFixed(1)} / ${(progress().total / 1024 / 1024).toFixed(1)} MB`
-                  : t(locale(), `download.${progress().phase}` as Parameters<typeof t>[1])}
-              </span>
-            </div>
-          </div>
-        )}
+        {(progress) => <ProgressBar title={tr("download.title")} progress={progress()} locale={locale()} />}
       </Show>
+
+      <Show when={resourceProgress()}>
+        {(progress) => <ProgressBar title={tr("resource.title")} progress={progress()} locale={locale()} />}
+      </Show>
+
+      <CopilotBrowser
+        open={browserTaskId() !== null}
+        locale={locale()}
+        onClose={() => setBrowserTaskId(null)}
+        onAdd={addBrowsedCopilot}
+      />
+
+      <CopilotBrowser
+        open={copilotBrowseOpen()}
+        locale={locale()}
+        onClose={() => setCopilotBrowseOpen(false)}
+        onAdd={addBrowsedCopilotGlobal}
+      />
 
       <AddDeviceDialog
         open={addDeviceOpen()}

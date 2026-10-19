@@ -4,11 +4,14 @@ import type {
   Bootstrap,
   ClientType,
   CoreInfo,
+  CoreReleaseCheck,
   DownloadProgress,
   Locale,
+  ResourceStatus,
   Theme,
   TouchMode,
 } from "../../../shared/schemas";
+import { formatResourceStamp } from "../../../shared/resource-version";
 import { t } from "../i18n/i18n";
 import { Button } from "../components/ui/Button";
 import { Icon } from "../components/ui/Icon";
@@ -25,6 +28,13 @@ interface SettingsProps {
   readonly onSetActiveCore: (id: string) => void;
   readonly onRemoveCore: (id: string) => void;
   readonly onRefreshCores: () => void;
+  readonly coreRelease?: CoreReleaseCheck;
+  readonly onCheckCoreUpdate: () => void;
+  readonly resourceStatuses: Readonly<Record<string, ResourceStatus>>;
+  readonly resourceBusy: boolean;
+  readonly onCheckResource: (coreId: string) => void;
+  readonly onUpdateResource: (coreId: string) => void;
+  readonly onRollbackResource: (coreId: string, backupId: string) => void;
 }
 
 const clientTypes: ReadonlyArray<ClientType> = ["Official", "Bilibili", "txwy", "YoStarEN", "YoStarJP", "YoStarKR"];
@@ -40,6 +50,28 @@ const coreStatusLabel = (core: CoreInfo, locale: Locale): string => {
 
 export const Settings: Component<SettingsProps> = (props) => {
   const settings = () => props.data.settings;
+
+  /**
+   * Resource files cannot be replaced while a device holds a session on that
+   * core (B1). Sessions belong to the active core, so the rule collapses to
+   * "active core + any live session". `engine.sessionCount` is the main
+   * process's own view, which also covers a device that is still connecting.
+   */
+  const coreInUse = (): boolean =>
+    props.data.engine.sessionCount > 0 ||
+    props.data.devices.some(
+      (device) => device.status === "online" || device.status === "running" || device.status === "connecting",
+    );
+
+  const resourceLocked = (core: CoreInfo, active: boolean): boolean =>
+    props.resourceBusy || core.status !== "ready" || (active && coreInUse());
+
+  // Prefer the command result: the registry copy is a cache that can lag
+  // behind the files on disk.
+  const stampText = (core: CoreInfo): string => {
+    const stamp = props.resourceStatuses[core.id]?.stamp ?? core.resourceStamp;
+    return stamp === undefined ? t(props.locale, "resource.none") : formatResourceStamp(stamp, props.locale);
+  };
   const themeOptions: ReadonlyArray<{
     value: Theme;
     key: "settings.themeDark" | "settings.themeLight" | "settings.themeSystem";
@@ -138,6 +170,53 @@ export const Settings: Component<SettingsProps> = (props) => {
                 </Button>
               </div>
             </header>
+            <Show when={props.coreRelease}>
+              {(release) => (
+                <div class={release().available ? "core-release core-release--new" : "core-release"}>
+                  <Icon name={release().available ? "sparkles" : "check"} />
+                  <span>
+                    {t(props.locale, release().available ? "settings.coreUpdateAvailable" : "settings.coreUpToDate")}
+                  </span>
+                  <span class="core-release-meta">
+                    {[
+                      release().available ? release().latest : release().current,
+                      release().publishedAt
+                        ? new Intl.DateTimeFormat(props.locale, {
+                            year: "numeric",
+                            month: "2-digit",
+                            day: "2-digit",
+                          }).format(release().publishedAt!)
+                        : undefined,
+                      release().sizeBytes ? `${Math.ceil(release().sizeBytes! / 1024 / 1024)} MB` : undefined,
+                    ]
+                      .filter((part): part is string => typeof part === "string" && part !== "")
+                      .join(" · ")}
+                  </span>
+                  <div class="core-release-actions">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={props.busy || props.download !== undefined}
+                      onClick={props.onCheckCoreUpdate}
+                    >
+                      <Icon name="refresh-cw" />
+                      {t(props.locale, "settings.checkCoreUpdate")}
+                    </Button>
+                    <Show when={release().available}>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={props.busy || props.download !== undefined}
+                        onClick={props.onDownloadCore}
+                      >
+                        <Icon name="download" />
+                        {t(props.locale, "settings.updateCore")}
+                      </Button>
+                    </Show>
+                  </div>
+                </div>
+              )}
+            </Show>
             <Show
               when={props.data.cores.length > 0}
               fallback={
@@ -158,33 +237,77 @@ export const Settings: Component<SettingsProps> = (props) => {
                       (!props.data.settings.activeCoreId && props.data.cores[0]?.id === core.id);
                     return (
                       <li class={active() ? "core-row core-row--active" : "core-row"}>
-                        <div class="core-main">
-                          <div class="core-title">
-                            <strong>{core.version}</strong>
-                            <span class="core-channel">{core.channel}</span>
-                            <Show when={active()}>
-                              <span class="tag">{t(props.locale, "common.active")}</span>
-                            </Show>
+                        <div class="core-row-top">
+                          <div class="core-main">
+                            <div class="core-title">
+                              <strong>{core.version}</strong>
+                              <span class="core-channel">{core.channel}</span>
+                              <Show when={active()}>
+                                <span class="tag">{t(props.locale, "common.active")}</span>
+                              </Show>
+                            </div>
+                            <p class="mono-line">{core.root}</p>
+                            <div class="core-meta">
+                              <span>{coreStatusLabel(core, props.locale)}</span>
+                              <span>{core.source}</span>
+                              <span>{core.managed ? "managed" : "external"}</span>
+                            </div>
                           </div>
-                          <p class="mono-line">{core.root}</p>
-                          <div class="core-meta">
-                            <span>{coreStatusLabel(core, props.locale)}</span>
-                            <span>{core.source}</span>
-                            <span>{core.managed ? "managed" : "external"}</span>
+                          <div class="core-actions">
+                            <Button
+                              size="sm"
+                              variant={active() ? "ghost" : "secondary"}
+                              disabled={active() || core.status !== "ready" || props.busy}
+                              onClick={() => props.onSetActiveCore(core.id)}
+                            >
+                              {t(props.locale, "settings.setActive")}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => props.onRemoveCore(core.id)}>
+                              <Icon name="trash-2" />
+                            </Button>
                           </div>
                         </div>
-                        <div class="core-actions">
-                          <Button
-                            size="sm"
-                            variant={active() ? "ghost" : "secondary"}
-                            disabled={active() || core.status !== "ready" || props.busy}
-                            onClick={() => props.onSetActiveCore(core.id)}
-                          >
-                            {t(props.locale, "settings.setActive")}
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => props.onRemoveCore(core.id)}>
-                            <Icon name="trash-2" />
-                          </Button>
+                        <div class="core-resource">
+                          <span class="core-resource-stamp">
+                            {t(props.locale, "resource.stamp")} · {stampText(core)}
+                          </span>
+                          <Show when={active() && resourceLocked(core, active()) && !props.resourceBusy}>
+                            <span class="core-resource-hint">{t(props.locale, "resource.blocked")}</span>
+                          </Show>
+                          <div class="core-resource-actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={resourceLocked(core, active())}
+                              onClick={() => props.onCheckResource(core.id)}
+                            >
+                              <Icon name="refresh-cw" />
+                              {t(props.locale, "resource.check")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={resourceLocked(core, active())}
+                              onClick={() => props.onUpdateResource(core.id)}
+                            >
+                              <Icon name="download" />
+                              {t(props.locale, "resource.update")}
+                            </Button>
+                            <For each={props.resourceStatuses[core.id]?.backups ?? []}>
+                              {(backup) => (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={resourceLocked(core, active())}
+                                  title={`${t(props.locale, "resource.backups")} · ${backup.files}`}
+                                  onClick={() => props.onRollbackResource(core.id, backup.id)}
+                                >
+                                  <Icon name="clock" />
+                                  {formatResourceStamp(backup.stamp, props.locale)}
+                                </Button>
+                              )}
+                            </For>
+                          </div>
                         </div>
                       </li>
                     );

@@ -9,7 +9,7 @@ import type {
   TaskType,
 } from "../../../shared/schemas";
 import type { UiLogEntry } from "../log-format";
-import { TASK_DEFINITIONS, TASK_TYPE_ORDER } from "../../../shared/tasks";
+import { TASK_DEFINITIONS, TASK_PALETTE_ORDER } from "../../../shared/tasks";
 import { pick, runStatusKey, runTaskStatusKey, t } from "../i18n/i18n";
 import { TaskCard } from "../components/TaskCard";
 import { Button } from "../components/ui/Button";
@@ -24,6 +24,17 @@ interface TasksProps {
   readonly run: RunSnapshot | undefined;
   readonly logs: ReadonlyArray<UiLogEntry>;
   readonly stages: ReadonlyArray<StageCatalogEntry>;
+  readonly plans: ReadonlyArray<TaskPlan>;
+  readonly onSelectPlan: (planId: string) => void;
+  readonly onCreatePlan: () => void;
+  readonly onDuplicatePlan: () => void;
+  readonly onRenamePlan: (name: string) => void;
+  readonly onImportPlan: () => void;
+  readonly onExportPlan: () => void;
+  readonly onDeletePlan: () => void;
+  readonly onPickFile: (taskId: string, key: string) => void;
+  readonly onResolveCopilot: (taskId: string, input: string) => Promise<boolean>;
+  readonly onBrowseCopilot: (taskId: string) => void;
   readonly busy: boolean;
   readonly saving: boolean;
   readonly onConnect: () => void;
@@ -56,6 +67,8 @@ export const Tasks: Component<TasksProps> = (props) => {
   const [expandedId, setExpandedId] = createSignal<string | null>(null);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [dragFrom, setDragFrom] = createSignal<number | null>(null);
+  const [renaming, setRenaming] = createSignal(false);
+  const [draftName, setDraftName] = createSignal("");
   let logRef: HTMLDivElement | undefined;
 
   const connected = () => props.device?.status === "online" || props.device?.status === "running";
@@ -120,6 +133,87 @@ export const Tasks: Component<TasksProps> = (props) => {
         </div>
       </header>
 
+      <div class="plan-bar">
+        <Icon name="list-todo" />
+        <span class="plan-label">{t(props.locale, "plans.select")}</span>
+        <select
+          class="input plan-select"
+          value={props.plan?.id ?? ""}
+          disabled={!props.device || props.busy}
+          onChange={(event) => props.onSelectPlan(event.currentTarget.value)}
+        >
+          <For each={props.plans}>
+            {(item) => (
+              <option value={item.id} selected={item.id === props.plan?.id}>
+                {item.name}
+              </option>
+            )}
+          </For>
+        </select>
+        <Show
+          when={renaming()}
+          fallback={
+            <div class="plan-actions">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!props.device || props.busy}
+                onClick={() => {
+                  setDraftName(props.plan?.name ?? "");
+                  setRenaming(true);
+                }}
+              >
+                {t(props.locale, "plans.rename")}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={!props.device || props.busy} onClick={props.onCreatePlan}>
+                {t(props.locale, "plans.new")}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={!props.plan || props.busy} onClick={props.onDuplicatePlan}>
+                {t(props.locale, "plans.duplicate")}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={!props.device || props.busy} onClick={props.onImportPlan}>
+                {t(props.locale, "plans.import")}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={!props.plan || props.busy} onClick={props.onExportPlan}>
+                {t(props.locale, "plans.export")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!props.plan || props.busy || props.plans.length <= 1}
+                onClick={props.onDeletePlan}
+              >
+                <Icon name="trash-2" />
+              </Button>
+            </div>
+          }
+        >
+          <input
+            class="input plan-name"
+            value={draftName()}
+            onInput={(event) => setDraftName(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                props.onRenamePlan(draftName());
+                setRenaming(false);
+              } else if (event.key === "Escape") {
+                setRenaming(false);
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => {
+              props.onRenamePlan(draftName());
+              setRenaming(false);
+            }}
+          >
+            {t(props.locale, "common.save")}
+          </Button>
+        </Show>
+      </div>
+
       <div class="task-layout">
         <section class="task-main">
           <div class="queue-toolbar">
@@ -167,7 +261,7 @@ export const Tasks: Component<TasksProps> = (props) => {
                 </button>
               </div>
               <div class="palette-grid">
-                <For each={TASK_TYPE_ORDER}>
+                <For each={TASK_PALETTE_ORDER}>
                   {(type) => {
                     const definition = TASK_DEFINITIONS[type];
                     return (
@@ -229,6 +323,9 @@ export const Tasks: Component<TasksProps> = (props) => {
                         onToggleExpanded={() => setExpandedId((current) => (current === task().id ? null : task().id))}
                         onEnabledChange={(enabled) => props.onEnabledChange(task().id, enabled)}
                         onParamChange={(key, value) => props.onParamChange(task().id, key, value)}
+                        onPickFile={(key) => props.onPickFile(task().id, key)}
+                        onResolveCopilot={(input) => props.onResolveCopilot(task().id, input)}
+                        onBrowseCopilot={() => props.onBrowseCopilot(task().id)}
                         onRemove={() => props.onRemoveTask(task().id)}
                         onDragStart={() => setDragFrom(index)}
                         onDragOver={(event) => event.preventDefault()}

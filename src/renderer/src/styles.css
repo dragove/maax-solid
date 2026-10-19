@@ -2671,3 +2671,533 @@ select.input {
   line-height: 1.6;
   color: var(--faint);
 }
+
+/* --------------------------------------------------------------------------
+   Resource update strip inside a core row
+   -------------------------------------------------------------------------- */
+
+.core-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.core-row-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.core-resource {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--stroke);
+}
+
+.core-resource-stamp {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.core-resource-hint {
+  font-size: 11px;
+  color: var(--warning);
+}
+
+.core-resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Core release banner
+   -------------------------------------------------------------------------- */
+
+.core-release {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-surface);
+  background: var(--inset);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.core-release--new {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--stroke));
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.core-release-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.core-release-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Task plan toolbar and file picker field
+   -------------------------------------------------------------------------- */
+
+.plan-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-surface);
+  background: var(--inset);
+  color: var(--faint);
+}
+
+.plan-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.plan-select {
+  min-width: 180px;
+  flex: 0 1 240px;
+}
+
+.plan-name {
+  flex: 0 1 240px;
+}
+
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.file-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.file-name--empty {
+  color: var(--faint);
+}
+
+/* --------------------------------------------------------------------------
+   Copilot batch editor
+   -------------------------------------------------------------------------- */
+
+.copilot-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.copilot-add {
+  display: flex;
+  gap: 6px;
+}
+
+.copilot-add .input {
+  flex: 1 1 auto;
+}
+
+.copilot-empty {
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.copilot-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.copilot-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+}
+
+.copilot-mode {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  background: var(--surface-alt);
+}
+
+.copilot-mode--raid {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.copilot-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.copilot-stage {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+/* --------------------------------------------------------------------------
+   Copilot browser
+   -------------------------------------------------------------------------- */
+
+.copilot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.browser-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.browser-search > .input:first-child {
+  flex: 1 1 260px;
+}
+
+.browser-stage {
+  position: relative;
+  flex: 0 1 220px;
+}
+
+.browser-stage .input {
+  width: 100%;
+}
+
+.browser-sort {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.browser-suggestions {
+  position: absolute;
+  z-index: 5;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius-surface);
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.browser-suggestions button {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.browser-suggestions button:hover {
+  background: var(--surface-alt);
+}
+
+.browser-suggestions strong {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.browser-suggestions small {
+  margin-left: auto;
+  color: var(--faint);
+}
+
+.browser-filters {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.browser-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+}
+
+.browser-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.browser-empty {
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.browser-meta {
+  display: flex;
+  justify-content: space-between;
+  margin: 10px 0 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.browser-item {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-surface);
+  background: var(--inset);
+}
+
+.browser-item--open {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--stroke));
+}
+
+.browser-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+}
+
+.browser-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.browser-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.browser-title strong {
+  font-size: 13px;
+}
+
+.browser-code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent-text);
+}
+
+.browser-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.browser-author {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-soft);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.browser-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.browser-detail {
+  padding: 0 8px 8px;
+  border-top: 1px dashed var(--stroke);
+}
+
+.browser-details {
+  margin: 6px 0;
+  max-height: 140px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.browser-min {
+  margin: 0 0 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.browser-opers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.browser-opers li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: var(--radius-control);
+  background: var(--surface-alt);
+  font-size: 11px;
+}
+
+.browser-oper-name {
+  color: var(--text);
+}
+
+.browser-opers small {
+  color: var(--faint);
+}
+
+.browser-pager {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+/* --------------------------------------------------------------------------
+   Copilot tab
+   -------------------------------------------------------------------------- */
+
+.copilot-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 1080px) {
+  .copilot-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.copilot-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-surface);
+  background: var(--surface);
+}
+
+.copilot-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.copilot-index {
+  flex: 0 0 auto;
+  min-width: 18px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  text-align: right;
+}
+
+.copilot-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.copilot-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.copilot-run {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--stroke);
+}
+
+.copilot-run-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
