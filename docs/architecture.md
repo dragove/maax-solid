@@ -64,6 +64,43 @@ does not know how it is implemented.
 - The user data directory passed to `AsstSetUserDir` is writable and separate
   from the (usually read-only) core directory.
 
+### Resource updates
+
+MaaCore ships with a complete `resource/` tree. The GitHub MaaResource archive
+carries only the JSON half of it (tasks, stages, pipeline data) plus
+`version.json`; templates, OCR models and `config.json` come from that installed
+tree. An update is therefore an **overlay**, never a replacement:
+
+1. `github.com/MaaAssistantArknights/MaaResource` `Version` is read from
+   `raw.githubusercontent.com/.../resource/version.json` (single small file) and
+   compared with `<core>/resource/version.json`; the file on disk is the
+   authority, the registry copy is only a cache for display.
+2. The 14 MB branch archive is downloaded, extracted with `src/main/zip.ts`
+   (yauzl, entry-type and path validation) and only
+   `MaaResource-main/resource/` is used.
+3. Files that differ are moved into place atomically; every replaced or added
+   file is recorded in a backup under `userData/resource-backups/<core>/<stamp>`.
+   The three newest backups are kept, and a rollback restores the exact previous
+   bytes (added files are deleted again).
+4. Nothing is written while a device holds a session: the main process refuses
+   and the UI disables the actions (B1). Any host for that core is stopped
+   before the overlay is applied, because MaaCore keeps resource state in the
+   process.
+
+Files that the archive does not carry stay at their installed version, so a core
+release remains the only way to update models and templates.
+
+### Component updates
+
+`cores.check-update` compares the active core version with the published release
+(`api.maa.plus/.../version/stable.json`) and reports the new version, its publish
+date and the archive size. Installing reuses the core installer: the archive is
+downloaded to a staging directory, extracted with the system `tar`, and renamed
+into `userData/cores/<version>`, so the running core is never touched. The new
+version becomes active immediately unless a device still holds a session; in
+that case the switch waits for the next disconnect. Windows and macOS archives
+still need their own host variants, so `platformSuffixFor` only lists Linux.
+
 ## Main-process services
 
 | Service | Responsibility |
@@ -106,7 +143,68 @@ application services.
   plan, run and logs; pages are pure projections.
 - Task forms are driven by `src/shared/tasks.ts`, a declarative catalogue of
   supported task types, defaults, localized labels and field definitions.
-  `buildMaaTaskParams` maps the UI model to MaaCore's parameter JSON.
+  `buildMaaTaskParams` maps the UI model to MaaCore's parameter JSON, and
+  `firstMissingField` rejects a queue whose copilot file or custom task names are
+  still empty before anything is appended to the core.
+- A plan is a device-scoped ordered task list. Create, duplicate, rename,
+  import, export and remove all run in `Workspace`; every mutation broadcasts
+  `plans-updated` so the renderer never shows a stale plan list.
+- Copilot assignments are plain JSON files. Importing one copies it into
+  `userData/copilot` and stores the absolute path in the task parameters,
+  because MaaCore reads the file itself. `copilot.resolve` accepts a PRTS id, a
+  `prts.plus` link or a `prts://s/<id>` set; sets are expanded by fetching each
+  member, with four downloads in flight.
+- Clearing a stage with a copilot is a **one-off action**, not a daily task:
+  the Copilot tab keeps its own saved setup (`config/copilot.json`: the batch
+  plus run options) and `copilot.start` appends exactly one task to the
+  connected session, without a plan. Runs created that way carry no `planId`.
+  The queue palette therefore does not offer `Copilot`; the other copilot-based
+  tasks (SSS, Paradox) remain queue entries because they are repeatable.
+- A copilot task runs a **batch**: `params.copilot_list` becomes
+  `copilot_list: [{ id: <position>, filename, is_raid }]` for MaaCore, which
+  executes the entries in order and reports progress by that position. Normal
+  and raid runs of one file are two entries sharing a filename — the PRTS
+  `difficulty` bitmask (1 normal, 2 raid, 3 both) decides how many entries
+  `copilot.resolve` creates.
+
+#### Talking to PRTS politely
+
+prts.maa.plus is a community service, so every request goes through
+`src/main/services/prts.ts`:
+
+- one request in flight at a time, with a 750 ms minimum gap;
+- identical GETs are served from a 60 s in-memory cache, so re-running a search,
+  paging back, or expanding details costs nothing;
+- the stage catalogue (`GET /arknights/level`, ≈690 KB, 3.5k entries) is cached
+  on disk with its ETag and revalidated at most every 12 hours via
+  `If-None-Match`; a 304 keeps the cached copy.
+
+A detail view never fetches anything: `copilot/query` already returns the whole
+document, including operator requirements. Measured for a full browse → add
+session: two requests on open (catalogue + one query), zero for details,
+suggestions and repeat searches, one per added assignment.
+
+Search parameters, as the site actually implements them:
+
+| Parameter | Meaning |
+| --- | --- |
+| `document` | full-text keyword: stage names, operator names, uploader, description |
+| `level_keyword` | substring of the **internal** stage id (`main_01-07`, `act52side`) |
+| `operator` | Chinese operator name |
+| `uploader_id` | numeric author id |
+| `orderBy`, `desc` | `hot`/`views`/`upload_time`, true = descending |
+| `page`, `limit` | paging |
+
+The catalogue is what makes stage search usable: its `cat_three` field carries
+the display code (`1-7`, `YW-EX-3`, `H9-5（标准）`) and `stage_id` the id the API
+filters on, so typing `1-7` resolves to `main_01-07` locally.
+
+Operators come from the active core's `resource/battle_data.json` instead of the
+network: ~1400 entries with names in Chinese, English, Japanese, Korean and
+Traditional Chinese, plus rarity, profession and the game's own sort order. The
+catalogue drops `TRAP` summons, matches Chinese or English names, and is cached
+per core path with the file mtime, so a core update refreshes it automatically.
+PRTS filters on the **Chinese** name, which is what the picker sends.
 - Styling is a hand-written CSS design system (tokens, panels, task cards,
   log stream). There is no Tailwind and no Solid-1 UI dependency.
 

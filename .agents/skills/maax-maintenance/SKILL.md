@@ -259,6 +259,92 @@ Use a utility process/worker, one host per core version or resource set.
   timing separately, keep both and label them, rather than replacing one with
   the other.
 
+### Host lifetime and recovery
+
+- A host is keyed by core + resource server and shared by its devices; membership
+  is `HostEntry.devices`. Attach in `ensureSession`, detach on disconnect/delete,
+  and release the process when the last device leaves. Do not count connects by
+  hand: the counter only grows that way and leaves orphaned processes.
+- On a crash, abort in-flight connects before scheduling the retry. A connect
+  that is still waiting on its 60s timeout otherwise reports a stale failure over
+  an already healthy retry.
+- Retries are gated on intent: an explicit disconnect, a device delete, or
+  shutdown clears it, so a retry that fails afterwards cannot start a new chain
+  behind the user.
+- Never resume a run after a host crash. Mark the interrupted queue failed;
+  resuming could spend sanity, medicine or Originite twice.
+
+### Resource updates
+
+- The resource stamp in `resource/version.json` is read from disk at use time.
+  The registry copy is a display cache; trusting it lets a stale value skip a
+  real update.
+- A resource update is an overlay: back up every file that will be replaced or
+  added, move files into place atomically, and leave the previous bytes
+  restorable. Imported cores may live on another filesystem than the cache, so
+  `rename` needs an EXDEV fallback.
+- Write nothing while a device holds a session on that core, and stop the core's
+  hosts first — MaaCore keeps resource state in the process.
+- Label a backup with the stamp it restores to, not the one it applied.
+
+### Component updates
+
+- Installing a core is additive: new directory, new registry entry. Never write
+  into the directory of a running core.
+- Activation is a separate step. Switch the active core only when no session
+  exists; otherwise leave the selection alone so a running device keeps its
+  core until it disconnects.
+- Only platform suffixes the core host can actually load belong in
+  `platformSuffixFor`; a wrong asset produces a "ready" core that cannot start.
+
+### Task plans and task types
+
+- A plan mutation must broadcast `plans-updated`. The renderer keeps its own
+  plan list; a stale list silently drops a plan switch because the select value
+  points at an option that does not exist yet.
+- New task types touch four places at once: `TaskTypeSchema`, an entry in
+  `TASK_DEFINITIONS`, `getTaskDefaults`, and `buildMaaTaskParams` (plus
+  `TASK_PALETTE_ORDER`). The exhaustive switches fail the type check if one is
+  missed — do not cast around them.
+- Required fields are validated in the main process before the first task is
+  appended, so a missing copilot file cannot leave a half-built queue.
+- A copilot batch's `copilot_list[].id` must be the entry's **position** in the
+  whole list: the core sends it back with progress events. Never use the local
+  item id or the PRTS id there.
+- Copilot is **not** a queue task: it lives in its own tab, keeps its setup in
+  `config/copilot.json` and starts a run with no `planId`. Do not add it back to
+  `TASK_PALETTE_ORDER`; a first clear is one-off, everything after it uses the
+  game's own auto-battle inside the Fight task.
+- Copilot `difficulty` is a bitmask (1 normal, 2 raid, 3 both), not an enum.
+  Expanding "both" into two entries that share one file is what makes a normal
+  and a raid run back to back possible.
+
+### PRTS traffic
+
+- Never call `fetch` on prts.maa.plus outside `PrtsClient`. The client owns the
+  request queue (one in flight, 750 ms gap) and the response cache; a stray
+  `fetch` bypasses both and the site is a community service.
+- The renderer must not search on keystroke. Searches run on an explicit action
+  and only the stage autocomplete is debounced; anything that re-queries on
+  every render will hammer the API.
+- `document` is the full-text keyword (stage/operator/author/description);
+  `level_keyword` expects the internal stage id, not a display code. Do not pass
+  `document=true` — it is a keyword, so it searches for the text "true".
+- The level catalogue is cached on disk with its ETag for 12 hours. Do not lower
+  that TTL to "always fresh": 690 KB per hit is exactly the pressure we are
+  trying to avoid.
+- Operator data is local (`<core>/resource/battle_data.json`). PRTS keys its
+  `operator` filter on the Chinese name, so send `name`, never `name_en`.
+
+### Event handlers and signals
+
+- Solid batches signal writes inside an event handler: reading `operator()`
+  right after `setOperator(...)` still returns the previous value. Handlers here
+  build the next snapshot explicitly and pass it to the async call
+  (`commit({ operator }) → search(page, filters)`); re-reading state you just
+  wrote silently searches with the old filter and looks like "the button does
+  nothing".
+
 ## Log severity mapping
 
 Callback message IDs are not a severity scale. Map payload types to user-facing
