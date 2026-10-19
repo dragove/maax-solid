@@ -1,0 +1,22 @@
+src/renderer/src/styles.css
+  s_d13dc646cedd3b::t_1c079365007c72 2007-2131
+src/renderer/src/components/ui/Toaster.tsx
+  s_d13dc646cedd3b::t_a799216b558e8d 69
+  s_d13dc646cedd3b::t_a87ba957747253 1,13-30,43-68,70-72,74-90,94-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "f9b374a3a350fd711d06e12d8b5d21b715a1aeb2",
+  "prompts": {},
+  "sessions": {
+    "s_d13dc646cedd3b": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a15295-ccb6-746d-ad95-77dabefd078c",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
