@@ -268,6 +268,19 @@ Use a utility process/worker, one host per core version or resource set.
 - On a crash, abort in-flight connects before scheduling the retry. A connect
   that is still waiting on its 60s timeout otherwise reports a stale failure over
   an already healthy retry.
+- A connect attempt must settle the device state on **every** exit path, not just
+  the "MaaCore rejected it" branches: missing core, host start failure, session
+  create failure, request error and the wait timeout all raise an error, and the
+  `connecting` badge is what the UI reads. Leaving it set strands the device on a
+  connect that never finishes and keeps the connect button (and the "disconnect
+  before removing" guard) disabled. Settle it from one `Effect.tapError` owner,
+  and ignore late failures from an attempt that a newer one superseded.
+- `adb connect` has no timeout of its own: against an unreachable address it can
+  block for minutes, and `AsstAsyncConnect` cannot be cancelled, so MaaCore never
+  emits `Connect`/`ConnectFailed`. Probe the address in `services/adb.ts` (hard
+  `execFile` timeout, `get-state` fallback so a refused connect still passes for
+  an address the adb server already knows) before starting the MaaCore call; the
+  waiter timeout is only the backstop.
 - Retries are gated on intent: an explicit disconnect, a device delete, or
   shutdown clears it, so a retry that fails afterwards cannot start a new chain
   behind the user.
@@ -374,18 +387,19 @@ levels in one formatter:
 
 ## Verification matrix
 
-| Change             | Minimum check                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------ |
-| Reactive control   | update twice; verify focus, visual selection, and persisted value                                |
-| Reactive warning   | `pnpm dev` console stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen |
-| Stylesheet rewrite | every class used by TSX still has a rule; screenshot affected screens in both themes             |
-| Modal              | open it from a focused launcher: focus lands inside, Esc and backdrop close                      |
-| Dynamic list       | add/remove/reorder; confirm no unexpected remount                                                |
-| Effect service     | type check, layer boot, and one failure path                                                     |
-| IPC contract       | invalid payload is rejected; valid payload round-trips                                           |
-| Native host        | connect, perform one operation, stop; inspect native log                                         |
-| Log formatter      | expected branch is not error; real failure is error                                              |
-| Packaging          | build, launch unpacked app, load a core/resource                                                 |
+| Change             | Minimum check                                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| Reactive control   | update twice; verify focus, visual selection, and persisted value                                     |
+| Reactive warning   | `pnpm dev` console stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen      |
+| Stylesheet rewrite | every class used by TSX still has a rule; screenshot affected screens in both themes                  |
+| Modal              | open it from a focused launcher: focus lands inside, Esc and backdrop close                           |
+| Dynamic list       | add/remove/reorder; confirm no unexpected remount                                                     |
+| Effect service     | type check, layer boot, and one failure path                                                          |
+| IPC contract       | invalid payload is rejected; valid payload round-trips                                                |
+| Native host        | connect, perform one operation, stop; inspect native log                                              |
+| Device connect     | connect an unreachable address: fails within the ADB probe timeout and the device leaves `connecting` |
+| Log formatter      | expected branch is not error; real failure is error                                                   |
+| Packaging          | build, launch unpacked app, load a core/resource                                                      |
 
 Add tests only where the contract is stable: schemas, pure mappers, severity
 classification, parser output. Avoid brittle DOM tests for screens that are

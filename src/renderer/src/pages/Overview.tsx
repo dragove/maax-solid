@@ -1,6 +1,6 @@
 import { For, Show, type Component } from "solid-js";
 import type { Bootstrap, DeviceView, Locale, RunSnapshot, TaskPlan } from "../../../shared/schemas";
-import type { UiLogEntry } from "../log-format";
+import { firstLine, type UiLogEntry } from "../log-format";
 import { enginePhaseKey, formatClock, pick, runStatusKey, runTaskStatusKey, t } from "../i18n/i18n";
 import { SetupPanel } from "../components/SetupPanel";
 import { Button } from "../components/ui/Button";
@@ -193,8 +193,8 @@ export const Overview: Component<OverviewProps> = (props) => {
               <For each={lastLogs()}>
                 {(entry) => (
                   <li class={`activity-line activity-line--${entry.level}`}>
-                    <span class="activity-time">{formatClock(entry.at, props.locale)}</span>
-                    <span>{entry.message}</span>
+                    <span class="activity-time">{entry.time}</span>
+                    <span>{firstLine(entry.message)}</span>
                   </li>
                 )}
               </For>

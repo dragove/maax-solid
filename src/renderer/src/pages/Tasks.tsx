@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, type Component } from "solid-js";
+import { For, Show, createSignal, type Component } from "solid-js";
 import type {
   Bootstrap,
   DeviceView,
@@ -11,6 +11,7 @@ import type {
 import type { UiLogEntry } from "../log-format";
 import { TASK_DEFINITIONS, TASK_PALETTE_ORDER } from "../../../shared/tasks";
 import { pick, runStatusKey, runTaskStatusKey, t } from "../i18n/i18n";
+import { LogStream } from "../components/LogStream";
 import { TaskCard } from "../components/TaskCard";
 import { Button } from "../components/ui/Button";
 import { Icon } from "../components/ui/Icon";
@@ -69,7 +70,6 @@ export const Tasks: Component<TasksProps> = (props) => {
   const [dragFrom, setDragFrom] = createSignal<number | null>(null);
   const [renaming, setRenaming] = createSignal(false);
   const [draftName, setDraftName] = createSignal("");
-  let logRef: HTMLDivElement | undefined;
 
   const connected = () => props.device?.status === "online" || props.device?.status === "running";
   const enabledTasks = () => props.plan?.tasks.filter((task) => task.enabled) ?? [];
@@ -77,15 +77,6 @@ export const Tasks: Component<TasksProps> = (props) => {
   const completedCount = () => props.run?.tasks.filter((task) => task.status === "completed").length ?? 0;
   const progress = () =>
     props.run && props.run.tasks.length > 0 ? Math.round((completedCount() / props.run.tasks.length) * 100) : 0;
-
-  createEffect(
-    () => props.logs.length,
-    () => {
-      queueMicrotask(() => {
-        if (logRef) logRef.scrollTop = logRef.scrollHeight;
-      });
-    },
-  );
 
   const addTask = (type: TaskType): void => {
     props.onAddTask(type);
@@ -395,28 +386,7 @@ export const Tasks: Component<TasksProps> = (props) => {
                 {t(props.locale, "tasks.clearLogs")}
               </Button>
             </div>
-            <div
-              class="log-stream"
-              ref={(element) => {
-                logRef = element;
-              }}
-            >
-              <Show
-                when={props.logs.length > 0}
-                fallback={<p class="muted log-empty">{t(props.locale, "tasks.noLogs")}</p>}
-              >
-                <For each={props.logs}>
-                  {(entry) => (
-                    <div class={`log-line log-line--${entry.level}`}>
-                      <span class="log-time">
-                        {new Date(entry.at).toLocaleTimeString(props.locale, { hour12: false })}
-                      </span>
-                      <span class="log-message">{entry.message}</span>
-                    </div>
-                  )}
-                </For>
-              </Show>
-            </div>
+            <LogStream entries={props.logs} locale={props.locale} empty={t(props.locale, "tasks.noLogs")} />
           </section>
         </aside>
       </div>

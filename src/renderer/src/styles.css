@@ -1219,6 +1219,10 @@ select.input {
   color: var(--warning);
 }
 
+.activity-line--success {
+  color: var(--ok);
+}
+
 .activity-line--debug {
   color: var(--muted);
 }
@@ -1744,8 +1748,16 @@ select.input {
   min-height: 0;
 }
 
+.log-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .log-stream {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 96px;
   overflow: auto;
   padding: 8px 14px;
@@ -1753,23 +1765,111 @@ select.input {
 
 .log-line {
   display: flex;
+  align-items: flex-start;
   gap: 8px;
   padding: 1px 0;
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-soft);
-  content-visibility: auto;
 }
 
 .log-time {
-  flex: 0 0 auto;
+  flex: 0 0 58px;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-badge {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 15px;
+  letter-spacing: 0.02em;
+  color: var(--faint);
+  background: var(--surface-alt);
+  border-radius: 3px;
+}
+
+.log-badge--info {
+  color: var(--info);
+  background: var(--info-soft);
+}
+
+.log-badge--success {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.log-badge--warn {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.log-badge--error {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .log-message {
+  display: -webkit-box;
+  flex: 1 1 auto;
   min-width: 0;
-  word-break: break-word;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.log-expand {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--faint);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.log-expand:hover {
+  color: var(--accent-text);
+}
+
+.log-expand .icon {
+  width: 12px;
+  height: 12px;
+  margin-top: 3px;
+}
+
+.log-resume {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border: 0;
+  border-radius: 50%;
+  box-shadow: var(--shadow-flyout);
+  cursor: pointer;
+}
+
+.log-resume:hover {
+  background: var(--accent-hover);
+}
+
+.log-resume .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.log-line--success .log-message {
+  color: var(--ok);
 }
 
 .log-line--error .log-message {
@@ -1782,6 +1882,36 @@ select.input {
 
 .log-line--debug .log-message {
   color: var(--muted);
+}
+
+.log-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.log-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.log-detail-body {
+  max-height: 300px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--inset);
+  border-radius: var(--radius-control);
 }
 
 .log-empty {

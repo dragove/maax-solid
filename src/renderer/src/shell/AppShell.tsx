@@ -25,7 +25,7 @@ import { StatusPill } from "../components/ui/StatusPill";
 import { DesktopBridgeError, bootstrap as loadBootstrap, command, subscribeEvents } from "../effect/desktop";
 import { useAppRuntime } from "../effect/solid-effect";
 import { enginePhaseKey, t } from "../i18n/i18n";
-import { formatCoreCallback, type UiLogEntry } from "../log-format";
+import { formatCoreCallback, formatLogTime, type UiLogEntry } from "../log-format";
 import { Copilot } from "../pages/Copilot";
 import { Devices } from "../pages/Devices";
 import { Overview } from "../pages/Overview";
@@ -51,6 +51,11 @@ const NAV: ReadonlyArray<{
   { view: "devices", icon: "smartphone", key: "nav.devices" },
   { view: "settings", icon: "settings", key: "nav.settings" },
 ];
+
+/** Rows kept in memory; also the hard cap on the rendered log list. */
+const LOG_LIMIT = 750;
+/** Core callbacks arrive in bursts, so line appends are coalesced per flush. */
+const LOG_FLUSH_MS = 60;
 
 const statusText = (status: DeviceView["status"], locale: Locale): string => {
   switch (status) {
@@ -98,6 +103,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const [stages, setStages] = createSignal<ReadonlyArray<StageCatalogEntry>>([]);
 
   let logId = 0;
+  let pendingLogs: UiLogEntry[] = [];
+  let logTimer: number | undefined;
   let themePending = false;
   let contentRef: HTMLElement | undefined;
   let saveTimer: number | undefined;
@@ -175,11 +182,20 @@ export const AppShell: Component<AppShellProps> = (props) => {
     },
   );
 
-  const appendLog = (entry: Omit<UiLogEntry, "id">): void => {
+  const flushLogs = (): void => {
+    logTimer = undefined;
+    if (pendingLogs.length === 0) return;
+    const batch = pendingLogs;
+    pendingLogs = [];
     setLogs((current) => {
-      const next = [...current, { ...entry, id: ++logId }];
-      return next.length > 1500 ? next.slice(next.length - 1500) : next;
+      const next = current.concat(batch);
+      return next.length > LOG_LIMIT ? next.slice(next.length - LOG_LIMIT) : next;
     });
+  };
+
+  const appendLog = (entry: Omit<UiLogEntry, "id" | "time">): void => {
+    pendingLogs.push({ ...entry, id: ++logId, time: formatLogTime(entry.at) });
+    logTimer ??= window.setTimeout(flushLogs, LOG_FLUSH_MS);
   };
 
   const applyEvent = (event: import("../../../shared/schemas").MaaxEvent): void => {
@@ -264,12 +280,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         const formatted = formatCoreCallback(event, locale());
         if (!formatted) break;
         if (formatted.level === "debug" && !data().settings.developerMode) break;
-        appendLog({
-          level: formatted.level,
-          message: formatted.message,
-          at: event.at,
-          deviceId: event.deviceId,
-        });
+        appendLog({ ...formatted, at: event.at, deviceId: event.deviceId });
         break;
       }
     }
@@ -327,6 +338,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
       unsubscribe();
       media.removeEventListener("change", onMedia);
       if (saveTimer !== undefined) window.clearTimeout(saveTimer);
+      if (logTimer !== undefined) window.clearTimeout(logTimer);
       for (const shot of Object.values(screenshots())) URL.revokeObjectURL(shot.url);
     };
   });
@@ -792,6 +804,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
   };
 
   const clearLogs = (): void => {
+    pendingLogs = [];
+    if (logTimer !== undefined) {
+      window.clearTimeout(logTimer);
+      logTimer = undefined;
+    }
     setLogs([]);
   };
 

@@ -39,6 +39,7 @@ import { TaskConfigSchema } from "../../shared/schemas";
 import type { TaskConfig } from "../../shared/schemas";
 import { buildMaaTaskParams, createCopilotTask, createDefaultPlanTasks, firstMissingField } from "../../shared/tasks";
 import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
+import { probeAdbConnection } from "./adb";
 
 const STAGE_ACTIVITY_URL = "https://api.maa.plus/MaaAssistantArknights/api/gui/StageActivityV2.json";
 
@@ -778,8 +779,15 @@ export const ApplicationLive: Layer.Layer<
         return { profile, state, host };
       });
 
-    const connectDevice = (deviceId: string, options?: { readonly retry?: boolean }) =>
-      Effect.gen(function* () {
+    /**
+     * The newest connect attempt owns the device state: a superseded attempt
+     * must not settle the badge of its successor.
+     */
+    const connectGenerations = new Map<string, number>();
+
+    const connectDevice = (deviceId: string, options?: { readonly retry?: boolean }) => {
+      let generation: number | undefined;
+      const attempt = Effect.gen(function* () {
         const profile = profiles.get(deviceId);
         if (!profile) return yield* maaxError("设备不存在");
         // A manual connect wins over pending retries; a retry keeps its counter.
@@ -789,13 +797,25 @@ export const ApplicationLive: Layer.Layer<
           const view = viewFor(deviceId);
           if (view) return view;
         }
+        // This attempt owns the waiter slot: settle a pending attempt instead of
+        // letting it time out later and swallow this attempt's callbacks.
+        abortConnectWaiter(deviceId, "连接请求已被新的连接请求取代");
+        generation = (connectGenerations.get(deviceId) ?? 0) + 1;
+        connectGenerations.set(deviceId, generation);
         setDeviceState(deviceId, { status: "connecting", lastError: undefined });
         emitDevice(deviceId);
         const core = yield* ensureActiveCore();
+        const adbPath = profile.adbPath || settingsCache?.adbPath || "adb";
+        // `adb connect` has no timeout of its own, and MaaCore cannot cancel the
+        // call it starts, so prove the address is reachable before asking for it.
+        const probe = yield* Effect.tryPromise({
+          try: () => probeAdbConnection({ adbPath, address: profile.address }),
+          catch: (cause) => maaxError("无法执行 ADB，请检查 ADB 路径", cause),
+        });
+        if (!probe.ok) return yield* maaxError("无法连接设备", probe.message);
         const server = serverForClient(profile.clientType);
         const host = yield* ensureHost(core, server);
         const sessionId = yield* ensureSession(profile, host);
-        const adbPath = profile.adbPath || settingsCache?.adbPath || "adb";
         const waiter = waitForConnect(deviceId);
         const connectResult = yield* Effect.tryPromise({
           try: async () => {
@@ -815,9 +835,6 @@ export const ApplicationLive: Layer.Layer<
           },
         });
         if (!connectResult || connectResult.callId <= 0) {
-          cancelConnectWaiter(deviceId);
-          setDeviceState(deviceId, { status: "error", lastError: "连接请求被 MaaCore 拒绝" });
-          emitDevice(deviceId);
           return yield* maaxError("连接请求被 MaaCore 拒绝");
         }
         const result = yield* Effect.tryPromise({
@@ -825,10 +842,7 @@ export const ApplicationLive: Layer.Layer<
           catch: (cause) => maaxError("连接失败", cause),
         });
         if (!result.ok) {
-          const message = result.message || "ADB 连接失败";
-          setDeviceState(deviceId, { status: "error", lastError: message });
-          emitDevice(deviceId);
-          return yield* maaxError("连接失败", message);
+          return yield* maaxError("连接失败", result.message || "ADB 连接失败");
         }
         const nextProfile = yield* workspace.markConnected(deviceId);
         profiles.set(deviceId, nextProfile);
@@ -846,10 +860,35 @@ export const ApplicationLive: Layer.Layer<
         return view;
       });
 
+      /**
+       * Every failure — missing core, host spawn, session create, request error,
+       * or no callback at all before the timeout — must settle the `connecting`
+       * badge. Leaving it set strands the UI on a connect that will never
+       * finish and keeps the connect button disabled.
+       */
+      return attempt.pipe(
+        Effect.tapError((error: MaaxError) =>
+          Effect.sync(() => {
+            if (generation === undefined || connectGenerations.get(deviceId) !== generation) return;
+            cancelConnectWaiter(deviceId);
+            // An explicit disconnect during the attempt owns the state now.
+            if (runtime.get(deviceId)?.status !== "connecting") return;
+            const message = error.detail ? `${error.message}：${error.detail}` : error.message;
+            setDeviceState(deviceId, { status: "error", lastError: message });
+            emitDevice(deviceId);
+            log("warn", `连接失败：${message}`);
+          }),
+        ),
+      );
+    };
+
     const disconnectDevice = (deviceId: string) =>
       Effect.gen(function* () {
         // An explicit disconnect must win over a pending crash retry.
         cancelReconnect(deviceId);
+        // ...and over an in-flight connect, whose late success would otherwise
+        // bring the device back online after the user disconnected it.
+        abortConnectWaiter(deviceId, "设备已断开");
         const state = runtime.get(deviceId);
         const run = runs.get(deviceId);
         if (run && (run.snapshot.status === "running" || run.snapshot.status === "preparing")) {
@@ -1317,6 +1356,8 @@ export const ApplicationLive: Layer.Layer<
     const removeDevice = (id: string) =>
       Effect.gen(function* () {
         cancelReconnect(id);
+        // A pending connect must not settle a device that no longer exists.
+        abortConnectWaiter(id, "设备已删除");
         const state = runtime.get(id);
         if (state?.sessionId && state.hostKey) {
           const host = hosts.get(state.hostKey);

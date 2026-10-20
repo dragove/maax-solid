@@ -1,15 +1,38 @@
 import type { CoreCallbackEvent, Locale } from "../../shared/schemas";
 import { t } from "./i18n/i18n";
 
+/**
+ * Display severity of one row. `success` is renderer-only: MaaCore reports the
+ * end of a chain through the same callback family either way, and a run that
+ * finished should not look identical to one that merely started.
+ */
+export type LogLevel = "debug" | "info" | "success" | "warn" | "error";
+
 export interface LogLine {
-  readonly level: "debug" | "info" | "warn" | "error";
+  readonly level: LogLevel;
   readonly message: string;
+  /** Context kept out of the clamped row and shown in the detail dialog. */
+  readonly detail?: string;
 }
 
 export interface UiLogEntry extends LogLine {
   readonly id: number;
   readonly at: number;
+  /** Pre-formatted `HH:mm:ss`, so a later locale switch cannot reflow the stream. */
+  readonly time: string;
   readonly deviceId?: string;
+}
+
+/** Fixed width time column; a locale time string varies in width and digits. */
+export function formatLogTime(at: number): string {
+  const date = new Date(at);
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** First line only, for compact surfaces such as the overview activity list. */
+export function firstLine(message: string): string {
+  return message.split("\n", 1)[0] ?? "";
 }
 
 const str = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -17,51 +40,116 @@ const str = (value: unknown): string => (typeof value === "string" ? value : "")
 const num = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
+const record = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+
+const list = (value: unknown): ReadonlyArray<unknown> => (Array.isArray(value) ? value : []);
+
+/** Payloads are untrusted JSON, so a star count must stay repeatable. */
+const stars = (value: number | undefined): number => Math.min(Math.max(Math.trunc(value ?? 0), 0), 6);
+
 const taskchain = (payload: Record<string, unknown>): string => str(payload.taskchain) || "MaaCore";
 
-const detailSummary = (what: string, details: Record<string, unknown>): string => {
+const info = (message: string): LogLine => ({ level: "info", message });
+
+/**
+ * A stage clear is a multi-line block: the row clamps to three lines and the
+ * detail dialog shows the rest. Recognition summaries alone were hiding the
+ * item list, which is the only part a player reads.
+ */
+const stageDrops = (details: Record<string, unknown>, locale: Locale): LogLine => {
+  const stage = str(record(details.stage).stageCode) || str(details.stage) || str(details.stage_name);
+  const lines = list(details.stats).flatMap((value) => {
+    const drop = record(value);
+    const name = str(drop.itemName);
+    const quantity = num(drop.quantity);
+    if (name === "" || quantity === undefined) return [];
+    const added = num(drop.addQuantity) ?? 0;
+    return [`${name} ×${quantity}${added > 0 ? ` (+${added})` : ""}`];
+  });
+
+  const turns = num(details.cur_times);
+  if (turns !== undefined && turns > 0) lines.push(`${t(locale, "log.detail.turns")} ${turns}`);
+
+  // Annihilation reports weekly progress as [current, cap] from v6.9.0 on.
+  const weekly = list(details.annihilation_weekly_process);
+  if (weekly.length === 2) {
+    lines.push(`${t(locale, "log.detail.annihilation")} ${String(weekly[0])} / ${String(weekly[1])}`);
+  }
+
+  const header = `${t(locale, "log.detail.dropTotal")}${stage === "" ? "" : ` · ${stage}`}`;
+  if (lines.length === 0) return info(`${header} · ${t(locale, "log.detail.noDrop")}`);
+  return info([header, ...lines].join("\n"));
+};
+
+/** 5★ and 6★ are the only results worth a highlight in a wall of recruit rows. */
+const recruitResult = (details: Record<string, unknown>, locale: Locale): LogLine => {
+  const level = stars(num(details.level));
+  const lines = list(details.result).flatMap((value) => {
+    const combination = record(value);
+    const combinationStars = stars(num(combination.level));
+    const tags = list(combination.tags)
+      .map((tag) => str(tag))
+      .filter((tag) => tag !== "")
+      .join("  ");
+    const opers = list(combination.opers).flatMap((value) => {
+      const oper = record(value);
+      const name = str(oper.name);
+      if (name === "") return [];
+      return [`  ${"★".repeat(stars(num(oper.level)))} ${name}`];
+    });
+    const head = [combinationStars > 0 ? `${combinationStars}★` : "", tags].filter((part) => part !== "").join("  ");
+    return [head, ...opers].filter((line) => line.trim() !== "");
+  });
+
+  return {
+    level: level >= 5 ? "success" : "info",
+    message: `${t(locale, "log.detail.recruit")} · ${level} ★`,
+    ...(lines.length > 0 ? { detail: lines.join("\n") } : {}),
+  };
+};
+
+const detailSummary = (what: string, details: Record<string, unknown>, locale: Locale): LogLine => {
   switch (what) {
-    case "StageDrops": {
-      const stage = str(details.stage) || str(details.stage_name);
-      return `掉落识别${stage ? ` · ${stage}` : ""}`;
-    }
+    case "StageDrops":
+      return stageDrops(details, locale);
     case "RecruitResult":
-      return "公开招募结果";
+      return recruitResult(details, locale);
     case "SanityBeforeStage": {
       const current = num(details.current);
       const max = num(details.max);
-      return current !== undefined && max !== undefined ? `理智 ${current}/${max}` : "理智检查";
+      return info(current !== undefined && max !== undefined ? `理智 ${current}/${max}` : "理智检查");
     }
     case "UseMedicine": {
       const count = num(details.count);
-      return count !== undefined ? `使用理智药 ×${count}` : "使用理智药";
+      return info(count !== undefined ? `使用理智药 ×${count}` : "使用理智药");
     }
     case "UseStone":
-      return "使用源石";
+      return info("使用源石");
     case "FightTimes": {
       const times = num(details.times);
       const max = num(details.max_times);
-      return times !== undefined && max !== undefined ? `战斗 ${times}/${max}` : "战斗计数";
+      return info(times !== undefined && max !== undefined ? `战斗 ${times}/${max}` : "战斗计数");
     }
     case "StageInfo":
-      return `关卡 ${str(details.name) || str(details.stage) || ""}`.trim();
+      return info(`关卡 ${str(details.name) || str(details.stage) || ""}`.trim());
     case "CopilotListLoadTaskFileSuccess":
-      return `作业已加载 · ${str(details.filename)}`;
+      return info(`作业已加载 · ${str(details.filename)}`);
     case "BattleStart":
-      return "进入战斗";
+      return info("进入战斗");
     case "BattleFinished":
-      return "战斗结束";
+      return info("战斗结束");
     case "":
-      return "子任务信息";
+      return info("子任务信息");
     default:
-      return what;
+      return info(what);
   }
 };
 
 export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): LogLine | null {
-  const payload = event.payload as Record<string, unknown>;
+  const payload = record(event.payload);
   const chain = taskchain(payload);
-  const details = (payload.details ?? {}) as Record<string, unknown>;
+  const details = record(payload.details);
   const why = str(payload.why);
   const what = str(payload.what);
 
@@ -92,7 +180,7 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
       };
     }
     case 3:
-      return { level: "info", message: `${t(locale, "log.allDone")} · ${chain}` };
+      return { level: "success", message: `${t(locale, "log.allDone")} · ${chain}` };
     case 4:
       return {
         level: "debug",
@@ -108,16 +196,14 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
     case 10001:
       return { level: "info", message: `${t(locale, "log.taskStart")} · ${chain}` };
     case 10002:
-      return { level: "info", message: `${t(locale, "log.taskDone")} · ${chain}` };
+      return { level: "success", message: `${t(locale, "log.taskDone")} · ${chain}` };
     case 10003:
       return { level: "debug", message: `${chain} · ${what || "extra info"}` };
     case 10004:
       return { level: "warn", message: `${t(locale, "log.taskStopped")} · ${chain}` };
     case 20000: {
       const subtask = str(payload.subtask);
-      const first = Array.isArray(payload.first)
-        ? payload.first.filter((value): value is string => typeof value === "string")
-        : [];
+      const first = list(payload.first).filter((value): value is string => typeof value === "string");
       const label = first[0] || str(details.task) || subtask || chain;
       if (subtask === "AutoRecruitTask") {
         return {
@@ -155,11 +241,14 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
         level: "debug",
         message: `${t(locale, "log.subtask")} · ${str(details.task) || what} · done`,
       };
-    case 20003:
+    case 20003: {
+      const summary = detailSummary(what, details, locale);
       return {
-        level: "info",
-        message: `${chain} · ${detailSummary(what, details)}`,
+        level: summary.level,
+        message: `${chain} · ${summary.message}`,
+        ...(summary.detail === undefined ? {} : { detail: summary.detail }),
       };
+    }
     case 20004:
       return { level: "warn", message: `${t(locale, "log.subtask")} · ${chain} · stopped` };
     case 30000:
