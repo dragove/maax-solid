@@ -14,8 +14,10 @@ import { pick, runStatusKey, runTaskStatusKey, t } from "../i18n/i18n";
 import { LogStream } from "../components/LogStream";
 import { TaskCard } from "../components/TaskCard";
 import { Button } from "../components/ui/Button";
+import { Collapse } from "../components/ui/Collapse";
 import { Icon } from "../components/ui/Icon";
 import { StatusPill } from "../components/ui/StatusPill";
+import { SwapStack } from "../components/ui/SwapStack";
 
 interface TasksProps {
   readonly data: Bootstrap;
@@ -92,40 +94,51 @@ export const Tasks: Component<TasksProps> = (props) => {
           <p class="page-subtitle">{t(props.locale, "tasks.subtitle")}</p>
         </div>
         <div class="page-actions">
-          <Show
-            when={connected()}
-            fallback={
-              <Button
-                variant="secondary"
-                disabled={!props.device || props.busy || props.connectBusy}
-                onClick={props.onConnect}
-              >
-                <Icon name={props.device?.status === "connecting" ? "loader" : "wifi"} />
-                {props.device?.status === "connecting"
-                  ? t(props.locale, "status.connecting")
-                  : t(props.locale, "tasks.connect")}
-              </Button>
-            }
-          >
-            <Show
-              when={isRunning()}
-              fallback={
-                <Button
-                  variant="primary"
-                  disabled={!props.device || props.busy || enabledTasks().length === 0}
-                  onClick={props.onStart}
-                >
-                  <Icon name="play" />
-                  {t(props.locale, "tasks.run")}
-                </Button>
-              }
-            >
-              <Button variant="danger" disabled={props.busy} onClick={props.onStop}>
-                <Icon name="square" />
-                {t(props.locale, "tasks.stop")}
-              </Button>
-            </Show>
-          </Show>
+          <SwapStack
+            current={connected() ? (isRunning() ? "stop" : "run") : "connect"}
+            items={[
+              {
+                id: "connect",
+                node: (
+                  <Button
+                    variant="secondary"
+                    disabled={!props.device || props.busy || props.connectBusy}
+                    onClick={props.onConnect}
+                  >
+                    <Icon
+                      name={props.device?.status === "connecting" ? "loader" : "wifi"}
+                      class={props.device?.status === "connecting" ? "spin" : undefined}
+                    />
+                    {props.device?.status === "connecting"
+                      ? t(props.locale, "status.connecting")
+                      : t(props.locale, "tasks.connect")}
+                  </Button>
+                ),
+              },
+              {
+                id: "run",
+                node: (
+                  <Button
+                    variant="primary"
+                    disabled={!props.device || props.busy || enabledTasks().length === 0}
+                    onClick={props.onStart}
+                  >
+                    <Icon name="play" />
+                    {t(props.locale, "tasks.run")}
+                  </Button>
+                ),
+              },
+              {
+                id: "stop",
+                node: (
+                  <Button variant="danger" disabled={props.busy} onClick={props.onStop}>
+                    <Icon name="square" />
+                    {t(props.locale, "tasks.stop")}
+                  </Button>
+                ),
+              },
+            ]}
+          />
         </div>
       </header>
 
@@ -243,39 +256,46 @@ export const Tasks: Component<TasksProps> = (props) => {
             </div>
           </div>
 
-          <Show when={paletteOpen()}>
-            <div class="task-palette">
-              <div class="palette-head">
-                <strong>{t(props.locale, "tasks.addTask")}</strong>
-                <button
-                  type="button"
-                  class="icon-button"
-                  onClick={() => setPaletteOpen(false)}
-                  aria-label={t(props.locale, "common.close")}
-                >
-                  <Icon name="x" />
-                </button>
+          <Collapse open={paletteOpen()}>
+            {() => (
+              <div class="task-palette">
+                <div class="palette-head">
+                  <strong>{t(props.locale, "tasks.addTask")}</strong>
+                  <button
+                    type="button"
+                    class="icon-button"
+                    onClick={() => setPaletteOpen(false)}
+                    aria-label={t(props.locale, "common.close")}
+                  >
+                    <Icon name="x" />
+                  </button>
+                </div>
+                <div class="palette-grid">
+                  <For each={TASK_PALETTE_ORDER}>
+                    {(type, index) => {
+                      const definition = TASK_DEFINITIONS[type];
+                      return (
+                        <button
+                          type="button"
+                          class="palette-item"
+                          style={{ "animation-delay": `${Math.min(index(), 8) * 14}ms` }}
+                          onClick={() => addTask(type)}
+                        >
+                          <span class="palette-icon">
+                            <Icon name={definition.icon} />
+                          </span>
+                          <span>
+                            <strong>{pick(props.locale, definition.name)}</strong>
+                            <small>{pick(props.locale, definition.description)}</small>
+                          </span>
+                        </button>
+                      );
+                    }}
+                  </For>
+                </div>
               </div>
-              <div class="palette-grid">
-                <For each={TASK_PALETTE_ORDER}>
-                  {(type) => {
-                    const definition = TASK_DEFINITIONS[type];
-                    return (
-                      <button type="button" class="palette-item" onClick={() => addTask(type)}>
-                        <span class="palette-icon">
-                          <Icon name={definition.icon} />
-                        </span>
-                        <span>
-                          <strong>{pick(props.locale, definition.name)}</strong>
-                          <small>{pick(props.locale, definition.description)}</small>
-                        </span>
-                      </button>
-                    );
-                  }}
-                </For>
-              </div>
-            </div>
-          </Show>
+            )}
+          </Collapse>
 
           <Show
             when={props.plan && props.plan.tasks.length > 0}

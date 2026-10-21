@@ -31,7 +31,7 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
 - **改 `styles.css` 后核对类名**。组件用到的每个类都要在样式表里有定义：整块样式被删不会编译报错，只会表现为控件错位或菜单变内联块。
 - **Effect 4** 使用 `Effect.catch`，不是 v3 的 `catchAll`；Service 方法内部提供依赖，对外保持 `R = never`。
 - **原生库宿主**必须放在 utilityProcess/worker，不能在 Electron 主进程加载；callback 只入队，禁止生命周期调用、阻塞 FFI 或跨线程回调内同步工作。
-- **动画走 motion token**。进入用 `--ease-out`、退出用 `--ease-in`，时长按元素大小取 `--duration-*`；`<Show>` 分支默认只有进入动画，退出动画只能由组件自己多挂载一个节拍（Modal / Toaster），并且必须被 `prefers-reduced-motion` 兜底关闭；日志、进度等高频内容不做动画。
+- **动画走 motion token**。按动作选曲线：进入用 `--ease-out`，真正离开屏幕的退出用 `--ease-in`，原地改变尺寸/透明度的动效（展开收起的两个方向、页面交叉淡入、滑块）用 `--ease-out` / `--ease-standard`——尺寸变化用 `--ease-in` 会先停住再猛收；时长按元素大小取 `--duration-*`；`<Show>` 分支默认只有进入动画，退出动画只能由组件自己多挂载一个节拍（Modal / Toaster），并且必须被 `prefers-reduced-motion` 兜底关闭；页面切换走 View Transition（`.content` 命名组）、展开收起用 `Collapse`、工具栏状态切换用 `SwapStack` 保持宽度稳定；日志、进度等高频内容不做动画。
 - **全局 `busy` 只属于会立即改变运行/设备状态的命令**。内核下载/导入是增量操作，设备连接可能要等 ADB/MaaCore 数十秒：它们都不占用全局 `busy`，分别用 `coreBusy`、`connectBusy` 只禁相关按钮，任务与计划在等待期间保持可用；只有任务处于 preparing/running 时才禁止切换内核。
 - **回调消息 ID 不等于日志级别**。在统一 formatter 中按 payload 语义分级：预期分支退出用 debug/info，可操作失败才用 error，并优先显示 `first`/`subtask`/`taskchain`，不要输出 `unknown`。
 

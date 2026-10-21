@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, onSettled, untrack, type Component } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, flush, onSettled, untrack, type Component } from "solid-js";
 import type {
   AppSettingsPatch,
   Bootstrap,
@@ -26,6 +26,7 @@ import { DesktopBridgeError, bootstrap as loadBootstrap, command, subscribeEvent
 import { useAppRuntime } from "../effect/solid-effect";
 import { enginePhaseKey, t } from "../i18n/i18n";
 import { formatCoreCallback, formatLogTime, type UiLogEntry } from "../log-format";
+import { prefersReducedMotion } from "../motion";
 import { Copilot } from "../pages/Copilot";
 import { Devices } from "../pages/Devices";
 import { Overview } from "../pages/Overview";
@@ -205,6 +206,24 @@ export const AppShell: Component<AppShellProps> = (props) => {
       contentRef?.scrollTo({ top: 0, behavior: "instant" });
     },
   );
+
+  /**
+   * Page switches cross-fade through a View Transition instead of swapping the
+   * <Show> branch in one frame. The transition is scoped to the content area
+   * (`::view-transition-*(content)`), so the sidebar and topbar stay put.
+   * `flush` applies the signal write inside the capture callback; without it
+   * the new snapshot would be taken before the page has rendered.
+   */
+  const navigate = (next: View): void => {
+    if (next === view()) return;
+    if (prefersReducedMotion() || typeof document.startViewTransition !== "function") {
+      setView(next);
+      return;
+    }
+    document.startViewTransition(() => {
+      flush(() => setView(next));
+    });
+  };
 
   const flushLogs = (): void => {
     logTimer = undefined;
@@ -462,7 +481,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     notify({ kind: "success", title: tr("toast.deviceAdded"), message: device.profile.name });
     await reload();
     setSelectedDeviceId(device.profile.id);
-    setView("tasks");
+    navigate("tasks");
   };
 
   const removeDevice = async (id: string): Promise<void> => {
@@ -668,12 +687,12 @@ export const AppShell: Component<AppShellProps> = (props) => {
     // A silent return here is what made the overview button look dead. Send the
     // user to the page where the missing piece lives and say what is missing.
     if (!plan) {
-      setView("tasks");
+      navigate("tasks");
       notify({ kind: "info", title: tr("tasks.noPlan"), message: tr("overview.noPlanHint") });
       return;
     }
     if (!plan.tasks.some((task) => task.enabled)) {
-      setView("tasks");
+      navigate("tasks");
       notify({ kind: "info", title: tr("tasks.noEnabled"), message: tr("overview.noEnabledHint") });
       return;
     }
@@ -938,7 +957,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               type="button"
               class={view() === item.view ? "nav-item nav-item--active" : "nav-item"}
               onClick={() => {
-                setView(item.view);
+                navigate(item.view);
               }}
             >
               <Icon name={item.icon} />
@@ -948,7 +967,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         </nav>
 
         <div class="sidebar-foot">
-          <button type="button" class="core-status" onClick={() => setView("settings")}>
+          <button type="button" class="core-status" onClick={() => navigate("settings")}>
             <div>
               <span class="mono-label">MaaCore</span>
               <strong>{activeCore()?.version ?? tr("overview.noCore")}</strong>
@@ -964,7 +983,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
             <span>{tr(NAV.find((item) => item.view === view())?.key ?? "nav.overview")}</span>
           </div>
           <div class="topbar-actions">
-            <button type="button" class="device-pill" onClick={() => setView("devices")}>
+            <button type="button" class="device-pill" onClick={() => navigate("devices")}>
               <span>{selectedDevice()?.profile.name ?? tr("overview.noDevice")}</span>
               <StatusPill
                 status={selectedDevice()?.status ?? "offline"}
@@ -992,7 +1011,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               plan={selectedPlan()}
               run={selectedRun()}
               logs={deviceLogs()}
-              onNavigate={(next) => setView(next)}
+              onNavigate={(next) => navigate(next)}
               onImportCore={() => void importCore()}
               onAddDevice={() => setAddDeviceOpen(true)}
               onConnect={() => void connectDevice()}

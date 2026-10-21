@@ -235,6 +235,10 @@ svg {
   }
 }
 
+/* Size, position and opacity changes settle in place with `--ease-out` /
+   `--ease-standard`; `--ease-in` is only for content that accelerates off the
+   frame (the toast slide), where a slow start reads as "it is on its way out". */
+
 /* A surface arriving into the page: panels, cards, empty states. */
 @keyframes surface-in {
   from {
@@ -266,17 +270,24 @@ svg {
   }
 }
 
-/* Dialogs: a small rise, then a soft settle. */
-@keyframes dialog-in {
+/* Dialogs: opacity and lift are separate animations so the fade stays even
+   while the movement decelerates. */
+@keyframes dialog-fade {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.97);
+  }
+}
+
+@keyframes dialog-lift {
+  from {
+    transform: translateY(16px) scale(0.96);
   }
 }
 
 @keyframes dialog-out {
   to {
-    transform: translateY(4px) scale(0.99);
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
   }
 }
 
@@ -580,6 +591,22 @@ svg {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Named so a page switch lifts the content area into its own transition
+     group; the sidebar and topbar stay put. */
+  view-transition-name: content;
+}
+
+/* Page switches run as a View Transition (see AppShell `navigate`): the old
+   page fades out while the new one fades in, and because only the content area
+   is a named group, the sidebar and topbar stay put. A cross-fade is an
+   in-place change, not a departure, so the outgoing page fades evenly instead
+   of accelerating away. */
+::view-transition-old(content) {
+  animation: fade-out 140ms var(--ease-standard) both;
+}
+
+::view-transition-new(content) {
+  animation: fade-in 200ms var(--ease-standard) both;
 }
 
 /* --------------------------------------------------------------------------
@@ -593,10 +620,6 @@ svg {
   width: 100%;
   min-height: 100%;
   padding: 14px 16px 16px;
-  /* Top-level navigation is a quick fade: moving a whole page would imply a
-     hierarchy the sidebar does not have. Opacity only, so sticky sidebars and
-     the scroll container keep working. */
-  animation: fade-in var(--duration-fast) var(--ease-standard);
 }
 
 .page--overview,
@@ -743,6 +766,44 @@ svg {
 
 .btn--danger:hover:not(:disabled) {
   background: var(--danger-soft);
+}
+
+/* Collapse wraps a section that can disappear. While closed it stays in the
+   DOM with no children: `:empty` keeps it out of a parent's flex gap, and
+   `flex: 0 0 auto` stops a flex column from shrinking it during the animation. */
+.collapse {
+  flex: 0 0 auto;
+}
+
+.collapse:empty {
+  display: none;
+}
+
+/* One toolbar slot, several possible controls (see SwapStack). Every item keeps
+   its space, so the slot never resizes; hidden items are removed from the tab
+   order by `visibility` without leaving the grid. */
+.swap-stack {
+  display: inline-grid;
+}
+
+.swap-stack-item {
+  grid-area: 1 / 1;
+  display: grid;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    visibility 0s linear var(--duration-fast);
+}
+
+.swap-stack-item--current {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    visibility 0s;
 }
 
 .input {
@@ -1004,6 +1065,7 @@ select.input {
 }
 
 .segmented {
+  position: relative;
   display: inline-flex;
   gap: 2px;
   padding: 2px;
@@ -1012,15 +1074,33 @@ select.input {
   border-radius: var(--radius-control);
 }
 
+/* The selection is a separate element so it slides between options instead of
+   blinking. Segmented.tsx keeps it on the active button. */
+.segmented-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  background: var(--surface-alt);
+  border-radius: 3px;
+}
+
+.segmented-thumb[data-ready="true"] {
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    width var(--duration-normal) var(--ease-out),
+    height var(--duration-normal) var(--ease-out);
+}
+
 .segmented-item {
+  position: relative;
+  z-index: 1;
   height: 26px;
   padding: 0 10px;
   font-size: 13px;
   color: var(--muted);
   border-radius: 3px;
-  transition:
-    color 120ms var(--ease),
-    background 120ms var(--ease);
+  transition: color var(--duration-fast) var(--ease-standard);
 }
 
 .segmented-item:hover {
@@ -1029,7 +1109,6 @@ select.input {
 
 .segmented-item--on {
   color: var(--text);
-  background: var(--surface-alt);
 }
 
 .segmented-item--on:hover {
@@ -1570,8 +1649,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
-  transform-origin: top;
-  animation: flyout-in var(--duration-fast) var(--ease-out);
+  animation: fade-in 120ms var(--ease-standard);
 }
 
 .palette-head {
@@ -1598,6 +1676,7 @@ select.input {
   gap: 9px;
   min-width: 0;
   padding: 10px;
+  animation: surface-in 160ms var(--ease-out) backwards;
   text-align: left;
   background: var(--inset);
   border: 1px solid var(--stroke);
@@ -1811,7 +1890,6 @@ select.input {
 .task-card-body {
   padding: 12px 14px 14px;
   border-top: 1px solid var(--stroke);
-  animation: surface-in 180ms var(--ease-out);
 }
 
 .task-form-grid {
@@ -1825,7 +1903,6 @@ select.input {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px dashed var(--stroke);
-  animation: surface-in var(--duration-fast) var(--ease-out);
 }
 
 .advanced-toggle {
@@ -2649,11 +2726,13 @@ select.input {
    the dialog in the same task; the layer is inert while it fades. */
 .modal-layer--closing {
   pointer-events: none;
-  animation: fade-out 120ms var(--ease-in) forwards;
+  animation: fade-out 140ms var(--ease-out) forwards;
 }
 
+/* Dismissal starts immediately instead of hanging on screen and then blinking
+   out; only motion that leaves the frame (the toast slide) accelerates. */
 .modal-layer--closing .modal {
-  animation: dialog-out 120ms var(--ease-in) forwards;
+  animation: dialog-out 140ms var(--ease-out) forwards;
 }
 
 .modal-backdrop {
@@ -2663,7 +2742,7 @@ select.input {
   cursor: default;
   background: color-mix(in srgb, var(--bg-chrome) 72%, transparent);
   backdrop-filter: blur(4px);
-  animation: fade-in var(--duration-fast) var(--ease-standard);
+  animation: fade-in var(--duration-normal) var(--ease-standard);
 }
 
 .modal {
@@ -2677,7 +2756,9 @@ select.input {
   border: 1px solid var(--stroke-strong);
   border-radius: var(--radius-dialog);
   box-shadow: var(--shadow-flyout);
-  animation: dialog-in var(--duration-normal) var(--ease-out);
+  animation:
+    dialog-fade var(--duration-normal) var(--ease-standard),
+    dialog-lift var(--duration-gentle) var(--ease-out);
 }
 
 .modal--wide {
@@ -2688,7 +2769,7 @@ select.input {
 .modal::backdrop {
   background: color-mix(in srgb, var(--bg-chrome) 72%, transparent);
   backdrop-filter: blur(4px);
-  animation: fade-in var(--duration-fast) var(--ease-standard);
+  animation: fade-in var(--duration-normal) var(--ease-standard);
 }
 
 .modal-head {
@@ -3357,7 +3438,6 @@ select.input {
 .browser-detail {
   padding: 0 8px 8px;
   border-top: 1px dashed var(--stroke);
-  animation: surface-in 140ms var(--ease-out);
 }
 
 .browser-details {

@@ -135,13 +135,30 @@ control — a three-state cycle makes light look stuck when the OS is light.
 ### Motion
 
 Fluent 2 motion tokens live in `styles.css`: `--duration-faster/fast/normal/gentle`,
-`--ease-out` (entrances), `--ease-in` (exits) and `--ease-standard` (state
-changes). Entrances decelerate, exits accelerate, and larger surfaces get more
-time. Hover/focus/selection feedback stays around 120ms.
+`--ease-out` (decelerate), `--ease-in` (accelerate) and `--ease-standard`
+(easy-ease). Larger surfaces get more time; hover/focus/selection feedback
+stays around 120ms.
 
-- Animate the element that is created, not its page. Each view fades in when
-  its `<Show>` mounts; cards, flyouts, empty states and dialogs carry their own
-  entrance.
+Pick the curve by what the element does, not by open/close:
+
+- **Entrances** (surfaces, flyouts, dialogs): `--ease-out` — arrive fast, settle.
+- **Leaving the frame** (the toast slide-out): `--ease-in` — it is already on its
+  way off-screen.
+- **Changing size or opacity in place** (collapse in _either_ direction, dialog
+  dismissal, page cross-fade, sliding selection): `--ease-out` (or
+  `--ease-standard` for a symmetric move). `--ease-in` is wrong here: on a
+  collapsing height it holds the layout still and then snaps the section shut,
+  and on a fading dialog it keeps the panel on screen before blinking it out.
+  That was a reported bug — do not reintroduce it.
+
+- Page switches are a View Transition scoped to the content area. `navigate()`
+  in `AppShell.tsx` wraps `setView` in `document.startViewTransition` plus
+  `flush`; `.content` carries `view-transition-name: content`, so the sidebar
+  and topbar are not captured. Never wrap every `setView` call again by hand,
+  and never add a CSS entrance to `.page` — the new snapshot would be captured
+  mid-fade.
+- Animate the element that is created, not its page: cards, flyouts, empty
+  states, list rows and dialogs carry their own entrance.
 - Solid disposes a `<Show>` branch as soon as the condition flips, so an exit
   needs the component to keep the element mounted for one beat. Only `Modal`
   and `Toaster` own that timer (durations in `src/renderer/src/motion.ts`,
@@ -155,6 +172,18 @@ time. Hover/focus/selection feedback stays around 120ms.
   Disposing an element that still reports `open` skips the browser's own dialog
   cleanup (including focus restoration for a modal host); closing it early
   instead drops the `::backdrop` mid-fade.
+- Expanding content uses `Collapse` (`components/ui/Collapse.tsx`): it keeps
+  the children mounted through the exit, animates the wrapper height and
+  releases the clip when done. Passing a render function (`{() => <div/>}`)
+  keeps the children lazy. Do not add an entrance animation to a child that a
+  `Collapse` already wraps — measure and fade would fight each other.
+- A toolbar control that swaps between different labels goes in a `SwapStack`
+  (`components/ui/SwapStack.tsx`). Every state stays mounted, so the slot keeps
+  the widest size and the switch cross-fades instead of jolting the layout;
+  `visibility: hidden` removes the inactive copies from the tab order.
+- A segmented control uses `Segmented` (`components/ui/Segmented.tsx`): the
+  highlight is a measured element that slides between options, and locale
+  changes remeasure it through a ResizeObserver.
 - Never animate high-frequency content (log lines, progress values). Also do not
   put an entrance on a row whose data is replaced in place: `<For>` remounts the
   row and the animation replays as flicker.
@@ -456,19 +485,20 @@ toolset/compression changes with the artifact on the same filesystem.
 
 ## Verification matrix
 
-| Change             | Minimum check                                                                                         |
-| ------------------ | ----------------------------------------------------------------------------------------------------- |
-| Reactive control   | update twice; verify focus, visual selection, and persisted value                                     |
-| Reactive warning   | `pnpm dev` console stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen      |
-| Stylesheet rewrite | every class used by TSX still has a rule; screenshot affected screens in both themes                  |
-| Modal              | open it from a focused launcher: focus lands inside, Esc and backdrop close                           |
-| Dynamic list       | add/remove/reorder; confirm no unexpected remount                                                     |
-| Effect service     | type check, layer boot, and one failure path                                                          |
-| IPC contract       | invalid payload is rejected; valid payload round-trips                                                |
-| Native host        | connect, perform one operation, stop; inspect native log                                              |
-| Device connect     | connect an unreachable address: fails within the ADB probe timeout and the device leaves `connecting` |
-| Log formatter      | expected branch is not error; real failure is error                                                   |
-| Packaging          | build, launch unpacked app, load a core/resource                                                      |
+| Change             | Minimum check                                                                                                                                 |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reactive control   | update twice; verify focus, visual selection, and persisted value                                                                             |
+| Motion             | sample `getAnimations()` across frames: collapse reverses mid-flight, page switch runs a `content` view transition, reduced motion skips both |
+| Reactive warning   | `pnpm dev` console stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen                                              |
+| Stylesheet rewrite | every class used by TSX still has a rule; screenshot affected screens in both themes                                                          |
+| Modal              | open it from a focused launcher: focus lands inside, Esc and backdrop close                                                                   |
+| Dynamic list       | add/remove/reorder; confirm no unexpected remount                                                                                             |
+| Effect service     | type check, layer boot, and one failure path                                                                                                  |
+| IPC contract       | invalid payload is rejected; valid payload round-trips                                                                                        |
+| Native host        | connect, perform one operation, stop; inspect native log                                                                                      |
+| Device connect     | connect an unreachable address: fails within the ADB probe timeout and the device leaves `connecting`                                         |
+| Log formatter      | expected branch is not error; real failure is error                                                                                           |
+| Packaging          | build, launch unpacked app, load a core/resource                                                                                              |
 
 Add tests only where the contract is stable: schemas, pure mappers, severity
 classification, parser output. Avoid brittle DOM tests for screens that are

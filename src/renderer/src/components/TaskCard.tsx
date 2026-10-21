@@ -5,6 +5,7 @@ import { TASK_DEFINITIONS } from "../../../shared/tasks";
 import { pick, t } from "../i18n/i18n";
 import { StagePicker } from "./StagePicker";
 import { Button } from "./ui/Button";
+import { Collapse } from "./ui/Collapse";
 import { Icon } from "./ui/Icon";
 import { Switch } from "./ui/Switch";
 
@@ -451,56 +452,60 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
         </span>
       </header>
 
-      <Show when={props.expanded}>
-        <div class="task-card-body">
-          <Show when={props.task.type === "Copilot"}>
-            <CopilotBatch
-              items={copilotItems()}
-              locale={props.locale}
-              disabled={props.disabled}
-              onAdd={(input) => props.onResolveCopilot(input)}
-              onBrowse={props.onBrowseCopilot}
-              onRemove={removeCopilotItem}
-            />
-          </Show>
-          <div class="task-form-grid">
-            <For each={basicFields()}>
-              {(field) => (
-                <FieldControl
-                  field={field}
-                  locale={props.locale}
-                  stages={props.stages}
-                  value={props.task.params[field.key]}
-                  onChange={(value) => props.onParamChange(field.key, value)}
-                  onPickFile={() => props.onPickFile(field.key)}
-                />
-              )}
-            </For>
-          </div>
-          <Show when={advancedFields().length > 0}>
-            <button type="button" class="advanced-toggle" onClick={() => setShowAdvanced((value) => !value)}>
-              <Icon name={showAdvanced() ? "chevron-down" : "chevron-right"} />
-              {t(props.locale, "tasks.advanced")}
-            </button>
-            <Show when={showAdvanced()}>
-              <div class="task-form-grid task-form-grid--advanced">
-                <For each={advancedFields()}>
-                  {(field) => (
-                    <FieldControl
-                      field={field}
-                      locale={props.locale}
-                      stages={props.stages}
-                      value={props.task.params[field.key]}
-                      onChange={(value) => props.onParamChange(field.key, value)}
-                      onPickFile={() => props.onPickFile(field.key)}
-                    />
-                  )}
-                </For>
-              </div>
+      <Collapse open={props.expanded}>
+        {() => (
+          <div class="task-card-body">
+            <Show when={props.task.type === "Copilot"}>
+              <CopilotBatch
+                items={copilotItems()}
+                locale={props.locale}
+                disabled={props.disabled}
+                onAdd={(input) => props.onResolveCopilot(input)}
+                onBrowse={props.onBrowseCopilot}
+                onRemove={removeCopilotItem}
+              />
             </Show>
-          </Show>
-        </div>
-      </Show>
+            <div class="task-form-grid">
+              <For each={basicFields()}>
+                {(field) => (
+                  <FieldControl
+                    field={field}
+                    locale={props.locale}
+                    stages={props.stages}
+                    value={props.task.params[field.key]}
+                    onChange={(value) => props.onParamChange(field.key, value)}
+                    onPickFile={() => props.onPickFile(field.key)}
+                  />
+                )}
+              </For>
+            </div>
+            <Show when={advancedFields().length > 0}>
+              <button type="button" class="advanced-toggle" onClick={() => setShowAdvanced((value) => !value)}>
+                <Icon name={showAdvanced() ? "chevron-down" : "chevron-right"} />
+                {t(props.locale, "tasks.advanced")}
+              </button>
+              <Collapse open={showAdvanced()}>
+                {() => (
+                  <div class="task-form-grid task-form-grid--advanced">
+                    <For each={advancedFields()}>
+                      {(field) => (
+                        <FieldControl
+                          field={field}
+                          locale={props.locale}
+                          stages={props.stages}
+                          value={props.task.params[field.key]}
+                          onChange={(value) => props.onParamChange(field.key, value)}
+                          onPickFile={() => props.onPickFile(field.key)}
+                        />
+                      )}
+                    </For>
+                  </div>
+                )}
+              </Collapse>
+            </Show>
+          </div>
+        )}
+      </Collapse>
     </article>
   );
 };

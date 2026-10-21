@@ -3,7 +3,7 @@
  * animation. The values match the exit keyframes in styles.css; change both
  * together.
  */
-export const dialogExitMs = 120;
+export const dialogExitMs = 140;
 export const toastExitMs = 140;
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";

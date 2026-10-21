@@ -6,6 +6,7 @@ import { SetupPanel } from "../components/SetupPanel";
 import { Button } from "../components/ui/Button";
 import { Icon } from "../components/ui/Icon";
 import { StatusPill } from "../components/ui/StatusPill";
+import { SwapStack } from "../components/ui/SwapStack";
 import { TASK_DEFINITIONS } from "../../../shared/tasks";
 
 interface OverviewProps {
@@ -25,15 +26,7 @@ interface OverviewProps {
   readonly connectBusy: boolean;
 }
 
-type PrimaryVariant = "primary" | "secondary" | "danger";
-
-interface PrimaryAction {
-  readonly label: string;
-  readonly icon: string;
-  readonly variant: PrimaryVariant;
-  readonly disabled: boolean;
-  readonly onClick: () => void;
-}
+type ActionMode = "import" | "add" | "connecting" | "stop" | "connect" | "configure" | "start";
 
 const statusText = (status: DeviceView["status"], locale: Locale): string => {
   switch (status) {
@@ -73,69 +66,14 @@ export const Overview: Component<OverviewProps> = (props) => {
    * button kept saying "Start" while a run was prepared and a second click only
    * produced an "already running" error.
    */
-  const primary = createMemo<PrimaryAction>(() => {
-    if (!runnableCore()) {
-      return {
-        label: t(props.locale, "setup.import"),
-        icon: "plus",
-        variant: "primary",
-        disabled: false,
-        onClick: props.onImportCore,
-      };
-    }
-    if (!props.device) {
-      return {
-        label: t(props.locale, "devices.add"),
-        icon: "plus",
-        variant: "primary",
-        disabled: false,
-        onClick: props.onAddDevice,
-      };
-    }
-    if (connecting()) {
-      return {
-        label: t(props.locale, "status.connecting"),
-        icon: "loader",
-        variant: "secondary",
-        disabled: true,
-        onClick: () => undefined,
-      };
-    }
-    if (isRunning()) {
-      return {
-        label: t(props.locale, "tasks.stop"),
-        icon: "square",
-        variant: "danger",
-        disabled: props.busy,
-        onClick: props.onStop,
-      };
-    }
-    if (!connected()) {
-      const failed = props.device.status === "error";
-      return {
-        label: t(props.locale, failed ? "overview.retryConnect" : "setup.connect"),
-        icon: failed ? "refresh-cw" : "wifi",
-        variant: "primary",
-        disabled: props.busy || props.connectBusy,
-        onClick: props.onConnect,
-      };
-    }
-    if (!props.plan || enabledTasks().length === 0) {
-      return {
-        label: t(props.locale, "overview.configureTasks"),
-        icon: "list-todo",
-        variant: "secondary",
-        disabled: false,
-        onClick: () => props.onNavigate("tasks"),
-      };
-    }
-    return {
-      label: t(props.locale, "overview.startTasks"),
-      icon: "play",
-      variant: "primary",
-      disabled: props.busy,
-      onClick: props.onStart,
-    };
+  const mode = createMemo<ActionMode>(() => {
+    if (!runnableCore()) return "import";
+    if (!props.device) return "add";
+    if (connecting()) return "connecting";
+    if (isRunning()) return "stop";
+    if (!connected()) return "connect";
+    if (!props.plan || enabledTasks().length === 0) return "configure";
+    return "start";
   });
 
   /** Explain why the CTA is disabled or what the run is doing. */
@@ -167,15 +105,75 @@ export const Overview: Component<OverviewProps> = (props) => {
           <p class="page-subtitle">{t(props.locale, "overview.subtitle")}</p>
         </div>
         <div class="page-actions page-actions--stack">
-          <Button
-            variant={primary().variant}
-            onClick={() => primary().onClick()}
-            disabled={primary().disabled}
+          <SwapStack
+            current={mode()}
             title={hint()}
-          >
-            <Icon name={primary().icon} class={primary().icon === "loader" ? "icon spin" : undefined} />
-            {primary().label}
-          </Button>
+            items={[
+              {
+                id: "import",
+                node: (
+                  <Button variant="primary" onClick={props.onImportCore}>
+                    <Icon name="plus" />
+                    {t(props.locale, "setup.import")}
+                  </Button>
+                ),
+              },
+              {
+                id: "add",
+                node: (
+                  <Button variant="primary" onClick={props.onAddDevice}>
+                    <Icon name="plus" />
+                    {t(props.locale, "devices.add")}
+                  </Button>
+                ),
+              },
+              {
+                id: "connecting",
+                node: (
+                  <Button variant="secondary" disabled onClick={() => undefined}>
+                    <Icon name="loader" class="spin" />
+                    {t(props.locale, "status.connecting")}
+                  </Button>
+                ),
+              },
+              {
+                id: "stop",
+                node: (
+                  <Button variant="danger" disabled={props.busy} onClick={props.onStop}>
+                    <Icon name="square" />
+                    {t(props.locale, "tasks.stop")}
+                  </Button>
+                ),
+              },
+              {
+                id: "connect",
+                node: (
+                  <Button variant="primary" disabled={props.busy || props.connectBusy} onClick={props.onConnect}>
+                    <Icon name={props.device?.status === "error" ? "refresh-cw" : "wifi"} />
+                    {t(props.locale, props.device?.status === "error" ? "overview.retryConnect" : "setup.connect")}
+                  </Button>
+                ),
+              },
+              {
+                id: "configure",
+                node: (
+                  <Button variant="secondary" onClick={() => props.onNavigate("tasks")}>
+                    <Icon name="list-todo" />
+                    {t(props.locale, "overview.configureTasks")}
+                  </Button>
+                ),
+              },
+              {
+                id: "start",
+                node: (
+                  <Button variant="primary" disabled={props.busy} onClick={props.onStart}>
+                    <Icon name="play" />
+                    {t(props.locale, "overview.startTasks")}
+                  </Button>
+                ),
+              },
+            ]}
+          />
           <Show when={hint()}>{(text) => <span class="page-action-hint">{text()}</span>}</Show>
         </div>
       </header>

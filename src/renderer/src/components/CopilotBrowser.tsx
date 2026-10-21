@@ -11,6 +11,7 @@ import { command } from "../effect/desktop";
 import { useAppRuntime } from "../effect/solid-effect";
 import { t } from "../i18n/i18n";
 import { Button } from "./ui/Button";
+import { Collapse } from "./ui/Collapse";
 import { Icon } from "./ui/Icon";
 import { Modal } from "./ui/Modal";
 
@@ -379,41 +380,43 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
                     </Button>
                   </div>
                 </div>
-                <Show when={detailId() === item.id}>
-                  <div class="browser-detail">
-                    <Show when={item.details !== ""}>
-                      <p class="browser-details">{item.details}</p>
-                    </Show>
-                    <Show when={item.minimumRequired !== ""}>
-                      <p class="browser-min">MaaCore {item.minimumRequired}</p>
-                    </Show>
-                    <ul class="browser-opers">
-                      <For each={item.operators}>
-                        {(oper) => (
-                          <li>
-                            <span class="browser-oper-name">{oper.name}</span>
-                            <Show when={oper.role !== ""}>
-                              <small>{oper.role}</small>
-                            </Show>
-                            <Show when={oper.elite !== undefined}>
-                              <small>
-                                E{oper.elite} {oper.level ?? ""}
-                              </small>
-                            </Show>
-                            <Show when={oper.skill !== 0}>
-                              <small>
-                                {t(props.locale, "browser.skill")} {oper.skill}
-                              </small>
-                            </Show>
-                            <Show when={(oper.module ?? 0) > 0}>
-                              <small>M{oper.module}</small>
-                            </Show>
-                          </li>
-                        )}
-                      </For>
-                    </ul>
-                  </div>
-                </Show>
+                <Collapse open={detailId() === item.id}>
+                  {() => (
+                    <div class="browser-detail">
+                      <Show when={item.details !== ""}>
+                        <p class="browser-details">{item.details}</p>
+                      </Show>
+                      <Show when={item.minimumRequired !== ""}>
+                        <p class="browser-min">MaaCore {item.minimumRequired}</p>
+                      </Show>
+                      <ul class="browser-opers">
+                        <For each={item.operators}>
+                          {(oper) => (
+                            <li>
+                              <span class="browser-oper-name">{oper.name}</span>
+                              <Show when={oper.role !== ""}>
+                                <small>{oper.role}</small>
+                              </Show>
+                              <Show when={oper.elite !== undefined}>
+                                <small>
+                                  E{oper.elite} {oper.level ?? ""}
+                                </small>
+                              </Show>
+                              <Show when={oper.skill !== 0}>
+                                <small>
+                                  {t(props.locale, "browser.skill")} {oper.skill}
+                                </small>
+                              </Show>
+                              <Show when={(oper.module ?? 0) > 0}>
+                                <small>M{oper.module}</small>
+                              </Show>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </div>
+                  )}
+                </Collapse>
               </li>
             )}
           </For>

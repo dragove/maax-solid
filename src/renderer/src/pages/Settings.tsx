@@ -15,6 +15,7 @@ import { formatResourceStamp } from "../../../shared/resource-version";
 import { t } from "../i18n/i18n";
 import { Button } from "../components/ui/Button";
 import { Icon } from "../components/ui/Icon";
+import { Segmented } from "../components/ui/Segmented";
 import { Switch } from "../components/ui/Switch";
 
 interface SettingsProps {
@@ -108,38 +109,22 @@ export const Settings: Component<SettingsProps> = (props) => {
             </header>
             <div class="setting-row">
               <span class="setting-label">{t(props.locale, "settings.theme")}</span>
-              <div class="segmented">
-                <For each={themeOptions}>
-                  {(option) => (
-                    <button
-                      type="button"
-                      class={settings().theme === option.value ? "segmented-item segmented-item--on" : "segmented-item"}
-                      onClick={() => props.onUpdateSettings({ theme: option.value })}
-                    >
-                      {t(props.locale, option.key)}
-                    </button>
-                  )}
-                </For>
-              </div>
+              <Segmented
+                value={settings().theme}
+                options={themeOptions.map((option) => ({ value: option.value, label: t(props.locale, option.key) }))}
+                onChange={(theme) => props.onUpdateSettings({ theme })}
+              />
             </div>
             <div class="setting-row">
               <span class="setting-label">{t(props.locale, "settings.language")}</span>
-              <div class="segmented">
-                <button
-                  type="button"
-                  class={settings().locale === "zh-CN" ? "segmented-item segmented-item--on" : "segmented-item"}
-                  onClick={() => props.onUpdateSettings({ locale: "zh-CN" })}
-                >
-                  {t(props.locale, "settings.zh")}
-                </button>
-                <button
-                  type="button"
-                  class={settings().locale === "en-US" ? "segmented-item segmented-item--on" : "segmented-item"}
-                  onClick={() => props.onUpdateSettings({ locale: "en-US" })}
-                >
-                  {t(props.locale, "settings.en")}
-                </button>
-              </div>
+              <Segmented
+                value={settings().locale}
+                options={[
+                  { value: "zh-CN", label: t(props.locale, "settings.zh") },
+                  { value: "en-US", label: t(props.locale, "settings.en") },
+                ]}
+                onChange={(locale) => props.onUpdateSettings({ locale })}
+              />
             </div>
           </section>
 
