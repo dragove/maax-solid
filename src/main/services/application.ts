@@ -1049,6 +1049,10 @@ export const ApplicationLive: Layer.Layer<
         }
       });
 
+    /** A run owns the core it was started on until it ends. */
+    const runActive = (): boolean =>
+      [...runs.values()].some((run) => run.snapshot.status === "preparing" || run.snapshot.status === "running");
+
     const startRun = (deviceId: string, planId: string) =>
       Effect.gen(function* () {
         yield* ensureDeviceIdle(deviceId);
@@ -1122,8 +1126,15 @@ export const ApplicationLive: Layer.Layer<
 
     const removeCore = (id: string) =>
       Effect.gen(function* () {
-        const cores = yield* registry.remove(id);
         const current = yield* settings.get;
+        const before = yield* registry.list;
+        // Removing the active entry is a core switch in disguise, and a run
+        // owns the active core until it ends.
+        const activeId = current.activeCoreId ?? before.find((core) => core.status === "ready")?.id ?? null;
+        if (activeId === id && runActive()) {
+          return yield* maaxError("任务运行中不能移除当前内核");
+        }
+        const cores = yield* registry.remove(id);
         if (current.activeCoreId === id) {
           yield* settings.update({
             activeCoreId: cores.find((core) => core.status === "ready")?.id ?? null,
@@ -1301,8 +1312,8 @@ export const ApplicationLive: Layer.Layer<
 
     /**
      * Installing a core never touches the running one; switching to it does
-     * change which version the next connection uses, so a live session keeps the
-     * current selection and the switch waits for a disconnect.
+     * change which version the next connection uses, so a live session or an
+     * active run keeps the current selection and the switch waits.
      */
     const downloadCore = Effect.gen(function* () {
       const core = yield* installer.downloadStable;
@@ -1313,13 +1324,14 @@ export const ApplicationLive: Layer.Layer<
       const currentSettings = yield* settings.get;
       if (currentSettings.activeCoreId === core.id) return core;
 
+      const running = runActive();
       const liveSession = [...runtime.values()].some((state) => state.sessionId !== undefined);
-      if (liveSession) {
+      if (liveSession || running) {
         bus.emit({
           _tag: "toast",
           kind: "info",
           title: "核心已安装",
-          message: "断开设备后会使用新版本",
+          message: running ? "任务结束后可在设置中切换" : "可在设置中切换",
         });
         return core;
       }
@@ -1331,6 +1343,7 @@ export const ApplicationLive: Layer.Layer<
 
     const setActiveCore = (id: string) =>
       Effect.gen(function* () {
+        if (runActive()) return yield* maaxError("任务运行中不能切换内核");
         const cores = yield* registry.list;
         if (!cores.some((core) => core.id === id && core.status === "ready")) {
           return yield* maaxError("核心不可用");

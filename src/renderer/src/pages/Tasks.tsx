@@ -37,6 +37,7 @@ interface TasksProps {
   readonly onResolveCopilot: (taskId: string, input: string) => Promise<boolean>;
   readonly onBrowseCopilot: (taskId: string) => void;
   readonly busy: boolean;
+  readonly connectBusy: boolean;
   readonly saving: boolean;
   readonly onConnect: () => void;
   readonly onStart: () => void;
@@ -94,7 +95,11 @@ export const Tasks: Component<TasksProps> = (props) => {
           <Show
             when={connected()}
             fallback={
-              <Button variant="secondary" disabled={!props.device || props.busy} onClick={props.onConnect}>
+              <Button
+                variant="secondary"
+                disabled={!props.device || props.busy || props.connectBusy}
+                onClick={props.onConnect}
+              >
                 <Icon name={props.device?.status === "connecting" ? "loader" : "wifi"} />
                 {props.device?.status === "connecting"
                   ? t(props.locale, "status.connecting")

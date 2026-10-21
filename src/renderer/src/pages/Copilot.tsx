@@ -13,6 +13,7 @@ interface CopilotPageProps {
   readonly options: CopilotOptions;
   readonly locale: Locale;
   readonly busy: boolean;
+  readonly connectBusy: boolean;
   readonly onConnect: () => void;
   readonly onStart: () => void;
   readonly onStop: () => void;
@@ -65,9 +66,15 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
           <Show
             when={connected()}
             fallback={
-              <Button variant="secondary" disabled={!props.device || props.busy} onClick={props.onConnect}>
-                <Icon name="wifi" />
-                {t(props.locale, "tasks.connect")}
+              <Button
+                variant="secondary"
+                disabled={!props.device || props.busy || props.connectBusy}
+                onClick={props.onConnect}
+              >
+                <Icon name={props.device?.status === "connecting" ? "loader" : "wifi"} />
+                {props.device?.status === "connecting"
+                  ? t(props.locale, "status.connecting")
+                  : t(props.locale, "tasks.connect")}
               </Button>
             }
           >

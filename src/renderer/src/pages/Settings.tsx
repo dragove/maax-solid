@@ -21,6 +21,8 @@ interface SettingsProps {
   readonly data: Bootstrap;
   readonly locale: Locale;
   readonly busy: boolean;
+  readonly coreBusy: boolean;
+  readonly runActive: boolean;
   readonly onUpdateSettings: (patch: AppSettingsPatch) => void;
   readonly download?: DownloadProgress;
   readonly onImportCore: () => void;
@@ -159,12 +161,17 @@ export const Settings: Component<SettingsProps> = (props) => {
                   size="sm"
                   variant="ghost"
                   onClick={props.onDownloadCore}
-                  disabled={props.busy || props.download !== undefined}
+                  disabled={props.busy || props.coreBusy || props.download !== undefined}
                 >
                   <Icon name="download" />
                   {t(props.locale, "settings.downloadCore")}
                 </Button>
-                <Button size="sm" variant="primary" onClick={props.onImportCore}>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={props.onImportCore}
+                  disabled={props.busy || props.coreBusy || props.download !== undefined}
+                >
                   <Icon name="folder-open" />
                   {t(props.locale, "settings.importCore")}
                 </Button>
@@ -196,7 +203,7 @@ export const Settings: Component<SettingsProps> = (props) => {
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={props.busy || props.download !== undefined}
+                      disabled={props.busy || props.coreBusy || props.download !== undefined}
                       onClick={props.onCheckCoreUpdate}
                     >
                       <Icon name="refresh-cw" />
@@ -206,7 +213,7 @@ export const Settings: Component<SettingsProps> = (props) => {
                       <Button
                         size="sm"
                         variant="primary"
-                        disabled={props.busy || props.download !== undefined}
+                        disabled={props.busy || props.coreBusy || props.download !== undefined}
                         onClick={props.onDownloadCore}
                       >
                         <Icon name="download" />
@@ -216,6 +223,9 @@ export const Settings: Component<SettingsProps> = (props) => {
                   </div>
                 </div>
               )}
+            </Show>
+            <Show when={props.runActive}>
+              <p class="core-switch-hint">{t(props.locale, "settings.coreSwitchBlocked")}</p>
             </Show>
             <Show
               when={props.data.cores.length > 0}
@@ -257,12 +267,21 @@ export const Settings: Component<SettingsProps> = (props) => {
                             <Button
                               size="sm"
                               variant={active() ? "ghost" : "secondary"}
-                              disabled={active() || core.status !== "ready" || props.busy}
+                              disabled={active() || core.status !== "ready" || props.busy || props.runActive}
+                              title={props.runActive ? t(props.locale, "settings.coreSwitchBlocked") : undefined}
                               onClick={() => props.onSetActiveCore(core.id)}
                             >
                               {t(props.locale, "settings.setActive")}
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={() => props.onRemoveCore(core.id)}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={active() && props.runActive}
+                              title={
+                                active() && props.runActive ? t(props.locale, "settings.coreSwitchBlocked") : undefined
+                              }
+                              onClick={() => props.onRemoveCore(core.id)}
+                            >
                               <Icon name="trash-2" />
                             </Button>
                           </div>

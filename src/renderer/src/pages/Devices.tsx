@@ -10,6 +10,7 @@ interface DevicesProps {
   readonly locale: Locale;
   readonly screenshots: Readonly<Record<string, { url: string; width: number; height: number; durationMs: number }>>;
   readonly busy: boolean;
+  readonly connectBusy: boolean;
   readonly onAdd: () => void;
   readonly onConnect: (id: string) => void;
   readonly onDisconnect: (id: string) => void;
@@ -174,7 +175,11 @@ export const Devices: Component<DevicesProps> = (props) => {
                     <Button
                       size="sm"
                       variant={connected() ? "ghost" : "primary"}
-                      disabled={props.busy || device.status === "connecting" || !activeCore()}
+                      disabled={
+                        props.busy ||
+                        !activeCore() ||
+                        (!connected() && (props.connectBusy || device.status === "connecting"))
+                      }
                       onClick={() =>
                         connected() ? props.onDisconnect(device.profile.id) : props.onConnect(device.profile.id)
                       }

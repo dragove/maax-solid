@@ -1,4 +1,5 @@
 import { For, createSignal, type Component } from "solid-js";
+import { prefersReducedMotion, toastExitMs } from "../../motion";
 import { Icon } from "./Icon";
 
 export type ToastKind = "info" | "success" | "warning" | "error";
@@ -27,6 +28,9 @@ let items: ReadonlyArray<ToastItem> = [];
 let nextId = 0;
 
 const [toasts, setToasts] = createSignal(items);
+/** Ids that are playing their exit animation and no longer accept input. */
+const [leaving, setLeaving] = createSignal<ReadonlySet<number>>(new Set());
+const leaveTimers = new Map<number, number>();
 
 const iconFor = (kind: ToastKind): string => {
   switch (kind) {
@@ -46,12 +50,40 @@ const clearTimer = (toast: ToastItem): void => {
   toast.timer = undefined;
 };
 
+const remove = (id: number): void => {
+  const leaveTimer = leaveTimers.get(id);
+  if (leaveTimer !== undefined) {
+    window.clearTimeout(leaveTimer);
+    leaveTimers.delete(id);
+  }
+  const next = items.filter((item) => item.id !== id);
+  if (next.length !== items.length) {
+    items = next;
+    setToasts(items);
+  }
+  setLeaving((current) => {
+    if (!current.has(id)) return current;
+    const updated = new Set(current);
+    updated.delete(id);
+    return updated;
+  });
+};
+
 const dismiss = (id: number): void => {
   const toast = items.find((item) => item.id === id);
-  if (!toast) return;
+  if (!toast || leaveTimers.has(id)) return;
   clearTimer(toast);
-  items = items.filter((item) => item.id !== id);
-  setToasts(items);
+  if (prefersReducedMotion()) {
+    remove(id);
+    return;
+  }
+  // Keep the row mounted for one short beat so it can animate out; Toaster owns
+  // that timer, and the row is already inert.
+  setLeaving((current) => new Set(current).add(id));
+  leaveTimers.set(
+    id,
+    window.setTimeout(() => remove(id), toastExitMs),
+  );
 };
 
 const start = (toast: ToastItem): void => {
@@ -66,7 +98,7 @@ const pause = (toast: ToastItem): void => {
 };
 
 const resume = (toast: ToastItem): void => {
-  if (toast.timer !== undefined || !items.includes(toast)) return;
+  if (toast.timer !== undefined || !items.includes(toast) || leaving().has(toast.id)) return;
   start(toast);
 };
 
@@ -96,7 +128,7 @@ export const Toaster: Component = () => (
       <For each={toasts()}>
         {(toast) => (
           <li
-            class={`toast toast--${toast.kind}`}
+            class={leaving().has(toast.id) ? `toast toast--${toast.kind} toast--leaving` : `toast toast--${toast.kind}`}
             role={toast.kind === "error" ? "alert" : "status"}
             onPointerEnter={() => pause(toast)}
             onPointerLeave={() => resume(toast)}

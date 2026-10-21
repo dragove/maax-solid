@@ -96,10 +96,14 @@ release remains the only way to update models and templates.
 (`api.maa.plus/.../version/stable.json`) and reports the new version, its publish
 date and the archive size. Installing reuses the core installer: the archive is
 downloaded to a staging directory, extracted with the system `tar`, and renamed
-into `userData/cores/<version>`, so the running core is never touched. The new
-version becomes active immediately unless a device still holds a session; in
-that case the switch waits for the next disconnect. Windows and macOS archives
-still need their own host variants, so `platformSuffixFor` only lists Linux.
+into `userData/cores/<version>`, so the running core is never touched. Tasks
+stay startable against the current core while an install runs: the renderer
+gates only the core buttons (`coreBusy`), never the run controls. The new
+version becomes active immediately unless a device still holds a session or a
+run is active; in those cases the current core stays and the user switches later
+in Settings. A manual switch is refused while a run is preparing or running.
+Windows and macOS archives still need their own host variants, so
+`platformSuffixFor` only lists Linux.
 
 ## Main-process services
 
@@ -206,7 +210,8 @@ catalogue drops `TRAP` summons, matches Chinese or English names, and is cached
 per core path with the file mtime, so a core update refreshes it automatically.
 PRTS filters on the **Chinese** name, which is what the picker sends.
 - Styling is a hand-written CSS design system (tokens, panels, task cards,
-  log stream). There is no Tailwind and no Solid-1 UI dependency.
+  log stream, Fluent-2 motion tokens). There is no Tailwind and no Solid-1 UI
+  dependency.
 
 ## Security
 

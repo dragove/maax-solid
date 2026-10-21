@@ -22,6 +22,7 @@ interface OverviewProps {
   readonly onStart: () => void;
   readonly onStop: () => void;
   readonly busy: boolean;
+  readonly connectBusy: boolean;
 }
 
 type PrimaryVariant = "primary" | "secondary" | "danger";
@@ -115,7 +116,7 @@ export const Overview: Component<OverviewProps> = (props) => {
         label: t(props.locale, failed ? "overview.retryConnect" : "setup.connect"),
         icon: failed ? "refresh-cw" : "wifi",
         variant: "primary",
-        disabled: props.busy,
+        disabled: props.busy || props.connectBusy,
         onClick: props.onConnect,
       };
     }
@@ -140,6 +141,8 @@ export const Overview: Component<OverviewProps> = (props) => {
   /** Explain why the CTA is disabled or what the run is doing. */
   const hint = (): string | undefined => {
     if (connecting()) return t(props.locale, "overview.connectingHint");
+    // Another device connecting keeps this device's Connect CTA disabled.
+    if (props.connectBusy && !connected()) return t(props.locale, "overview.connectingHint");
     if (props.run?.status === "preparing") return t(props.locale, "overview.preparingHint");
     if (isRunning()) {
       const total = props.run?.tasks.length ?? 0;

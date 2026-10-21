@@ -50,7 +50,17 @@
   --radius-dialog: 8px;
 
   --shadow-flyout: 0 10px 30px rgba(0, 0, 0, 0.5);
+
+  /* Fluent 2 motion: duration follows the size of what moves, entrances
+     decelerate, exits accelerate, and state changes stay quick. */
+  --duration-faster: 100ms;
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-gentle: 250ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.1, 0.9, 0.2, 1);
+  --ease-in: cubic-bezier(0.7, 0, 1, 0.5);
+  --ease-standard: cubic-bezier(0.33, 0, 0.67, 1);
 }
 
 [data-theme="light"] {
@@ -200,6 +210,94 @@ svg {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Motion
+
+   Entrances decelerate, exits accelerate. A <Show> branch is disposed the
+   moment its condition flips, so only components that own the exit beat
+   (Modal, Toaster) keep their element mounted for one animation; everything
+   else animates on entry only. High-frequency content (the log stream) never
+   animates, and nothing replays an entrance when data merely updates.
+   -------------------------------------------------------------------------- */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* A surface arriving into the page: panels, cards, empty states. */
+@keyframes surface-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Floating chrome entering from the bottom edge: toasts, progress. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+/* Menus and flyouts grow out of their trigger. */
+@keyframes flyout-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+@keyframes flyout-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+/* Dialogs: a small rise, then a soft settle. */
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
+@keyframes dialog-out {
+  to {
+    transform: translateY(4px) scale(0.99);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
   }
 }
 
@@ -465,7 +563,12 @@ svg {
   border-radius: var(--radius-control);
   transition:
     color 120ms var(--ease),
-    background 120ms var(--ease);
+    background 120ms var(--ease),
+    transform var(--duration-faster) var(--ease-standard);
+}
+
+.icon-button:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .icon-button:hover:not(:disabled) {
@@ -490,6 +593,10 @@ svg {
   width: 100%;
   min-height: 100%;
   padding: 14px 16px 16px;
+  /* Top-level navigation is a quick fade: moving a whole page would imply a
+     hierarchy the sidebar does not have. Opacity only, so sticky sidebars and
+     the scroll container keep working. */
+  animation: fade-in var(--duration-fast) var(--ease-standard);
 }
 
 .page--overview,
@@ -566,7 +673,12 @@ svg {
   transition:
     background 120ms var(--ease),
     border-color 120ms var(--ease),
-    color 120ms var(--ease);
+    color 120ms var(--ease),
+    transform var(--duration-faster) var(--ease-standard);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn .icon {
@@ -766,11 +878,15 @@ select.input {
   border: 1px solid var(--stroke-strong);
   border-radius: var(--radius-surface);
   box-shadow: var(--shadow-flyout);
+  transform-origin: top;
+  animation: flyout-in 120ms var(--ease-out);
 }
 
 .stage-menu--up {
   top: auto;
   bottom: calc(100% + 4px);
+  transform-origin: bottom;
+  animation-name: flyout-in-up;
 }
 
 .stage-group + .stage-group {
@@ -852,7 +968,7 @@ select.input {
   flex: 0 0 auto;
   background: var(--stroke-strong);
   border-radius: 999px;
-  transition: background 140ms var(--ease);
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .switch--on {
@@ -867,7 +983,7 @@ select.input {
   height: 16px;
   background: var(--text);
   border-radius: 50%;
-  transition: transform 140ms var(--ease);
+  transition: transform var(--duration-normal) var(--ease-out);
 }
 
 .switch--on .switch-thumb {
@@ -939,6 +1055,7 @@ select.input {
   color: var(--danger);
   background: var(--danger-soft);
   border-radius: var(--radius-control);
+  animation: surface-in var(--duration-fast) var(--ease-out);
 }
 
 .chip-row {
@@ -957,7 +1074,12 @@ select.input {
   transition:
     color 120ms var(--ease),
     background 120ms var(--ease),
-    border-color 120ms var(--ease);
+    border-color 120ms var(--ease),
+    transform var(--duration-faster) var(--ease-standard);
+}
+
+.chip:active {
+  transform: scale(0.96);
 }
 
 .chip:hover {
@@ -993,6 +1115,10 @@ select.input {
   background: var(--surface-alt);
   border: 1px solid var(--stroke);
   border-radius: 999px;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .status-pill .icon {
@@ -1308,6 +1434,9 @@ select.input {
   color: var(--muted);
   background: var(--surface-alt);
   border-radius: 50%;
+  transition:
+    color var(--duration-normal) var(--ease-standard),
+    background-color var(--duration-normal) var(--ease-standard);
 }
 
 .setup-step--done .setup-index {
@@ -1333,6 +1462,7 @@ select.input {
   gap: 1px;
   min-width: 0;
   flex: 1;
+  transition: opacity var(--duration-normal) var(--ease-standard);
 }
 
 .setup-copy strong {
@@ -1440,7 +1570,8 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
-  animation: palette-in 140ms var(--ease);
+  transform-origin: top;
+  animation: flyout-in var(--duration-fast) var(--ease-out);
 }
 
 .palette-head {
@@ -1473,12 +1604,17 @@ select.input {
   border-radius: var(--radius-control);
   transition:
     background 120ms var(--ease),
-    border-color 120ms var(--ease);
+    border-color 120ms var(--ease),
+    transform var(--duration-faster) var(--ease-standard);
 }
 
 .palette-item:hover {
   background: var(--surface-alt);
   border-color: var(--stroke-strong);
+}
+
+.palette-item:active {
+  transform: scale(0.98);
 }
 
 .palette-icon {
@@ -1537,6 +1673,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
+  animation: surface-in 180ms var(--ease-out);
   transition:
     border-color 120ms var(--ease),
     opacity 120ms var(--ease);
@@ -1639,6 +1776,10 @@ select.input {
   color: var(--muted);
   background: var(--surface-alt);
   border-radius: 999px;
+  animation: pop-in var(--duration-fast) var(--ease-out);
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
 }
 
 .task-state--running {
@@ -1670,6 +1811,7 @@ select.input {
 .task-card-body {
   padding: 12px 14px 14px;
   border-top: 1px solid var(--stroke);
+  animation: surface-in 180ms var(--ease-out);
 }
 
 .task-form-grid {
@@ -1683,6 +1825,7 @@ select.input {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px dashed var(--stroke);
+  animation: surface-in var(--duration-fast) var(--ease-out);
 }
 
 .advanced-toggle {
@@ -1875,6 +2018,7 @@ select.input {
   border-radius: 50%;
   box-shadow: var(--shadow-flyout);
   cursor: pointer;
+  animation: pop-in var(--duration-fast) var(--ease-out);
 }
 
 .log-resume:hover {
@@ -1947,6 +2091,7 @@ select.input {
   padding: 24px;
   text-align: center;
   border-radius: var(--radius-surface);
+  animation: surface-in var(--duration-gentle) var(--ease-out);
 }
 
 .empty-state--queue,
@@ -2001,6 +2146,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
+  transition: border-color var(--duration-normal) var(--ease-standard);
 }
 
 .device-card--online {
@@ -2076,6 +2222,7 @@ select.input {
   height: auto;
   max-height: 220px;
   object-fit: contain;
+  animation: fade-in var(--duration-normal) var(--ease-out);
 }
 
 .device-shot-refresh {
@@ -2146,6 +2293,7 @@ select.input {
   color: var(--danger);
   background: var(--danger-soft);
   border-radius: var(--radius-control);
+  animation: surface-in var(--duration-fast) var(--ease-out);
 }
 
 .device-card-foot {
@@ -2337,7 +2485,14 @@ select.input {
   border-radius: var(--radius-surface);
   box-shadow: var(--shadow-flyout);
   pointer-events: auto;
-  animation: toast-in 160ms var(--ease);
+  animation: toast-in var(--duration-normal) var(--ease-out);
+}
+
+/* The row stays mounted for one short beat so the toast can leave instead of
+   vanishing; Toaster owns that timer. */
+.toast--leaving {
+  pointer-events: none;
+  animation: toast-out 140ms var(--ease-in) forwards;
 }
 
 .toast--success {
@@ -2411,23 +2566,6 @@ select.input {
 .toast-close:hover {
   color: var(--text);
   background: var(--surface-alt);
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .toast {
-    animation: none;
-  }
 }
 
 /* --------------------------------------------------------------------------
@@ -2507,6 +2645,17 @@ select.input {
   padding: 24px;
 }
 
+/* Modal keeps the layer mounted for its exit beat, then closes and unmounts
+   the dialog in the same task; the layer is inert while it fades. */
+.modal-layer--closing {
+  pointer-events: none;
+  animation: fade-out 120ms var(--ease-in) forwards;
+}
+
+.modal-layer--closing .modal {
+  animation: dialog-out 120ms var(--ease-in) forwards;
+}
+
 .modal-backdrop {
   position: absolute;
   inset: 0;
@@ -2514,6 +2663,7 @@ select.input {
   cursor: default;
   background: color-mix(in srgb, var(--bg-chrome) 72%, transparent);
   backdrop-filter: blur(4px);
+  animation: fade-in var(--duration-fast) var(--ease-standard);
 }
 
 .modal {
@@ -2527,6 +2677,7 @@ select.input {
   border: 1px solid var(--stroke-strong);
   border-radius: var(--radius-dialog);
   box-shadow: var(--shadow-flyout);
+  animation: dialog-in var(--duration-normal) var(--ease-out);
 }
 
 .modal--wide {
@@ -2537,6 +2688,7 @@ select.input {
 .modal::backdrop {
   background: color-mix(in srgb, var(--bg-chrome) 72%, transparent);
   backdrop-filter: blur(4px);
+  animation: fade-in var(--duration-fast) var(--ease-standard);
 }
 
 .modal-head {
@@ -2589,6 +2741,7 @@ select.input {
   border: 1px solid var(--stroke-strong);
   border-radius: var(--radius-surface);
   box-shadow: var(--shadow-flyout);
+  animation: rise-in var(--duration-normal) var(--ease-out);
 }
 
 .download-icon {
@@ -2695,6 +2848,7 @@ select.input {
   background: var(--inset);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
+  transition: border-color var(--duration-normal) var(--ease-standard);
 }
 
 .core-row--active {
@@ -2857,6 +3011,18 @@ select.input {
   margin-left: auto;
 }
 
+/* Shown while a run owns the active core; the switch buttons are disabled. */
+.core-switch-hint {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-radius: var(--radius-control);
+  animation: surface-in var(--duration-fast) var(--ease-out);
+}
+
 /* --------------------------------------------------------------------------
    Task plan toolbar and file picker field
    -------------------------------------------------------------------------- */
@@ -2958,6 +3124,7 @@ select.input {
   border: 1px solid var(--stroke);
   border-radius: var(--radius-control);
   background: var(--inset);
+  animation: surface-in var(--duration-fast) var(--ease-out);
 }
 
 .copilot-mode {
@@ -3044,6 +3211,8 @@ select.input {
   border-radius: var(--radius-surface);
   background: var(--surface);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  transform-origin: top;
+  animation: flyout-in 120ms var(--ease-out);
 }
 
 .browser-suggestions button {
@@ -3188,6 +3357,7 @@ select.input {
 .browser-detail {
   padding: 0 8px 8px;
   border-top: 1px dashed var(--stroke);
+  animation: surface-in 140ms var(--ease-out);
 }
 
 .browser-details {
@@ -3306,4 +3476,26 @@ select.input {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* --------------------------------------------------------------------------
+   Reduced motion
+   Motion is a preference, not decoration: collapse every duration at once
+   instead of listing each animated selector. The spinner stays, because it
+   reports status rather than conveying movement.
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
+  .spin {
+    animation: spin 1.6s linear infinite !important;
+  }
 }

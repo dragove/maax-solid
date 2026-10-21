@@ -96,6 +96,13 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const [resourceProgress, setResourceProgress] = createSignal<DownloadProgress>();
   const [resourceStatuses, setResourceStatuses] = createSignal<Readonly<Record<string, ResourceStatus>>>({});
   const [resourceBusy, setResourceBusy] = createSignal(false);
+  // Core management has its own in-flight flag: installing or importing a
+  // version is additive, so it must not disable starting a run on the core that
+  // is already active.
+  const [coreBusy, setCoreBusy] = createSignal(false);
+  // A connect can wait on ADB and MaaCore for up to a minute. Only the connect
+  // actions wait on it; tasks and plans stay usable.
+  const [connectBusy, setConnectBusy] = createSignal(false);
   const [coreRelease, setCoreRelease] = createSignal<CoreReleaseCheck>();
   const [browserTaskId, setBrowserTaskId] = createSignal<string | null>(null);
   const [copilotBrowseOpen, setCopilotBrowseOpen] = createSignal(false);
@@ -118,6 +125,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
   // is set, which is another window for a duplicate start.
   let connectPending = false;
   let runActionPending = false;
+  let coreActionPending = false;
 
   const locale = () => data().settings.locale;
   const tr = (key: Parameters<typeof t>[1]) => t(locale(), key);
@@ -150,6 +158,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
     if (!id) return logs();
     return logs().filter((entry) => !entry.deviceId || entry.deviceId === id);
   });
+
+  // A run owns the active core until it ends; only then may the core change.
+  // The device status covers a window reload, where no run snapshot survives.
+  const runActive = createMemo(
+    () =>
+      data().devices.some((device) => device.status === "running") ||
+      Object.values(runs()).some((run) => run.status === "preparing" || run.status === "running"),
+  );
 
   const resolvedTheme = createMemo<"dark" | "light">(() => {
     const theme = data().settings.theme;
@@ -423,10 +439,20 @@ export const AppShell: Component<AppShellProps> = (props) => {
   };
 
   const importCore = async (): Promise<void> => {
-    const core = await send(COMMANDS.pickAndAddCore, undefined);
-    if (!core) return;
-    notify({ kind: "success", title: tr("toast.coreAdded"), message: core.version });
-    await reload();
+    if (coreActionPending) return;
+    coreActionPending = true;
+    setCoreBusy(true);
+    try {
+      // Additive install: the active core keeps serving runs, so this cannot
+      // take the global busy flag.
+      const core = await send(COMMANDS.pickAndAddCore, undefined, { busy: false });
+      if (!core) return;
+      notify({ kind: "success", title: tr("toast.coreAdded"), message: core.version });
+      await reload();
+    } finally {
+      coreActionPending = false;
+      setCoreBusy(false);
+    }
   };
 
   const addDevice = async (draft: DeviceDraft): Promise<void> => {
@@ -465,8 +491,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
     if (connectPending) return;
     if (data().devices.find((item) => item.profile.id === deviceId)?.status === "connecting") return;
     connectPending = true;
+    setConnectBusy(true);
     try {
-      const device = await send(COMMANDS.connectDevice, { id: deviceId });
+      // The device's own connecting badge reports the attempt; taking the
+      // global busy flag here froze every run control for the whole wait.
+      const device = await send(COMMANDS.connectDevice, { id: deviceId }, { busy: false });
       if (!device) return;
       setData((current) => ({
         ...current,
@@ -475,6 +504,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
       notify({ kind: "success", title: tr("toast.connected"), message: device.profile.name });
     } finally {
       connectPending = false;
+      setConnectBusy(false);
     }
   };
 
@@ -520,12 +550,26 @@ export const AppShell: Component<AppShellProps> = (props) => {
   };
 
   const downloadCore = async (): Promise<void> => {
+    if (coreActionPending) return;
+    coreActionPending = true;
+    setCoreBusy(true);
     setDownload({ _tag: "download-progress", phase: "metadata", received: 0, total: 0 });
-    const core = await send(COMMANDS.downloadCore, undefined);
-    if (core) {
+    try {
+      // A new core installs beside the running one, so tasks stay startable
+      // while this downloads and unpacks.
+      const core = await send(COMMANDS.downloadCore, undefined, { busy: false });
+      if (!core) {
+        // Cancelled confirmation or a failed install: neither emits a terminal
+        // progress event, so the bar has to clear itself.
+        setDownload(undefined);
+        return;
+      }
       notify({ kind: "success", title: tr("toast.coreAdded"), message: core.version });
       await reload();
       await loadCoreRelease();
+    } finally {
+      coreActionPending = false;
+      setCoreBusy(false);
     }
   };
 
@@ -955,6 +999,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               onStart={() => void startRun()}
               onStop={() => void stopRun()}
               busy={busy()}
+              connectBusy={connectBusy()}
             />
           </Show>
           <Show when={view() === "tasks"}>
@@ -967,6 +1012,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               logs={deviceLogs()}
               stages={stages()}
               busy={busy()}
+              connectBusy={connectBusy()}
               saving={saving()}
               onConnect={() => void connectDevice()}
               onStart={() => void startRun()}
@@ -998,6 +1044,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               options={data().copilot.options}
               locale={locale()}
               busy={busy()}
+              connectBusy={connectBusy()}
               onConnect={() => void connectDevice()}
               onStart={() => void startCopilot()}
               onStop={() => void stopRun()}
@@ -1013,6 +1060,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               locale={locale()}
               screenshots={screenshots()}
               busy={busy()}
+              connectBusy={connectBusy()}
               onAdd={() => setAddDeviceOpen(true)}
               onConnect={(id) => void connectDevice(id)}
               onDisconnect={(id) => void disconnectDevice(id)}
@@ -1025,6 +1073,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
               data={data()}
               locale={locale()}
               busy={busy()}
+              coreBusy={coreBusy()}
+              runActive={runActive()}
               onUpdateSettings={(patch) => void updateSettings(patch)}
               download={download()}
               onImportCore={() => void importCore()}

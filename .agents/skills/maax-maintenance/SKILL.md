@@ -132,6 +132,37 @@ and `prefers-reduced-motion` keeps the hard switch. The topbar button is a
 binary dark/light toggle because `"system"` is owned by the Settings segmented
 control — a three-state cycle makes light look stuck when the OS is light.
 
+### Motion
+
+Fluent 2 motion tokens live in `styles.css`: `--duration-faster/fast/normal/gentle`,
+`--ease-out` (entrances), `--ease-in` (exits) and `--ease-standard` (state
+changes). Entrances decelerate, exits accelerate, and larger surfaces get more
+time. Hover/focus/selection feedback stays around 120ms.
+
+- Animate the element that is created, not its page. Each view fades in when
+  its `<Show>` mounts; cards, flyouts, empty states and dialogs carry their own
+  entrance.
+- Solid disposes a `<Show>` branch as soon as the condition flips, so an exit
+  needs the component to keep the element mounted for one beat. Only `Modal`
+  and `Toaster` own that timer (durations in `src/renderer/src/motion.ts`,
+  classes `--closing` / `--leaving`). Entry-only is the default; do not add an
+  exit timer to every list row.
+- A "closing" signal set from a `createEffect` is too late to keep a `<Show>`
+  mounted: the branch is already disposed and would remount, which resets its
+  scroll and focus mid-fade. Arm a `hold` signal while the surface is open and
+  let the exit timer release it, so the condition never reads false.
+- Close the dialog when its exit beat ends, in the same task as the unmount.
+  Disposing an element that still reports `open` skips the browser's own dialog
+  cleanup (including focus restoration for a modal host); closing it early
+  instead drops the `::backdrop` mid-fade.
+- Never animate high-frequency content (log lines, progress values). Also do not
+  put an entrance on a row whose data is replaced in place: `<For>` remounts the
+  row and the animation replays as flicker.
+- `prefers-reduced-motion` collapses every duration in one block at the end of
+  `styles.css`; JS-side exit beats skip their delay through
+  `prefersReducedMotion()`. The loading spinner is status, not decoration, and
+  keeps turning.
+
 ### Dynamic native controls
 
 When options are rendered dynamically, setting a native `<select value={...}>`
@@ -194,8 +225,11 @@ the commands the screen exercises), and `subscribe` returns an unsubscribe
 function. Click through the screens, then read `console` — a stub that returns
 `{ ok: false, error }` for everything else is enough to reach most UI.
 
-Class names are the other silent failure. After a stylesheet rewrite, every class
-used by `src/renderer/src/**/*.tsx` must still have a rule: a deleted block
+An `animation: name …` whose `@keyframes` was deleted is silent too, so keep
+keyframes and references together.
+
+Class names are the other silent failure. After a stylesheet rewrite, every
+class used by `src/renderer/src/**/*.tsx` must still have a rule: a deleted block
 compiles cleanly and only shows up as a misplaced control, an unstyled menu, or
 an icon in the wrong corner. Extract the class names from the TSX files and diff
 them against `styles.css` instead of eyeballing the CSS.
@@ -308,10 +342,15 @@ Use a utility process/worker, one host per core version or resource set.
 ### Component updates
 
 - Installing a core is additive: new directory, new registry entry. Never write
-  into the directory of a running core.
-- Activation is a separate step. Switch the active core only when no session
-  exists; otherwise leave the selection alone so a running device keeps its
-  core until it disconnects.
+  into the directory of a running core. An install/download must not take the
+  renderer's global `busy` flag either: the active core keeps serving runs, so
+  tasks stay startable while the new version downloads. Gate the core buttons
+  with `coreBusy` instead; only commands that change run/device state own
+  `busy`.
+- Activation is a separate step. The automatic switch after an install waits
+  for no live session and no active run; a manual switch is allowed while a
+  device is connected but is refused while a run is preparing or running (main
+  returns a typed error, Settings disables the button and shows a hint).
 - Only platform suffixes the core host can actually load belong in
   `platformSuffixFor`; a wrong asset produces a "ready" core that cannot start.
 
@@ -367,6 +406,12 @@ Use a utility process/worker, one host per core version or resource set.
   mutating connect/start/stop handler with a local in-flight flag; a shared
   `busy` signal set inside `send` is too late when the handler awaits a plan
   flush first.
+- `busy` is not a progress flag. It disables every mutating control, so it only
+  belongs to commands that immediately change run/device state. A core install
+  or a device connect can take minutes; those own `coreBusy` / `connectBusy`,
+  which gate only their own buttons. The connect handler is serialized by
+  `connectPending`, and the per-device `connecting` badge is what the user
+  watches, so plans, tasks and other devices stay usable throughout.
 - Derive the primary action from run state, not only connection state:
   `preparing`/`running` must turn the overview CTA into Stop, `connecting` must
   disable it, and a missing plan/enabled task must navigate to the owning page
