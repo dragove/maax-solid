@@ -1,6 +1,7 @@
 import { Show, createSignal, onSettled, type Component } from "solid-js";
 import type { Bootstrap } from "../../shared/schemas";
 import { AppShell } from "./shell/AppShell";
+import { traceRendererBoot } from "./boot-trace";
 import { DesktopBridgeError, DesktopBridgeLive, bootstrap as bootstrapEffect } from "./effect/desktop";
 import { RuntimeContext, createRuntime, useAppRuntime } from "./effect/solid-effect";
 import { Toaster } from "./components/ui/Toaster";
@@ -12,21 +13,6 @@ function describeError(cause: unknown): string {
   }
   return cause instanceof Error ? cause.message : String(cause);
 }
-
-const BootScreen: Component = () => (
-  <div class="boot-screen">
-    <div class="boot-inner">
-      <span class="boot-mark">
-        <span>M</span>
-      </span>
-      <h1 class="boot-title">Starting the workbench</h1>
-      <div class="boot-progress" aria-hidden="true">
-        <span />
-      </div>
-      <p class="boot-hint">Loading MaaCore status and workspace…</p>
-    </div>
-  </div>
-);
 
 const FatalScreen: Component<{ error: unknown; onRetry: () => void }> = (props) => (
   <div class="fatal-screen">
@@ -59,9 +45,11 @@ const Workbench: Component = () => {
   const load = (): void => {
     setError(undefined);
     setInitial(undefined);
+    traceRendererBoot("bootstrap-request");
     void runtime
       .runPromise(bootstrapEffect)
       .then((value) => {
+        traceRendererBoot("bootstrap-resolved");
         if (!cancelled) setInitial(value);
       })
       .catch((cause: unknown) => {
@@ -78,14 +66,13 @@ const Workbench: Component = () => {
     };
   });
 
+  // The window is hidden until the renderer loads and the shell paints shortly
+  // after; a separate boot screen would only flash. The app background covers the
+  // gap, and bootstrap failures still land on FatalScreen.
   return (
     <Show
       when={initial()}
-      fallback={
-        <Show when={error()} fallback={<BootScreen />}>
-          {(cause) => <FatalScreen error={cause()} onRetry={load} />}
-        </Show>
-      }
+      fallback={<Show when={error()}>{(cause) => <FatalScreen error={cause()} onRetry={load} />}</Show>}
     >
       {(value) => <AppShell initial={value()} />}
     </Show>

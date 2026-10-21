@@ -110,6 +110,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
   let saveTimer: number | undefined;
   let pendingPlan: TaskPlan | undefined;
   let saveChain: Promise<void> = Promise.resolve();
+  // Solid batches the disabled state until the next microtask, so a second
+  // click in the same tick would still reach these handlers. These flags make
+  // the in-flight command own the action: repeated clicks are ignored instead
+  // of racing a second connect/start/stop and surfacing an "already running"
+  // error. Starting also flushes the pending plan before the global busy flag
+  // is set, which is another window for a duplicate start.
+  let connectPending = false;
+  let runActionPending = false;
 
   const locale = () => data().settings.locale;
   const tr = (key: Parameters<typeof t>[1]) => t(locale(), key);
@@ -231,9 +239,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
       case "run-updated": {
         const previous = runs()[event.run.deviceId];
         setRuns((current) => ({ ...current, [event.run.deviceId]: event.run }));
+        // A launch failure arrives together with the start command's error
+        // toast; that failed event only clears the preparing state.
+        const launchFailure =
+          event.run.status === "failed" && event.run.tasks.every((task) => task.startedAt === undefined);
         if (
           previous &&
           previous.status !== event.run.status &&
+          !launchFailure &&
           (event.run.status === "completed" || event.run.status === "failed" || event.run.status === "stopped")
         ) {
           notify({
@@ -243,7 +256,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
                 ? tr("tasks.completed")
                 : event.run.status === "failed"
                   ? tr("tasks.failed")
-                  : tr("tasks.stopped"),
+                  : tr("toast.runStopped"),
             message: selectedDevice()?.profile.name,
           });
         }
@@ -447,13 +460,22 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setAddDeviceOpen(true);
       return;
     }
-    const device = await send(COMMANDS.connectDevice, { id: deviceId });
-    if (!device) return;
-    setData((current) => ({
-      ...current,
-      devices: current.devices.map((item) => (item.profile.id === device.profile.id ? device : item)),
-    }));
-    notify({ kind: "success", title: tr("toast.connected"), message: device.profile.name });
+    // A retry or a second click must not restart an attempt that is already in
+    // flight; it owns the waiter and the connecting badge.
+    if (connectPending) return;
+    if (data().devices.find((item) => item.profile.id === deviceId)?.status === "connecting") return;
+    connectPending = true;
+    try {
+      const device = await send(COMMANDS.connectDevice, { id: deviceId });
+      if (!device) return;
+      setData((current) => ({
+        ...current,
+        devices: current.devices.map((item) => (item.profile.id === device.profile.id ? device : item)),
+      }));
+      notify({ kind: "success", title: tr("toast.connected"), message: device.profile.name });
+    } finally {
+      connectPending = false;
+    }
   };
 
   const disconnectDevice = async (id: string): Promise<void> => {
@@ -588,23 +610,59 @@ export const AppShell: Component<AppShellProps> = (props) => {
   };
 
   const startRun = async (): Promise<void> => {
+    if (runActionPending) return;
     const device = selectedDevice();
     const plan = selectedPlan();
-    if (!device || !plan) return;
-    await flushSave();
-    const run = await send(COMMANDS.startRun, { deviceId: device.profile.id, planId: plan.id });
-    if (!run) return;
-    setRuns((current) => ({ ...current, [run.deviceId]: run }));
-    notify({ kind: "success", title: tr("toast.runStarted"), message: device.profile.name });
+    if (!device) {
+      setAddDeviceOpen(true);
+      return;
+    }
+    const activeRun = selectedRun();
+    if (device.status === "running" || activeRun?.status === "preparing" || activeRun?.status === "running") {
+      return;
+    }
+    // A silent return here is what made the overview button look dead. Send the
+    // user to the page where the missing piece lives and say what is missing.
+    if (!plan) {
+      setView("tasks");
+      notify({ kind: "info", title: tr("tasks.noPlan"), message: tr("overview.noPlanHint") });
+      return;
+    }
+    if (!plan.tasks.some((task) => task.enabled)) {
+      setView("tasks");
+      notify({ kind: "info", title: tr("tasks.noEnabled"), message: tr("overview.noEnabledHint") });
+      return;
+    }
+    runActionPending = true;
+    // Disable the CTA before the plan flush, not after it; otherwise the button
+    // still looks idle during a pending save and invites another click.
+    setBusy(true);
+    try {
+      await flushSave();
+      const run = await send(COMMANDS.startRun, { deviceId: device.profile.id, planId: plan.id }, { busy: false });
+      if (!run) return;
+      setRuns((current) => ({ ...current, [run.deviceId]: run }));
+      notify({ kind: "success", title: tr("toast.runStarted"), message: device.profile.name });
+    } finally {
+      setBusy(false);
+      runActionPending = false;
+    }
   };
 
   const stopRun = async (): Promise<void> => {
+    if (runActionPending) return;
     const device = selectedDevice();
     if (!device) return;
-    const run = await send(COMMANDS.stopRun, { deviceId: device.profile.id });
-    if (!run) return;
-    setRuns((current) => ({ ...current, [run.deviceId]: run }));
-    notify({ kind: "info", title: tr("toast.runStopped") });
+    runActionPending = true;
+    try {
+      const run = await send(COMMANDS.stopRun, { deviceId: device.profile.id });
+      if (!run) return;
+      setRuns((current) => ({ ...current, [run.deviceId]: run }));
+      // The terminal run-updated event owns the stop notification; notifying
+      // here too produced two toasts for one click.
+    } finally {
+      runActionPending = false;
+    }
   };
 
   const updateTaskParam = (taskId: string, key: string, value: unknown): void => {
@@ -749,12 +807,18 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const addBrowsedCopilotGlobal = async (id: number): Promise<boolean> => resolveCopilotGlobal(String(id));
 
   const startCopilot = async (): Promise<void> => {
+    if (runActionPending) return;
     const device = selectedDevice();
     if (!device) return;
-    const run = await send(COMMANDS.startCopilot, { deviceId: device.profile.id });
-    if (!run) return;
-    setRuns((current) => ({ ...current, [run.deviceId]: run }));
-    notify({ kind: "success", title: tr("copilotPage.started"), message: device.profile.name });
+    runActionPending = true;
+    try {
+      const run = await send(COMMANDS.startCopilot, { deviceId: device.profile.id });
+      if (!run) return;
+      setRuns((current) => ({ ...current, [run.deviceId]: run }));
+      notify({ kind: "success", title: tr("copilotPage.started"), message: device.profile.name });
+    } finally {
+      runActionPending = false;
+    }
   };
 
   const addBrowsedCopilot = async (id: number): Promise<boolean> => {
@@ -889,6 +953,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
               onAddDevice={() => setAddDeviceOpen(true)}
               onConnect={() => void connectDevice()}
               onStart={() => void startRun()}
+              onStop={() => void stopRun()}
+              busy={busy()}
             />
           </Show>
           <Show when={view() === "tasks"}>

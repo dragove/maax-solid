@@ -8,6 +8,7 @@ import {
   TaskPlanSchema,
 } from "../shared/schemas";
 import { COMMANDS, IPC_CHANNELS } from "../shared/ipc";
+import { bootTrace } from "./boot-trace";
 import { EventBus } from "./events";
 import { describeError, type MaaxError } from "./errors";
 import type { AppRuntime } from "./runtime";
@@ -64,8 +65,12 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
 
   ipcMain.handle(IPC_CHANNELS.command, async (_event, command: string, payload: unknown): Promise<unknown> => {
     switch (command) {
-      case COMMANDS.bootstrap:
-        return run((app) => app.bootstrap);
+      case COMMANDS.bootstrap: {
+        bootTrace("bootstrap-start");
+        const result = await run((app) => app.bootstrap);
+        bootTrace("bootstrap-end");
+        return result;
+      }
       case COMMANDS.updateSettings: {
         const patch = decode(AppSettingsPatchSchema, payload);
         return run((app) => app.updateSettings(patch));

@@ -2,6 +2,7 @@ import { app, BrowserWindow, session, shell } from "electron";
 import { Effect } from "effect";
 import { join } from "node:path";
 import appIcon from "../../build/icon.png?asset";
+import { attachRendererBootTrace, bootTrace, bootTraceEnabled } from "./boot-trace";
 import { registerIpcHandlers } from "./ipc";
 import { makeRuntime, type AppRuntime } from "./runtime";
 import { Application } from "./services/application";
@@ -13,6 +14,17 @@ let runtime: AppRuntime | null = null;
 let quitting = false;
 
 app.setName("Maax");
+
+if (bootTraceEnabled) {
+  bootTrace("main-loaded", {
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+    userData: app.getPath("userData"),
+    processStartedAt: Date.now() - process.uptime() * 1000,
+    mainUptimeMs: Math.round(process.uptime() * 1000),
+  });
+}
 
 if (isDevelopment) {
   app.commandLine.appendSwitch("remote-debugging-port", "9229");
@@ -77,11 +89,20 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      // The startup benchmark must receive frame callbacks even if the window
+      // opens behind another one; normal runs keep Chromium's throttling.
+      backgroundThrottling: !bootTraceEnabled,
       spellcheck: false,
     },
   });
 
   mainWindow = window;
+
+  bootTrace("window-created");
+  attachRendererBootTrace(window.webContents);
+  window.webContents.on("dom-ready", () => bootTrace("dom-ready"));
+  window.webContents.on("did-finish-load", () => bootTrace("did-finish-load"));
+  window.once("ready-to-show", () => bootTrace("ready-to-show"));
 
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
@@ -96,18 +117,25 @@ async function createWindow(): Promise<void> {
   }
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
+  bootTrace("load-start", { url: isDevelopment && rendererUrl ? rendererUrl : "file:index.html" });
 
   if (isDevelopment && rendererUrl) {
     await window.loadURL(rendererUrl);
   } else {
-    await window.loadFile(join(__dirname, "../renderer/index.html"));
+    await window.loadFile(
+      join(__dirname, "../renderer/index.html"),
+      bootTraceEnabled ? { query: { bootTrace: "1" } } : undefined,
+    );
   }
+
+  bootTrace("load-resolved");
 
   // Showing on did-finish-load instead of ready-to-show removes a compositor
   // round trip: hidden windows throttle frame production, so ready-to-show can
   // lag the first paint by >100ms on Wayland. The window background already
   // matches the app shell, so there is no white flash.
   window.show();
+  bootTrace("window-shown");
 }
 
 async function shutdown(): Promise<void> {
@@ -145,9 +173,12 @@ if (!hasSingleInstanceLock) {
   void app
     .whenReady()
     .then(async () => {
+      bootTrace("app-ready");
       app.setAppUserModelId("app.maax.desktop");
       runtime = makeRuntime();
+      bootTrace("runtime-created");
       registerIpcHandlers(runtime, () => mainWindow);
+      bootTrace("ipc-registered");
 
       session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
       session.defaultSession.setPermissionCheckHandler(() => false);

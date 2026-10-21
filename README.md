@@ -58,15 +58,20 @@ MAAX_DEV_CORE=/path/to/MAA-vX.Y.Z-linux-x86_64 pnpm dev
 `pnpm dev` 打开远程调试端口 `9229`，便于在 Wayland/niri 下做本地 UI 调试；
 生产包不开启该端口。
 
-| 命令           | 说明                                           |
-| -------------- | ---------------------------------------------- |
-| `pnpm dev`     | Electron + Vite HMR                            |
-| `pnpm lint`    | Effect 规则、type-aware 检查与 TypeScript 诊断 |
-| `pnpm format`  | Oxfmt                                          |
-| `pnpm check`   | lint + format check                            |
-| `pnpm build`   | lint 后构建到 `out/`                           |
-| `pnpm package` | 生成免安装目录 `dist/linux-unpacked`           |
-| `pnpm dist`    | 生成 AppImage / deb                            |
+| 命令                 | 说明                                           |
+| -------------------- | ---------------------------------------------- |
+| `pnpm dev`           | Electron + Vite HMR                            |
+| `pnpm lint`          | Effect 规则、type-aware 检查与 TypeScript 诊断 |
+| `pnpm format`        | Oxfmt                                          |
+| `pnpm check`         | lint + format check                            |
+| `pnpm build`         | lint 后构建到 `out/`                           |
+| `pnpm package`       | 生成免安装目录 `dist/linux-unpacked`           |
+| `pnpm dist`          | 生成 AppImage / deb                            |
+| `pnpm bench:startup` | 对比三种启动方式的耗时与内存（见下文）         |
+
+`pnpm bench:startup` 使用同一份 app.asar，分别启动 `linux-unpacked`、
+AppImage 和本地 Electron + app.asar，测量到工作台首帧的耗时与稳定后的 PSS/RSS。
+准备步骤、指标定义和限制见 [docs/startup-benchmark.md](docs/startup-benchmark.md)。
 
 ## 架构
 

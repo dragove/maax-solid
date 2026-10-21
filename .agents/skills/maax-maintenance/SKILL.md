@@ -162,6 +162,11 @@ The flow callback that renders the shell (`<Show when={initial()}>`) runs
 untracked, so the shell must take one explicit snapshot
 (`const initial = untrack(() => props.initial)`) and own its state from then on.
 
+There is no boot splash. The window is shown after the renderer loads and the
+shell paints within a few hundred milliseconds; a loading screen would only
+flash and its progress bar does not represent real work. Render nothing while
+bootstrap is pending and let `FatalScreen` own failures.
+
 ### Exhaustive branches
 
 When adding a member to a discriminated union, update every switch that renders
@@ -357,6 +362,16 @@ Use a utility process/worker, one host per core version or resource set.
   (`commit({ operator }) → search(page, filters)`); re-reading state you just
   wrote silently searches with the old filter and looks like "the button does
   nothing".
+- Solid also flushes DOM updates per microtask: a second click in the same tick
+  still reaches the handler even though the first click set `busy`. Guard every
+  mutating connect/start/stop handler with a local in-flight flag; a shared
+  `busy` signal set inside `send` is too late when the handler awaits a plan
+  flush first.
+- Derive the primary action from run state, not only connection state:
+  `preparing`/`running` must turn the overview CTA into Stop, `connecting` must
+  disable it, and a missing plan/enabled task must navigate to the owning page
+  instead of returning silently. The terminal `run-updated` event already owns
+  the stop toast; do not notify again in the command handler.
 
 ## Log severity mapping
 
@@ -384,6 +399,15 @@ levels in one formatter:
 - Builder warnings about optional platform binaries are expected on a
   single-platform build, but the matching binary and a successful launch are
   required before calling them harmless.
+
+### Startup measurement
+
+`pnpm bench:startup` compares `linux-unpacked`, AppImage and
+`electron app.asar` using env-gated `MAAX_BOOT_TRACE` markers; see
+`docs/startup-benchmark.md`. Measure spawn → first AppShell frame, sample PSS
+after the app settles, and keep tracing opt-in so normal startup performs no
+trace file I/O. Linux packaging choices can dominate startup: benchmark AppImage
+toolset/compression changes with the artifact on the same filesystem.
 
 ## Verification matrix
 

@@ -18,7 +18,8 @@
     "check": "pnpm run lint && pnpm run format:check",
     "build": "pnpm run lint && electron-vite build",
     "package": "pnpm run build && electron-builder --dir",
-    "dist": "pnpm run build && electron-builder"
+    "dist": "pnpm run build && electron-builder",
+    "bench:startup": "node scripts/measure-startup.mjs"
   },
   "dependencies": {
     "koffi": "3.3.3"

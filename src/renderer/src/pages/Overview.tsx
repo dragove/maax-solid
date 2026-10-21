@@ -1,4 +1,4 @@
-import { For, Show, type Component } from "solid-js";
+import { For, Show, createMemo, type Component } from "solid-js";
 import type { Bootstrap, DeviceView, Locale, RunSnapshot, TaskPlan } from "../../../shared/schemas";
 import { firstLine, type UiLogEntry } from "../log-format";
 import { enginePhaseKey, formatClock, pick, runStatusKey, runTaskStatusKey, t } from "../i18n/i18n";
@@ -20,6 +20,18 @@ interface OverviewProps {
   readonly onAddDevice: () => void;
   readonly onConnect: () => void;
   readonly onStart: () => void;
+  readonly onStop: () => void;
+  readonly busy: boolean;
+}
+
+type PrimaryVariant = "primary" | "secondary" | "danger";
+
+interface PrimaryAction {
+  readonly label: string;
+  readonly icon: string;
+  readonly variant: PrimaryVariant;
+  readonly disabled: boolean;
+  readonly onClick: () => void;
 }
 
 const statusText = (status: DeviceView["status"], locale: Locale): string => {
@@ -39,27 +51,109 @@ const statusText = (status: DeviceView["status"], locale: Locale): string => {
 
 export const Overview: Component<OverviewProps> = (props) => {
   const enabledTasks = () => props.plan?.tasks.filter((task) => task.enabled) ?? [];
-  const activeCore = () =>
+  const displayCore = () =>
     props.data.cores.find((core) => core.id === props.data.settings.activeCoreId) ?? props.data.cores[0];
+  // Match the main process: only a ready core can connect, and a broken active
+  // core falls back to any other ready one instead of disabling the CTA.
+  const runnableCore = () => {
+    const ready = props.data.cores.filter((core) => core.status === "ready");
+    return ready.find((core) => core.id === props.data.settings.activeCoreId) ?? ready[0];
+  };
   const connected = () => props.device?.status === "online" || props.device?.status === "running";
+  const connecting = () => props.device?.status === "connecting";
+  const runActive = () => props.run?.status === "preparing" || props.run?.status === "running";
+  const isRunning = () => runActive() || props.device?.status === "running";
   const lastLogs = () => props.logs.slice(-80).reverse();
   const completedCount = () => props.run?.tasks.filter((task) => task.status === "completed").length ?? 0;
-  const primaryLabel = () => {
-    if (!props.device) return t(props.locale, "devices.add");
-    if (!connected()) return t(props.locale, "overview.connectFirst");
-    return t(props.locale, "overview.startTasks");
-  };
-  const primaryIcon = () => (!props.device ? "plus" : connected() ? "play" : "wifi");
-  const primaryAction = () => {
+
+  /**
+   * One CTA for the whole setup: import a core, add or connect a device, start
+   * the queue, or stop the run that is already in flight. Without this the
+   * button kept saying "Start" while a run was prepared and a second click only
+   * produced an "already running" error.
+   */
+  const primary = createMemo<PrimaryAction>(() => {
+    if (!runnableCore()) {
+      return {
+        label: t(props.locale, "setup.import"),
+        icon: "plus",
+        variant: "primary",
+        disabled: false,
+        onClick: props.onImportCore,
+      };
+    }
     if (!props.device) {
-      props.onAddDevice();
-      return;
+      return {
+        label: t(props.locale, "devices.add"),
+        icon: "plus",
+        variant: "primary",
+        disabled: false,
+        onClick: props.onAddDevice,
+      };
+    }
+    if (connecting()) {
+      return {
+        label: t(props.locale, "status.connecting"),
+        icon: "loader",
+        variant: "secondary",
+        disabled: true,
+        onClick: () => undefined,
+      };
+    }
+    if (isRunning()) {
+      return {
+        label: t(props.locale, "tasks.stop"),
+        icon: "square",
+        variant: "danger",
+        disabled: props.busy,
+        onClick: props.onStop,
+      };
     }
     if (!connected()) {
-      props.onConnect();
-      return;
+      const failed = props.device.status === "error";
+      return {
+        label: t(props.locale, failed ? "overview.retryConnect" : "setup.connect"),
+        icon: failed ? "refresh-cw" : "wifi",
+        variant: "primary",
+        disabled: props.busy,
+        onClick: props.onConnect,
+      };
     }
-    props.onStart();
+    if (!props.plan || enabledTasks().length === 0) {
+      return {
+        label: t(props.locale, "overview.configureTasks"),
+        icon: "list-todo",
+        variant: "secondary",
+        disabled: false,
+        onClick: () => props.onNavigate("tasks"),
+      };
+    }
+    return {
+      label: t(props.locale, "overview.startTasks"),
+      icon: "play",
+      variant: "primary",
+      disabled: props.busy,
+      onClick: props.onStart,
+    };
+  });
+
+  /** Explain why the CTA is disabled or what the run is doing. */
+  const hint = (): string | undefined => {
+    if (connecting()) return t(props.locale, "overview.connectingHint");
+    if (props.run?.status === "preparing") return t(props.locale, "overview.preparingHint");
+    if (isRunning()) {
+      const total = props.run?.tasks.length ?? 0;
+      return total > 0
+        ? `${completedCount()}/${total} ${t(props.locale, "tasks.tasksCount")}`
+        : t(props.locale, "tasks.running");
+    }
+    if (props.device?.status === "error" && props.device.lastError) return props.device.lastError;
+    if (!runnableCore()) return t(props.locale, "overview.noCoreHint");
+    if (!props.device) return t(props.locale, "overview.noDeviceHint");
+    if (connected() && !props.plan) return t(props.locale, "overview.noPlanHint");
+    if (connected() && enabledTasks().length === 0) return t(props.locale, "overview.noEnabledHint");
+    if (props.busy) return t(props.locale, "common.working");
+    return undefined;
   };
 
   return (
@@ -69,11 +163,17 @@ export const Overview: Component<OverviewProps> = (props) => {
           <h1>{t(props.locale, "nav.overview")}</h1>
           <p class="page-subtitle">{t(props.locale, "overview.subtitle")}</p>
         </div>
-        <div class="page-actions">
-          <Button variant="primary" onClick={primaryAction} disabled={!activeCore()}>
-            <Icon name={primaryIcon()} />
-            {primaryLabel()}
+        <div class="page-actions page-actions--stack">
+          <Button
+            variant={primary().variant}
+            onClick={() => primary().onClick()}
+            disabled={primary().disabled}
+            title={hint()}
+          >
+            <Icon name={primary().icon} class={primary().icon === "loader" ? "icon spin" : undefined} />
+            {primary().label}
           </Button>
+          <Show when={hint()}>{(text) => <span class="page-action-hint">{text()}</span>}</Show>
         </div>
       </header>
 
@@ -94,7 +194,7 @@ export const Overview: Component<OverviewProps> = (props) => {
         <div class="status-cell">
           <span class="status-cell-label">{t(props.locale, "overview.core")}</span>
           <span class="status-cell-value">
-            <span>{activeCore()?.version ?? t(props.locale, "overview.noCore")}</span>
+            <span>{displayCore()?.version ?? t(props.locale, "overview.noCore")}</span>
           </span>
           <span class="status-cell-meta">{t(props.locale, enginePhaseKey(props.data.engine.phase))}</span>
         </div>
@@ -124,10 +224,10 @@ export const Overview: Component<OverviewProps> = (props) => {
         </div>
       </section>
 
-      <Show when={!activeCore() || !props.device}>
+      <Show when={!runnableCore() || !props.device}>
         <SetupPanel
           locale={props.locale}
-          hasCore={Boolean(activeCore())}
+          hasCore={Boolean(runnableCore())}
           hasDevice={Boolean(props.device)}
           connected={connected()}
           onImportCore={props.onImportCore}

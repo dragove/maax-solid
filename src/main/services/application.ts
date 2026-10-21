@@ -1000,7 +1000,6 @@ export const ApplicationLive: Layer.Layer<
               }),
             catch: (cause) => {
               const message = cause instanceof Error ? cause.message : String(cause);
-              runs.delete(deviceId);
               return maaxError(`任务「${task.name || task.type}」参数被拒绝`, message);
             },
           });
@@ -1021,7 +1020,6 @@ export const ApplicationLive: Layer.Layer<
             ? Boolean((started as { ok: unknown }).ok)
             : true;
         if (!ok) {
-          runs.delete(deviceId);
           return yield* maaxError("MaaCore 拒绝启动任务");
         }
         run.snapshot = { ...run.snapshot, status: "running" };
@@ -1030,7 +1028,18 @@ export const ApplicationLive: Layer.Layer<
         emitRun(run);
         emitEngine();
         return run.snapshot;
-      });
+      }).pipe(
+        // The preparing snapshot was already broadcast. If a later step fails,
+        // leaving it in the run map strands the UI on "preparing" (and offers a
+        // Stop button for a run the core never accepted), so project a terminal
+        // failure for every start error.
+        Effect.tapError((error: MaaxError) =>
+          Effect.sync(() => {
+            const message = error.detail ? `${error.message}：${error.detail}` : error.message;
+            finishRun(deviceId, "failed", message);
+          }),
+        ),
+      );
 
     const ensureDeviceIdle = (deviceId: string): Effect.Effect<void, MaaxError> =>
       Effect.gen(function* () {

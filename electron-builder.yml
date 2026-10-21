@@ -1,3 +1,9 @@
+# The static runtime + zstd AppImage starts roughly 1.3s faster than the
+# legacy FUSE2/gzip toolset; see docs/startup-benchmark.md.
+toolsets:
+  appimage: "1.0.3"
+appImage:
+  compression: zstd
 appId: app.maax.desktop
 productName: Maax
 copyright: Copyright © 2026 Maax
