@@ -28,6 +28,20 @@ describe("core callback formatting", () => {
     expect(line?.message).not.toContain("unknown");
   });
 
+  it("explains a stuck copilot stage navigation as a warning", () => {
+    const line = formatCoreCallback(
+      event(20003, {
+        what: "ExceededLimit",
+        taskchain: "Copilot",
+        first: ["Copilot@FullStageNavigation"],
+        details: { task: "FullStageNavigation" },
+      }),
+      "zh-CN",
+    );
+    expect(line?.level).toBe("warn");
+    expect(line?.message).toContain("关卡地图");
+  });
+
   it("surfaces recruitment failures as errors", () => {
     const line = formatCoreCallback(
       event(20000, { subtask: "AutoRecruitTask", taskchain: "Recruit", why: "no permit" }),

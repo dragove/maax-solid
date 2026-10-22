@@ -40,12 +40,25 @@
 - [x] Copilot browsing: search PRTS by keyword, stage, operator, author and
       sort order from inside the app, with a disk-cached stage catalogue and the
       core's own operator list.
-- [ ] Tools: recruitment calculator, operator box, depot.
-- [ ] Scheduled runs and run history/statistics.
-- [ ] Component manager UI (install/repair/rollback/move core).
-- [ ] Multi-device sessions with one host per core version.
-- [ ] Tray mode, native notifications, close-to-tray.
-- [ ] Log export and diagnostics bundle.
+- [x] Tools: recruitment calculator, operator box, depot. Recruitment reads
+      the active core's tables; OperBox/Depot results stream from the core's
+      `SubTaskExtraInfo` callbacks and are kept per device.
+- [x] Scheduled runs and run history/statistics. A per-device daily schedule
+      fires inside a two-hour grace window while the app is running; every
+      terminal run is recorded once and summarised by day and task type.
+- [x] Component manager UI (install/repair/rollback/move core). Install and
+      import remain additive; managed cores can be repaired from the release
+      archive or moved to another directory, and older versions stay selectable
+      for rollback.
+- [x] Multi-device sessions with one host per core version. Hosts are keyed by
+      core + resource server and shared by every attached device, so two devices
+      on the same core reuse one utility process while their runs stay separate.
+- [x] Tray mode, native notifications, close-to-tray. Notifications already
+      covered run completion; close-to-tray keeps scheduled runs alive and the
+      tray menu reopens or quits the app.
+- [x] Log export and diagnostics bundle. Logs are written through a save
+      dialog; the diagnostics bundle adds runtime, settings, cores, devices,
+      schedules, history and tool snapshots to a reviewable folder.
 
 ## v2 — polish and platform breadth
 

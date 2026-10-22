@@ -1,6 +1,15 @@
 import { For, Show, createSignal, type Component } from "solid-js";
-import type { CopilotItem, CopilotOptions, DeviceView, Locale, RunSnapshot } from "../../../shared/schemas";
+import type {
+  CopilotItem,
+  CopilotKind,
+  CopilotOptions,
+  DeviceView,
+  Locale,
+  RunSnapshot,
+} from "../../../shared/schemas";
+import type { UiLogEntry } from "../log-format";
 import { t } from "../i18n/i18n";
+import { LogStream } from "../components/LogStream";
 import { Button } from "../components/ui/Button";
 import { Icon } from "../components/ui/Icon";
 import { StatusPill } from "../components/ui/StatusPill";
@@ -14,6 +23,8 @@ interface CopilotPageProps {
   readonly locale: Locale;
   readonly busy: boolean;
   readonly connectBusy: boolean;
+  readonly logs: ReadonlyArray<UiLogEntry>;
+  readonly onClearLogs: () => void;
   readonly onConnect: () => void;
   readonly onStart: () => void;
   readonly onStop: () => void;
@@ -38,6 +49,37 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
   const connected = () => props.device?.status === "online" || props.device?.status === "running";
   const running = () => props.run?.status === "running" || props.run?.status === "preparing";
   const current = () => props.run?.tasks[0];
+
+  /** A batch can only drive one MaaCore task family at a time. */
+  const kind = (): CopilotKind | "mixed" => {
+    const kinds = new Set(props.items.map((item) => item.kind ?? "normal"));
+    if (kinds.size === 0) return "normal";
+    return kinds.size === 1 ? [...kinds][0]! : "mixed";
+  };
+
+  const prerequisite = (): string => {
+    switch (kind()) {
+      case "sss":
+        return t(props.locale, "copilotPage.prerequisiteSss");
+      case "paradox":
+        return t(props.locale, "copilotPage.prerequisiteParadox");
+      case "mixed":
+        return t(props.locale, "copilotPage.prerequisiteMixed");
+      default:
+        return t(props.locale, "copilotPage.prerequisite");
+    }
+  };
+
+  const kindLabel = (value: CopilotKind): string => {
+    switch (value) {
+      case "sss":
+        return t(props.locale, "copilot.kind.sss");
+      case "paradox":
+        return t(props.locale, "copilot.kind.paradox");
+      default:
+        return t(props.locale, "copilot.kind.normal");
+    }
+  };
 
   const add = async (): Promise<void> => {
     const value = input().trim();
@@ -81,7 +123,11 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
             <Show
               when={running()}
               fallback={
-                <Button variant="primary" disabled={props.busy || props.items.length === 0} onClick={props.onStart}>
+                <Button
+                  variant="primary"
+                  disabled={props.busy || props.items.length === 0 || kind() === "mixed"}
+                  onClick={props.onStart}
+                >
                   <Icon name="play" />
                   {t(props.locale, "copilotPage.start")}
                 </Button>
@@ -95,6 +141,11 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
           </Show>
         </div>
       </header>
+
+      <p class={kind() === "mixed" ? "copilot-prereq copilot-prereq--mixed" : "copilot-prereq"}>
+        <Icon name={kind() === "mixed" ? "alert-triangle" : "info"} />
+        {prerequisite()}
+      </p>
 
       <div class="copilot-grid">
         <section class="copilot-panel">
@@ -141,6 +192,9 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
                     <span class={item.isRaid ? "copilot-mode copilot-mode--raid" : "copilot-mode"}>
                       {t(props.locale, item.isRaid ? "copilot.raid" : "copilot.normal")}
                     </span>
+                    <Show when={(item.kind ?? "normal") !== "normal"}>
+                      <span class={`copilot-kind copilot-kind--${item.kind}`}>{kindLabel(item.kind ?? "normal")}</span>
+                    </Show>
                     <span class="copilot-title">{item.title || item.stage || item.filename}</span>
                     <span class="copilot-stage">{item.stage}</span>
                     <button
@@ -173,93 +227,111 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
             <span class="field-label">{t(props.locale, "copilotPage.options")}</span>
           </header>
           <div class="copilot-options">
-            <label class="field field--switch">
-              <span class="field-label">{t(props.locale, "copilotPage.formation")}</span>
-              <Switch
-                checked={props.options.formation}
-                disabled={running()}
-                onChange={(value) => props.onOptions({ formation: value })}
-                label={t(props.locale, "copilotPage.formation")}
-              />
-            </label>
-            <label class="field field--switch">
-              <span class="field-label">{t(props.locale, "copilotPage.addTrust")}</span>
-              <Switch
-                checked={props.options.addTrust}
-                disabled={running()}
-                onChange={(value) => props.onOptions({ addTrust: value })}
-                label={t(props.locale, "copilotPage.addTrust")}
-              />
-            </label>
-            <label class="field field--switch">
-              <span class="field-label">{t(props.locale, "copilotPage.ignoreRequirements")}</span>
-              <Switch
-                checked={props.options.ignoreRequirements}
-                disabled={running()}
-                onChange={(value) => props.onOptions({ ignoreRequirements: value })}
-                label={t(props.locale, "copilotPage.ignoreRequirements")}
-              />
-            </label>
-            <label class="field field--switch">
-              <span class="field-label">{t(props.locale, "copilotPage.useSanityPotion")}</span>
-              <Switch
-                checked={props.options.useSanityPotion}
-                disabled={running()}
-                onChange={(value) => props.onOptions({ useSanityPotion: value })}
-                label={t(props.locale, "copilotPage.useSanityPotion")}
-              />
-            </label>
-            <label class="field">
-              <span class="field-label">{t(props.locale, "copilotPage.supportUnit")}</span>
-              <select
-                class="input"
-                value={String(props.options.supportUnitUsage)}
-                disabled={running()}
-                onChange={(event) => props.onOptions({ supportUnitUsage: Number(event.currentTarget.value) })}
-              >
-                <For each={SUPPORT_USAGE}>
-                  {(value) => (
-                    <option value={String(value)} selected={props.options.supportUnitUsage === value}>
-                      {t(props.locale, `copilotPage.support${value}` as Parameters<typeof t>[1])}
-                    </option>
-                  )}
-                </For>
-              </select>
-            </label>
-            <label class="field">
-              <span class="field-label">{t(props.locale, "copilotPage.loopTimes")}</span>
-              <input
-                class="input input--number"
-                type="number"
-                min={1}
-                max={99}
-                step={1}
-                value={props.options.loopTimes}
-                disabled={running()}
-                onInput={(event) => {
-                  const next = event.currentTarget.valueAsNumber;
-                  props.onOptions({ loopTimes: Number.isFinite(next) ? Math.max(1, Math.trunc(next)) : 1 });
-                }}
-              />
-            </label>
-            <label class="field">
-              <span class="field-label">{t(props.locale, "copilotPage.formationIndex")}</span>
-              <input
-                class="input input--number"
-                type="number"
-                min={0}
-                max={4}
-                step={1}
-                value={props.options.formationIndex}
-                disabled={running()}
-                onInput={(event) => {
-                  const next = event.currentTarget.valueAsNumber;
-                  props.onOptions({
-                    formationIndex: Number.isFinite(next) ? Math.min(4, Math.max(0, Math.trunc(next))) : 0,
-                  });
-                }}
-              />
-            </label>
+            <Show when={kind() === "normal"}>
+              <label class="field field--switch">
+                <span class="field-label">{t(props.locale, "copilotPage.formation")}</span>
+                <Switch
+                  checked={props.options.formation}
+                  disabled={running()}
+                  onChange={(value) => props.onOptions({ formation: value })}
+                  label={t(props.locale, "copilotPage.formation")}
+                />
+              </label>
+              <label class="field field--switch">
+                <span class="field-label">{t(props.locale, "copilotPage.addTrust")}</span>
+                <Switch
+                  checked={props.options.addTrust}
+                  disabled={running()}
+                  onChange={(value) => props.onOptions({ addTrust: value })}
+                  label={t(props.locale, "copilotPage.addTrust")}
+                />
+              </label>
+              <label class="field field--switch">
+                <span class="field-label">{t(props.locale, "copilotPage.ignoreRequirements")}</span>
+                <Switch
+                  checked={props.options.ignoreRequirements}
+                  disabled={running()}
+                  onChange={(value) => props.onOptions({ ignoreRequirements: value })}
+                  label={t(props.locale, "copilotPage.ignoreRequirements")}
+                />
+              </label>
+              <label class="field field--switch">
+                <span class="field-label">{t(props.locale, "copilotPage.useSanityPotion")}</span>
+                <Switch
+                  checked={props.options.useSanityPotion}
+                  disabled={running()}
+                  onChange={(value) => props.onOptions({ useSanityPotion: value })}
+                  label={t(props.locale, "copilotPage.useSanityPotion")}
+                />
+              </label>
+              <label class="field">
+                <span class="field-label">{t(props.locale, "copilotPage.supportUnit")}</span>
+                <select
+                  class="input"
+                  value={String(props.options.supportUnitUsage)}
+                  disabled={running()}
+                  onChange={(event) => props.onOptions({ supportUnitUsage: Number(event.currentTarget.value) })}
+                >
+                  <For each={SUPPORT_USAGE}>
+                    {(value) => (
+                      <option value={String(value)} selected={props.options.supportUnitUsage === value}>
+                        {t(props.locale, `copilotPage.support${value}` as Parameters<typeof t>[1])}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </label>
+            </Show>
+            <Show when={kind() === "normal" || kind() === "sss"}>
+              <label class="field">
+                <span class="field-label">{t(props.locale, "copilotPage.loopTimes")}</span>
+                <input
+                  class="input input--number"
+                  type="number"
+                  min={1}
+                  max={99}
+                  step={1}
+                  value={props.options.loopTimes}
+                  disabled={running()}
+                  onInput={(event) => {
+                    const next = event.currentTarget.valueAsNumber;
+                    props.onOptions({ loopTimes: Number.isFinite(next) ? Math.max(1, Math.trunc(next)) : 1 });
+                  }}
+                />
+              </label>
+            </Show>
+            <Show when={kind() === "normal"}>
+              <label class="field">
+                <span class="field-label">{t(props.locale, "copilotPage.formationIndex")}</span>
+                <input
+                  class="input input--number"
+                  type="number"
+                  min={0}
+                  max={4}
+                  step={1}
+                  value={props.options.formationIndex}
+                  disabled={running()}
+                  onInput={(event) => {
+                    const next = event.currentTarget.valueAsNumber;
+                    props.onOptions({
+                      formationIndex: Number.isFinite(next) ? Math.min(4, Math.max(0, Math.trunc(next))) : 0,
+                    });
+                  }}
+                />
+              </label>
+            </Show>
+            <Show when={kind() === "sss"}>
+              <p class="copilot-option-note">{t(props.locale, "copilotPage.sssOptionsHint")}</p>
+            </Show>
+            <Show when={kind() === "paradox"}>
+              <p class="copilot-option-note">{t(props.locale, "copilotPage.paradoxOptionsHint")}</p>
+            </Show>
+            <Show when={kind() === "mixed"}>
+              <p class="copilot-option-note copilot-option-note--warning">
+                <Icon name="alert-triangle" />
+                {t(props.locale, "copilotPage.prerequisiteMixed")}
+              </p>
+            </Show>
           </div>
 
           <Show when={props.run}>
@@ -282,6 +354,19 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
           </Show>
         </section>
       </div>
+
+      <section class="panel log-panel copilot-log">
+        <div class="panel-head">
+          <div>
+            <h3>{t(props.locale, "copilotPage.logs")}</h3>
+          </div>
+          <Button size="sm" variant="ghost" onClick={props.onClearLogs} disabled={props.logs.length === 0}>
+            <Icon name="trash-2" />
+            {t(props.locale, "tasks.clearLogs")}
+          </Button>
+        </div>
+        <LogStream entries={props.logs} locale={props.locale} empty={t(props.locale, "tasks.noLogs")} />
+      </section>
     </div>
   );
 };

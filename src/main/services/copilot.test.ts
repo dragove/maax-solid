@@ -60,6 +60,20 @@ describe("copilot items", () => {
   it("falls back to the stage code when there is no title", () => {
     expect(itemsFromContent({ stage_name: "1-7" }, 1, "/tmp/a.json")[0]!.title).toBe("1-7");
   });
+
+  it("marks an SSS protocol file as one non-raid entry", () => {
+    const items = itemsFromContent(
+      { type: "SSS", stage_name: "lt_21_01", difficulty: 3, doc: { title: "保全派驻 LT-1" } },
+      7,
+      "/tmp/sss.json",
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "sss", isRaid: false, stage: "lt_21_01" });
+  });
+
+  it("keeps ordinary files typed as normal", () => {
+    expect(itemsFromContent({ ...content, difficulty: 1 }, 1, "/tmp/a.json")[0]!.kind).toBe("normal");
+  });
 });
 
 describe("copilot search query", () => {

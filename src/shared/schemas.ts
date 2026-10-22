@@ -62,6 +62,7 @@ export const AppSettingsSchema = Schema.Struct({
   connectionConfig: Schema.String,
   confirmBeforeDownload: Schema.Boolean,
   notifyOnComplete: Schema.Boolean,
+  closeToTray: Schema.Boolean,
   developerMode: Schema.Boolean,
 });
 export type AppSettings = Schema.Schema.Type<typeof AppSettingsSchema>;
@@ -76,6 +77,7 @@ export const AppSettingsPatchSchema = Schema.Struct({
   connectionConfig: Schema.optional(Schema.String),
   confirmBeforeDownload: Schema.optional(Schema.Boolean),
   notifyOnComplete: Schema.optional(Schema.Boolean),
+  closeToTray: Schema.optional(Schema.Boolean),
   developerMode: Schema.optional(Schema.Boolean),
 });
 export type AppSettingsPatch = Schema.Schema.Type<typeof AppSettingsPatchSchema>;
@@ -89,6 +91,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   connectionConfig: "General",
   confirmBeforeDownload: true,
   notifyOnComplete: true,
+  closeToTray: false,
   developerMode: false,
 };
 
@@ -165,9 +168,16 @@ export const CopilotFileSchema = Schema.Struct({
 });
 export type CopilotFile = Schema.Schema.Type<typeof CopilotFileSchema>;
 
+/** The three MaaCore copilot task families. */
+export const CopilotKindSchema = Schema.Literals(["normal", "sss", "paradox"]);
+export type CopilotKind = Schema.Schema.Type<typeof CopilotKindSchema>;
+
 /**
  * One entry of a copilot batch. Normal and raid runs of the same assignment are
  * two entries sharing a file but differing in `isRaid`.
+ *
+ * `kind` is optional so a batch saved before type detection still decodes as
+ * a normal assignment.
  */
 export const CopilotItemSchema = Schema.Struct({
   id: Schema.NonEmptyString,
@@ -176,6 +186,7 @@ export const CopilotItemSchema = Schema.Struct({
   stage: Schema.String,
   title: Schema.String,
   isRaid: Schema.Boolean,
+  kind: Schema.optional(CopilotKindSchema),
 });
 export type CopilotItem = Schema.Schema.Type<typeof CopilotItemSchema>;
 
@@ -449,6 +460,171 @@ export const RunSnapshotSchema = Schema.Struct({
 export type RunSnapshot = Schema.Schema.Type<typeof RunSnapshotSchema>;
 
 /* -------------------------------------------------------------------------- */
+/* Run history + schedules                                                     */
+/* -------------------------------------------------------------------------- */
+
+export const RunHistoryTaskSchema = Schema.Struct({
+  type: TaskTypeSchema,
+  name: Schema.String,
+  status: RunTaskStatusSchema,
+  startedAt: Schema.optional(Schema.Finite),
+  endedAt: Schema.optional(Schema.Finite),
+});
+export type RunHistoryTask = Schema.Schema.Type<typeof RunHistoryTaskSchema>;
+
+export const RunHistoryEntrySchema = Schema.Struct({
+  id: Schema.NonEmptyString,
+  deviceId: Schema.NonEmptyString,
+  deviceName: Schema.String,
+  planId: Schema.optional(Schema.NonEmptyString),
+  planName: Schema.optional(Schema.String),
+  /** Terminal status only: completed, stopped or failed. */
+  status: RunStatusSchema,
+  startedAt: Schema.Finite,
+  endedAt: Schema.Finite,
+  tasks: Schema.Array(RunHistoryTaskSchema),
+});
+export type RunHistoryEntry = Schema.Schema.Type<typeof RunHistoryEntrySchema>;
+
+export const RunDayStatSchema = Schema.Struct({
+  /** Local calendar day, YYYY-MM-DD. */
+  date: Schema.String,
+  total: Schema.Int,
+  completed: Schema.Int,
+  failed: Schema.Int,
+});
+export type RunDayStat = Schema.Schema.Type<typeof RunDayStatSchema>;
+
+export const RunTaskStatSchema = Schema.Struct({
+  type: TaskTypeSchema,
+  total: Schema.Int,
+  completed: Schema.Int,
+  failed: Schema.Int,
+});
+export type RunTaskStat = Schema.Schema.Type<typeof RunTaskStatSchema>;
+
+export const RunStatsSchema = Schema.Struct({
+  total: Schema.Int,
+  completed: Schema.Int,
+  failed: Schema.Int,
+  stopped: Schema.Int,
+  today: Schema.Int,
+  totalDurationMs: Schema.Finite,
+  byDay: Schema.Array(RunDayStatSchema),
+  byTask: Schema.Array(RunTaskStatSchema),
+});
+export type RunStats = Schema.Schema.Type<typeof RunStatsSchema>;
+
+export const RunHistorySchema = Schema.Struct({
+  entries: Schema.Array(RunHistoryEntrySchema),
+  stats: RunStatsSchema,
+});
+export type RunHistory = Schema.Schema.Type<typeof RunHistorySchema>;
+
+/**
+ * A daily schedule for one device. The main process checks it while it runs;
+ * planId falls back to the device's active plan when absent.
+ */
+export const ScheduleSchema = Schema.Struct({
+  deviceId: Schema.NonEmptyString,
+  planId: Schema.optional(Schema.NonEmptyString),
+  enabled: Schema.Boolean,
+  /** Local time in 24h HH:mm form. */
+  time: Schema.String,
+  /** JavaScript weekday numbers: Sunday = 0. */
+  weekdays: Schema.Array(Schema.Int),
+  lastTriggeredAt: Schema.optional(Schema.Finite),
+  lastStatus: Schema.optional(Schema.Literals(["started", "skipped", "failed"])),
+  lastMessage: Schema.optional(Schema.String),
+});
+export type Schedule = Schema.Schema.Type<typeof ScheduleSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Tools: recruitment, operator box and depot                                 */
+/* -------------------------------------------------------------------------- */
+
+export const RecruitmentTagSchema = Schema.Struct({
+  /** Chinese tag as stored in recruitment.json; also the key the game uses. */
+  name: Schema.String,
+  nameEn: Schema.String,
+});
+export type RecruitmentTag = Schema.Schema.Type<typeof RecruitmentTagSchema>;
+
+export const RecruitmentOperatorSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  nameEn: Schema.String,
+  rarity: Schema.Int,
+  tags: Schema.Array(Schema.String),
+});
+export type RecruitmentOperator = Schema.Schema.Type<typeof RecruitmentOperatorSchema>;
+
+export const RecruitmentDataSchema = Schema.Struct({
+  coreId: Schema.NonEmptyString,
+  tags: Schema.Array(RecruitmentTagSchema),
+  operators: Schema.Array(RecruitmentOperatorSchema),
+  updatedAt: Schema.Finite,
+});
+export type RecruitmentData = Schema.Schema.Type<typeof RecruitmentDataSchema>;
+
+export const OperBoxEntrySchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  nameEn: Schema.String,
+  rarity: Schema.Int,
+  own: Schema.Boolean,
+  elite: Schema.optional(Schema.Int),
+  level: Schema.optional(Schema.Int),
+  potential: Schema.optional(Schema.Int),
+});
+export type OperBoxEntry = Schema.Schema.Type<typeof OperBoxEntrySchema>;
+
+export const OperBoxSnapshotSchema = Schema.Struct({
+  updatedAt: Schema.Finite,
+  done: Schema.Boolean,
+  entries: Schema.Array(OperBoxEntrySchema),
+});
+export type OperBoxSnapshot = Schema.Schema.Type<typeof OperBoxSnapshotSchema>;
+
+export const DepotItemSchema = Schema.Struct({
+  itemId: Schema.String,
+  name: Schema.String,
+  count: Schema.Int,
+  group: Schema.String,
+});
+export type DepotItem = Schema.Schema.Type<typeof DepotItemSchema>;
+
+export const DepotSnapshotSchema = Schema.Struct({
+  updatedAt: Schema.Finite,
+  done: Schema.Boolean,
+  items: Schema.Array(DepotItemSchema),
+});
+export type DepotSnapshot = Schema.Schema.Type<typeof DepotSnapshotSchema>;
+
+export const ToolSnapshotSchema = Schema.Struct({
+  operbox: Schema.optional(OperBoxSnapshotSchema),
+  depot: Schema.optional(DepotSnapshotSchema),
+});
+export type ToolSnapshot = Schema.Schema.Type<typeof ToolSnapshotSchema>;
+
+export const ToolsStateSchema = Schema.Record(Schema.String, ToolSnapshotSchema);
+export type ToolsState = Schema.Schema.Type<typeof ToolsStateSchema>;
+
+export const ToolKindSchema = Schema.Literals(["operbox", "depot"]);
+export type ToolKind = Schema.Schema.Type<typeof ToolKindSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Logs + diagnostics                                                         */
+/* -------------------------------------------------------------------------- */
+
+export const LogEntrySchema = Schema.Struct({
+  at: Schema.Finite,
+  level: Schema.Literals(["debug", "info", "warn", "error", "success"]),
+  message: Schema.String,
+});
+export type LogEntry = Schema.Schema.Type<typeof LogEntrySchema>;
+
+/* -------------------------------------------------------------------------- */
 /* Bootstrap + live events                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -460,6 +636,9 @@ export const BootstrapSchema = Schema.Struct({
   plans: Schema.Array(TaskPlanSchema),
   engine: EngineInfoSchema,
   copilot: CopilotSetupSchema,
+  history: RunHistorySchema,
+  schedules: Schema.Array(ScheduleSchema),
+  tools: ToolsStateSchema,
 });
 export type Bootstrap = Schema.Schema.Type<typeof BootstrapSchema>;
 
@@ -494,6 +673,16 @@ export const CopilotUpdatedEventSchema = Schema.TaggedStruct("copilot-updated", 
 export const SettingsUpdatedEventSchema = Schema.TaggedStruct("settings-updated", {
   settings: AppSettingsSchema,
 });
+export const HistoryUpdatedEventSchema = Schema.TaggedStruct("history-updated", {
+  history: RunHistorySchema,
+});
+export const SchedulesUpdatedEventSchema = Schema.TaggedStruct("schedules-updated", {
+  schedules: Schema.Array(ScheduleSchema),
+});
+export const ToolsUpdatedEventSchema = Schema.TaggedStruct("tools-updated", {
+  deviceId: Schema.NonEmptyString,
+  snapshot: ToolSnapshotSchema,
+});
 export const LogEventSchema = Schema.TaggedStruct("log", {
   level: Schema.Literals(["debug", "info", "warn", "error"]),
   message: Schema.String,
@@ -524,6 +713,9 @@ export const MaaxEventSchema = Schema.Union([
   PlansUpdatedEventSchema,
   CopilotUpdatedEventSchema,
   SettingsUpdatedEventSchema,
+  HistoryUpdatedEventSchema,
+  SchedulesUpdatedEventSchema,
+  ToolsUpdatedEventSchema,
   LogEventSchema,
   ToastEventSchema,
   DownloadProgressEventSchema,

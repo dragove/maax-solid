@@ -1389,7 +1389,7 @@ export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Rec
   }
 }
 
-/** Build the single task the copilot tab runs, from its saved setup. */
+/** Build the normal-stage batch task the copilot tab runs. */
 export function createCopilotTask(setup: CopilotSetup, id = crypto.randomUUID()): TaskConfig {
   return {
     id,
@@ -1409,6 +1409,46 @@ export function createCopilotTask(setup: CopilotSetup, id = crypto.randomUUID())
     },
     createdAt: 0,
   };
+}
+
+/**
+ * Turn one saved copilot batch into the MaaCore tasks it needs.
+ *
+ * Normal assignments share one `Copilot` task with `copilot_list`. SSS has no
+ * batch form in MaaCore, so each file becomes its own `SSSCopilot` task; the
+ * paradox batch form accepts a list, but MaaCore's task definition in this app
+ * only passes one filename, so those also become sequential tasks. Mixing the
+ * three families is refused: they start from different screens.
+ */
+export function createCopilotRunTasks(setup: CopilotSetup, id = crypto.randomUUID()): ReadonlyArray<TaskConfig> {
+  if (setup.items.length === 0) return [];
+  const kinds = new Set(setup.items.map((item) => item.kind ?? "normal"));
+  if (kinds.size > 1) return [];
+  const kind = setup.items[0]!.kind ?? "normal";
+
+  if (kind === "sss") {
+    return setup.items.map((item, index) => {
+      const task = createTask("SSSCopilot", index === 0 ? id : crypto.randomUUID());
+      return {
+        ...task,
+        params: {
+          ...task.params,
+          filename: item.filename,
+          formation: false,
+          loop_times: setup.options.loopTimes,
+        },
+      };
+    });
+  }
+
+  if (kind === "paradox") {
+    return setup.items.map((item, index) => {
+      const task = createTask("ParadoxCopilot", index === 0 ? id : crypto.randomUUID());
+      return { ...task, params: { ...task.params, filename: item.filename } };
+    });
+  }
+
+  return [createCopilotTask(setup, id)];
 }
 
 /**

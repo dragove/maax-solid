@@ -333,6 +333,9 @@ Use a utility process/worker, one host per core version or resource set.
   is `HostEntry.devices`. Attach in `ensureSession`, detach on disconnect/delete,
   and release the process when the last device leaves. Do not count connects by
   hand: the counter only grows that way and leaves orphaned processes.
+- Hosts are shared by core + resource server across devices. When testing
+  multi-device behavior, verify the host count does not grow per device and a
+  removed or disconnected device is detached from `HostEntry.devices`.
 - On a crash, abort in-flight connects before scheduling the retry. A connect
   that is still waiting on its 60s timeout otherwise reports a stale failure over
   an already healthy retry.
@@ -354,6 +357,35 @@ Use a utility process/worker, one host per core version or resource set.
   behind the user.
 - Never resume a run after a host crash. Mark the interrupted queue failed;
   resuming could spend sanity, medicine or Originite twice.
+
+### Tools and run activity
+
+- OperBox and Depot results arrive as `SubTaskExtraInfo` (`msg === 20003`)
+  callbacks with `what: "OperBoxInfo"` / `"DepotInfo"`; parse them in
+  `src/shared/tools.ts` and persist the latest snapshot per device. Depot's
+  `details.data` is a JSON string of `itemId -> count`, and item names come
+  from the active core's `item_index.json`. Never add a native API for this.
+- The recruitment calculator is pure renderer/shared code over
+  `recruitment.json` + `battle_data.json`. Tag ids stay Chinese because that is
+  the key the game and MaaCore use; localize only the label.
+- Record a terminal run exactly once. `recordRun` owns the history write and
+  guards on `RunState.recorded`; completion callbacks, stop and host crashes all
+  funnel through it. Do not record from the renderer or from an event handler.
+- Schedules are local-time, per-device entries in `config/schedules.json`. They
+  fire only while the app runs, inside a two-hour grace window, and are marked
+  started/skipped/failed before the next check. A due schedule may connect the
+  device itself; it must not take the renderer's global `busy` flag.
+- Tray close behavior is mirrored into `src/main/app-behavior.ts` because the
+  window close handler runs outside Effect. `window-all-closed` must keep the
+  app alive when close-to-tray is enabled and a tray exists; otherwise a
+  programmatic window close would strand a hidden process.
+- Log/diagnostics exports are local only. The diagnostics folder intentionally
+  includes device addresses and paths, so document that before sharing.
+
+New small stores (`history`, `schedules`, `tools`) use the plain atomic
+`json-file.ts` helper instead of adding another exception to the unstable
+`effect/FileSystem` boundary list. Keep writes serialized and atomic; do not
+write JSON with a bare `writeFile` in place.
 
 ### Resource updates
 
@@ -382,6 +414,11 @@ Use a utility process/worker, one host per core version or resource set.
   returns a typed error, Settings disables the button and shows a hint).
 - Only platform suffixes the core host can actually load belong in
   `platformSuffixFor`; a wrong asset produces a "ready" core that cannot start.
+- Repair re-downloads the **current** version and swaps the managed directory
+  through a staging copy; restore the old tree if extraction or rename fails.
+  Move relocates a managed core and then revalidates its registry entry, and is
+  refused while a session holds that core. Imported cores are never moved or
+  repaired automatically.
 
 ### Task plans and task types
 
@@ -408,6 +445,23 @@ Use a utility process/worker, one host per core version or resource set.
   `config/copilot.json` and starts a run with no `planId`. Do not add it back to
   `TASK_PALETTE_ORDER`; a first clear is one-off, everything after it uses the
   game's own auto-battle inside the Fight task.
+- MAA's multi-assignment mode (`copilot_list`) starts at the **target chapter's
+  stage map**. From the home screen or another chapter, the core only swipes
+  `FullStageNavigation`, hits `ExceededLimit`, and never reaches the stage.
+  Keep the prerequisite visible in the Copilot tab; do not try to automate
+  chapter switching from the home screen.
+- The Copilot tab keeps its own `LogStream`. Command failures (`send`) are
+  appended to the log as errors, and `ExceededLimit` on
+  `FullStageNavigation` is formatted as a warning that names the map-screen
+  requirement. A failed resolve/start must never be toast-only.
+- Every `CopilotItem` carries `kind` (`normal`/`sss`/`paradox`). Detect it
+  from the SSS protocol marker and the level catalogue's `lt_`/`mem_` stage-id
+  prefixes. Normal uses one `Copilot` + `copilot_list`; SSS uses one
+  `SSSCopilot` per file and **no auto formation**; Paradox uses one
+  `ParadoxCopilot` per file. Never send an SSS or Paradox file through the
+  normal branch, and refuse a mixed batch at add and start time. Their entry
+  screens differ: normal needs the target chapter map, SSS the deployment
+  preparation screen, Paradox the formation screen after choosing a skill.
 - Copilot `difficulty` is a bitmask (1 normal, 2 raid, 3 both), not an enum.
   Expanding "both" into two entries that share one file is what makes a normal
   and a raid run back to back possible.
@@ -492,20 +546,24 @@ toolset/compression changes with the artifact on the same filesystem.
 
 ## Verification matrix
 
-| Change             | Minimum check                                                                                                                                 |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reactive control   | update twice; verify focus, visual selection, and persisted value                                                                             |
-| Motion             | sample `getAnimations()` across frames: collapse reverses mid-flight, page switch runs a `content` view transition, reduced motion skips both |
-| Reactive warning   | `pnpm dev` console stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen                                              |
-| Stylesheet rewrite | every class used by TSX still has a rule; screenshot affected screens in both themes                                                          |
-| Modal              | open it from a focused launcher: focus lands inside, Esc and backdrop close                                                                   |
-| Dynamic list       | add/remove/reorder; confirm no unexpected remount                                                                                             |
-| Effect service     | type check, layer boot, and one failure path                                                                                                  |
-| IPC contract       | invalid payload is rejected; valid payload round-trips                                                                                        |
-| Native host        | connect, perform one operation, stop; inspect native log                                                                                      |
-| Device connect     | connect an unreachable address: fails within the ADB probe timeout and the device leaves `connecting`                                         |
-| Log formatter      | expected branch is not error; real failure is error                                                                                           |
-| Packaging          | build, launch unpacked app, load a core/resource                                                                                              |
+| Change               | Minimum check                                                                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reactive control     | update twice; verify focus, visual selection, and persisted value                                                                             |
+| Motion               | sample `getAnimations()` across frames: collapse reverses mid-flight, page switch runs a `content` view transition, reduced motion skips both |
+| Reactive warning     | `pnpm dev` console stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen                                              |
+| Stylesheet rewrite   | every class used by TSX still has a rule; screenshot affected screens in both themes                                                          |
+| Modal                | open it from a focused launcher: focus lands inside, Esc and backdrop close                                                                   |
+| Dynamic list         | add/remove/reorder; confirm no unexpected remount                                                                                             |
+| Effect service       | type check, layer boot, and one failure path                                                                                                  |
+| IPC contract         | invalid payload is rejected; valid payload round-trips                                                                                        |
+| Native host          | connect, perform one operation, stop; inspect native log                                                                                      |
+| Device connect       | connect an unreachable address: fails within the ADB probe timeout and the device leaves `connecting`                                         |
+| Log formatter        | expected branch is not error; real failure is error                                                                                           |
+| Tool callback parser | partial OperBox/Depot frames replace the snapshot; malformed payload is ignored                                                               |
+| Schedule             | due only on a matching local weekday, not twice, inside the grace window                                                                      |
+| Tray                 | close with the window manager hides the window and keeps the process alive; tray/reopen path works                                            |
+| Diagnostics          | exported folder contains summary, workspace, schedules, history, tools and logs; no upload                                                    |
+| Packaging            | build, launch unpacked app, load a core/resource                                                                                              |
 
 Add tests only where the contract is stable: schemas, pure mappers, severity
 classification, parser output. Avoid brittle DOM tests for screens that are

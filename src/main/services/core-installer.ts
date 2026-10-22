@@ -1,7 +1,7 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { app, BrowserWindow, dialog } from "electron";
 import { cp, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import type { CoreInfo, CoreReleaseCheck } from "../../shared/schemas";
 import { maaxError, type MaaxError } from "../errors";
@@ -60,6 +60,7 @@ const hasCoreFiles = async (directory: string): Promise<boolean> => {
 export interface CoreInstallerApi {
   readonly downloadStable: Effect.Effect<CoreInfo | null, MaaxError>;
   readonly checkUpdate: Effect.Effect<CoreReleaseCheck, MaaxError>;
+  readonly repair: (core: CoreInfo) => Effect.Effect<CoreInfo, MaaxError>;
 }
 
 export class CoreInstaller extends Context.Service<CoreInstaller, CoreInstallerApi>()("maax/CoreInstaller") {}
@@ -244,6 +245,93 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
         }
       });
 
-      return { downloadStable, checkUpdate };
+      /**
+       * Reinstall a managed core in place. The old directory is renamed aside
+       * first, so a failed archive or extraction restores the exact previous
+       * tree instead of leaving a half-written core the host cannot load.
+       */
+      const repair = (core: CoreInfo): Effect.Effect<CoreInfo, MaaxError> =>
+        Effect.gen(function* () {
+          if (!core.managed) {
+            return yield* maaxError("只能修复由 MaaX 下载安装的核心", "导入的核心请重新选择目录");
+          }
+          if (!resolve(core.root).startsWith(resolve(paths.coresDir))) {
+            return yield* maaxError("核心目录不在 MaaX 的管理范围内", core.root);
+          }
+          const suffix = platformSuffixFor(process.platform, process.arch);
+          if (!suffix) return yield* maaxError("当前平台暂不支持自动修复 MaaCore");
+
+          progress("metadata", 0, 0);
+          const release = yield* fetchRelease;
+          if (release.version !== core.version) {
+            return yield* maaxError(
+              "这个核心版本不是当前稳定版，无法自动修复",
+              `当前稳定版为 ${release.version}，请使用「下载核心」更新`,
+            );
+          }
+          const asset = pickCoreAsset(release, suffix);
+          if (!asset) return yield* maaxError(`这个版本没有 ${suffix} 的 tar.gz 包`);
+
+          const workspace = join(paths.cacheDir, `core-repair-${process.pid}-${Date.now()}`);
+          const archive = join(workspace, asset.name);
+          const extracted = join(workspace, "extracted");
+          yield* Effect.tryPromise({
+            try: () => mkdir(extracted, { recursive: true }),
+            catch: (cause) => maaxError("创建修复临时目录失败", cause),
+          });
+
+          try {
+            progress("downloading", 0, asset.size);
+            yield* Effect.tryPromise({
+              try: () =>
+                downloadFile(asset.url, archive, {
+                  total: asset.size,
+                  label: "MaaCore",
+                  onProgress: (received, total) => progress("downloading", received, total),
+                }),
+              catch: (cause) => maaxError("下载 MaaCore 失败", cause),
+            });
+            progress("extracting", asset.size, asset.size);
+            yield* Effect.tryPromise({
+              try: () => extractTarGz(archive, extracted),
+              catch: (cause) => maaxError("解压 MaaCore 失败", cause),
+            });
+            const root = yield* Effect.tryPromise({
+              try: () => findExtractedRoot(extracted),
+              catch: (cause) => maaxError("找不到解压后的 MaaCore", cause),
+            });
+
+            progress("installing", asset.size, asset.size);
+            const backup = `${core.root}.repair-${process.pid}`;
+            yield* Effect.tryPromise({
+              try: async () => {
+                await rename(core.root, backup);
+                try {
+                  if (root === extracted) {
+                    await cp(root, core.root, { recursive: true, force: false, errorOnExist: true });
+                  } else {
+                    await rename(root, core.root);
+                  }
+                } catch (error) {
+                  await rm(core.root, { recursive: true, force: true }).catch(() => undefined);
+                  await rename(backup, core.root).catch(() => undefined);
+                  throw error;
+                }
+                await rm(backup, { recursive: true, force: true }).catch(() => undefined);
+              },
+              catch: (cause) => maaxError("修复 MaaCore 失败", cause),
+            });
+
+            const cores = yield* registry.refresh;
+            const refreshed = cores.find((item) => item.root === core.root);
+            if (!refreshed) return yield* maaxError("修复后找不到核心登记");
+            progress("done", asset.size, asset.size);
+            return refreshed;
+          } finally {
+            yield* Effect.promise(() => rm(workspace, { recursive: true, force: true }).catch(() => undefined));
+          }
+        });
+
+      return { downloadStable, checkUpdate, repair };
     }),
   );

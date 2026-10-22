@@ -5,7 +5,10 @@ import {
   CopilotItemSchema,
   DeviceDraftSchema,
   DeviceUpdateSchema,
+  LogEntrySchema,
+  ScheduleSchema,
   TaskPlanSchema,
+  ToolKindSchema,
 } from "../shared/schemas";
 import { COMMANDS, IPC_CHANNELS } from "../shared/ipc";
 import { bootTrace } from "./boot-trace";
@@ -44,6 +47,12 @@ const CopilotSearchInputSchema = Schema.Struct({
 const RollbackInputSchema = Schema.Struct({
   coreId: Schema.NonEmptyString,
   backupId: Schema.NonEmptyString,
+});
+const ScheduleInputSchema = Schema.Struct({ schedule: ScheduleSchema });
+const LogEntriesInputSchema = Schema.Struct({ entries: Schema.Array(LogEntrySchema) });
+const ToolInputSchema = Schema.Struct({
+  deviceId: Schema.NonEmptyString,
+  kind: ToolKindSchema,
 });
 
 const decode = <A>(schema: Schema.ConstraintDecoder<A>, input: unknown): A => Schema.decodeUnknownSync(schema)(input);
@@ -111,6 +120,14 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
         return run((app) => app.downloadCore);
       case COMMANDS.checkCoreUpdate:
         return run((app) => app.checkCoreUpdate);
+      case COMMANDS.repairCore: {
+        const { coreId } = decode(CoreIdInputSchema, payload);
+        return run((app) => app.repairCore(coreId));
+      }
+      case COMMANDS.moveCore: {
+        const { coreId } = decode(CoreIdInputSchema, payload);
+        return run((app) => app.moveCore(coreId));
+      }
       case COMMANDS.resourceStatus: {
         const { coreId } = decode(CoreIdInputSchema, payload);
         return run((app) => app.resourceStatus(coreId));
@@ -233,6 +250,28 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
       case COMMANDS.stopRun: {
         const { deviceId } = decode(Schema.Struct({ deviceId: Schema.String }), payload);
         return run((app) => app.stopRun(deviceId));
+      }
+      case COMMANDS.runHistory:
+        return run((app) => app.runHistory);
+      case COMMANDS.clearHistory:
+        return run((app) => app.clearHistory);
+      case COMMANDS.saveSchedule: {
+        const { schedule } = decode(ScheduleInputSchema, payload);
+        return run((app) => app.saveSchedule(schedule));
+      }
+      case COMMANDS.recruitmentData:
+        return run((app) => app.recruitmentData);
+      case COMMANDS.startTool: {
+        const { deviceId, kind } = decode(ToolInputSchema, payload);
+        return run((app) => app.startTool(deviceId, kind));
+      }
+      case COMMANDS.exportLogs: {
+        const { entries } = decode(LogEntriesInputSchema, payload);
+        return run((app) => app.exportLogs(entries));
+      }
+      case COMMANDS.exportDiagnostics: {
+        const { entries } = decode(LogEntriesInputSchema, payload);
+        return run((app) => app.exportDiagnostics(entries));
       }
       default:
         return {

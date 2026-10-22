@@ -30,7 +30,12 @@ interface SettingsProps {
   readonly onDownloadCore: () => void;
   readonly onSetActiveCore: (id: string) => void;
   readonly onRemoveCore: (id: string) => void;
+  readonly onRepairCore: (id: string) => void;
+  readonly onMoveCore: (id: string) => void;
   readonly onRefreshCores: () => void;
+  readonly onExportLogs: () => void;
+  readonly onExportDiagnostics: () => void;
+  readonly logCount: number;
   readonly coreRelease?: CoreReleaseCheck;
   readonly onCheckCoreUpdate: () => void;
   readonly resourceStatuses: Readonly<Record<string, ResourceStatus>>;
@@ -226,10 +231,20 @@ export const Settings: Component<SettingsProps> = (props) => {
             >
               <ul class="core-list">
                 <For each={props.data.cores}>
-                  {(core) => {
+                  {(core, index) => {
                     const active = () =>
                       props.data.settings.activeCoreId === core.id ||
                       (!props.data.settings.activeCoreId && props.data.cores[0]?.id === core.id);
+                    // The registry is sorted newest first, so a later row is an
+                    // older version: switching to it is the core rollback path.
+                    const olderThanActive = () => {
+                      const activeIndex = props.data.cores.findIndex(
+                        (item) =>
+                          props.data.settings.activeCoreId === item.id ||
+                          (!props.data.settings.activeCoreId && item.id === props.data.cores[0]?.id),
+                      );
+                      return activeIndex >= 0 && index() > activeIndex;
+                    };
                     return (
                       <li class={active() ? "core-row core-row--active" : "core-row"}>
                         <div class="core-row-top">
@@ -256,7 +271,47 @@ export const Settings: Component<SettingsProps> = (props) => {
                               title={props.runActive ? t(props.locale, "settings.coreSwitchBlocked") : undefined}
                               onClick={() => props.onSetActiveCore(core.id)}
                             >
-                              {t(props.locale, "settings.setActive")}
+                              {t(props.locale, olderThanActive() ? "settings.rollbackTo" : "settings.setActive")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={
+                                !core.managed ||
+                                props.coreBusy ||
+                                props.resourceBusy ||
+                                (active() && (props.runActive || coreInUse()))
+                              }
+                              title={
+                                !core.managed
+                                  ? t(props.locale, "settings.coreRepairUnavailable")
+                                  : active() && (props.runActive || coreInUse())
+                                    ? t(props.locale, "settings.coreSwitchBlocked")
+                                    : t(props.locale, "settings.repairCore")
+                              }
+                              onClick={() => props.onRepairCore(core.id)}
+                            >
+                              <Icon name="wrench" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={
+                                !core.managed ||
+                                props.coreBusy ||
+                                props.resourceBusy ||
+                                (active() && (props.runActive || coreInUse()))
+                              }
+                              title={
+                                !core.managed
+                                  ? t(props.locale, "settings.coreMoveUnavailable")
+                                  : active() && (props.runActive || coreInUse())
+                                    ? t(props.locale, "settings.coreSwitchBlocked")
+                                    : t(props.locale, "settings.moveCore")
+                              }
+                              onClick={() => props.onMoveCore(core.id)}
+                            >
+                              <Icon name="folder-open" />
                             </Button>
                             <Button
                               size="sm"
@@ -406,6 +461,39 @@ export const Settings: Component<SettingsProps> = (props) => {
                   onChange={(value) => props.onUpdateSettings({ developerMode: value })}
                 />
               </div>
+              <div class="switch-row">
+                <span>{t(props.locale, "settings.closeToTray")}</span>
+                <Switch
+                  checked={settings().closeToTray}
+                  onChange={(value) => props.onUpdateSettings({ closeToTray: value })}
+                />
+              </div>
+            </div>
+            <p class="muted">{t(props.locale, "settings.closeToTrayHint")}</p>
+          </section>
+
+          <section class="settings-card">
+            <header class="settings-card-head">
+              <span class="settings-icon">
+                <Icon name="terminal" />
+              </span>
+              <div>
+                <h2>{t(props.locale, "settings.diagnostics")}</h2>
+                <p>{t(props.locale, "settings.diagnosticsHint")}</p>
+              </div>
+            </header>
+            <p class="muted">
+              {props.logCount} {t(props.locale, "tasks.logs")}
+            </p>
+            <div class="settings-head-actions">
+              <Button size="sm" variant="secondary" onClick={props.onExportLogs}>
+                <Icon name="download" />
+                {t(props.locale, "settings.exportLogs")}
+              </Button>
+              <Button size="sm" variant="primary" onClick={props.onExportDiagnostics}>
+                <Icon name="hard-drive" />
+                {t(props.locale, "settings.exportDiagnostics")}
+              </Button>
             </div>
           </section>
         </div>

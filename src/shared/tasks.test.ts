@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_COPILOT_OPTIONS, type AppSettings, type TaskType } from "./schemas";
+import { DEFAULT_COPILOT_OPTIONS, type AppSettings, type CopilotItem, type TaskType } from "./schemas";
 import {
   TASK_DEFINITIONS,
   TASK_PALETTE_ORDER,
   buildMaaTaskParams,
+  createCopilotRunTasks,
   createCopilotTask,
   createTask,
   firstMissingField,
@@ -19,6 +20,7 @@ const settings: AppSettings = {
   connectionConfig: "General",
   confirmBeforeDownload: true,
   notifyOnComplete: true,
+  closeToTray: false,
   developerMode: false,
 };
 
@@ -118,6 +120,58 @@ describe("task catalogue", () => {
       expect(getTaskDefaults(type)).toBeTypeOf("object");
       expect(buildMaaTaskParams(createTask(type), settings).client_type).toBe("Official");
     }
+  });
+});
+
+describe("copilot task dispatch", () => {
+  const item = (kind: NonNullable<CopilotItem["kind"]>, filename: string, id = filename): CopilotItem => ({
+    id,
+    copilotId: 1,
+    filename,
+    stage: "1-7",
+    title: "t",
+    isRaid: false,
+    kind,
+  });
+  const setup = (items: ReadonlyArray<CopilotItem>, loopTimes = 1) => ({
+    items,
+    options: { ...DEFAULT_COPILOT_OPTIONS, loopTimes },
+  });
+
+  it("keeps normal assignments in one Copilot batch", () => {
+    const tasks = createCopilotRunTasks(setup([item("normal", "/tmp/a.json"), item("normal", "/tmp/b.json")]));
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ type: "Copilot" });
+    expect(tasks[0]!.params.copilot_list as ReadonlyArray<unknown>).toHaveLength(2);
+  });
+
+  it("runs each SSS file as its own task without auto formation", () => {
+    const tasks = createCopilotRunTasks(setup([item("sss", "/tmp/a.json"), item("sss", "/tmp/b.json")], 4));
+    expect(tasks.map((task) => task.type)).toEqual(["SSSCopilot", "SSSCopilot"]);
+    expect(tasks[0]!.params).toMatchObject({ filename: "/tmp/a.json", formation: false, loop_times: 4 });
+    expect(tasks[1]!.params).toMatchObject({ filename: "/tmp/b.json", formation: false, loop_times: 4 });
+  });
+
+  it("runs each Paradox file as its own task", () => {
+    const tasks = createCopilotRunTasks(setup([item("paradox", "/tmp/a.json")]));
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ type: "ParadoxCopilot", params: { filename: "/tmp/a.json" } });
+  });
+
+  it("refuses a batch that mixes task families", () => {
+    expect(createCopilotRunTasks(setup([item("normal", "/tmp/a.json"), item("sss", "/tmp/b.json")]))).toEqual([]);
+  });
+
+  it("treats legacy items without a kind as normal", () => {
+    const legacy: CopilotItem = {
+      id: "legacy",
+      copilotId: 1,
+      filename: "/tmp/legacy.json",
+      stage: "1-7",
+      title: "t",
+      isRaid: false,
+    };
+    expect(createCopilotRunTasks(setup([legacy]))[0]).toMatchObject({ type: "Copilot" });
   });
 });
 

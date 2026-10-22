@@ -15,6 +15,9 @@ export interface AppPathInfo {
   readonly resourceBackupsDir: string;
   readonly copilotDir: string;
   readonly copilotSetupFile: string;
+  readonly historyFile: string;
+  readonly schedulesFile: string;
+  readonly toolsFile: string;
 }
 
 export class AppPaths extends Context.Service<AppPaths, AppPathInfo>()("maax/AppPaths") {}
@@ -37,6 +40,9 @@ export const AppPathsLive = Layer.succeed(
       resourceBackupsDir: join(userData, "resource-backups"),
       copilotDir: join(userData, "copilot"),
       copilotSetupFile: join(userData, "config", "copilot.json"),
+      historyFile: join(userData, "config", "history.json"),
+      schedulesFile: join(userData, "config", "schedules.json"),
+      toolsFile: join(userData, "config", "tools.json"),
     };
   })(),
 );

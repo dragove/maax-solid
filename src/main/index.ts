@@ -1,4 +1,5 @@
-import { app, BrowserWindow, session, shell } from "electron";
+import { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, shell } from "electron";
+import { closeToTray } from "./app-behavior";
 import { Effect } from "effect";
 import { join } from "node:path";
 import appIcon from "../../build/icon.png?asset";
@@ -11,7 +12,9 @@ const isDevelopment = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
 let runtime: AppRuntime | null = null;
+let tray: Tray | null = null;
 let quitting = false;
+let trayHintShown = false;
 
 app.setName("Maax");
 
@@ -28,6 +31,46 @@ if (bootTraceEnabled) {
 
 if (isDevelopment) {
   app.commandLine.appendSwitch("remote-debugging-port", "9229");
+}
+
+/** Bring the workbench back from the tray or a minimized state. */
+function showMainWindow(): void {
+  if (!mainWindow) {
+    if (app.isReady()) void createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray(): void {
+  if (tray) return;
+  const zh = app.getLocale().toLowerCase().startsWith("zh");
+  try {
+    const image = nativeImage.createFromPath(appIcon);
+    tray = new Tray(image.isEmpty() ? appIcon : image.resize({ width: 22, height: 22 }));
+    tray.setToolTip("Maax");
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: zh ? "显示 MAAX" : "Show MAAX", click: showMainWindow },
+        { type: "separator" },
+        {
+          label: zh ? "退出 MAAX" : "Quit MAAX",
+          click: () => {
+            void shutdown();
+          },
+        },
+      ]),
+    );
+    tray.on("click", showMainWindow);
+    tray.on("double-click", showMainWindow);
+  } catch (error) {
+    // A desktop without a tray host must not break the window lifecycle; the
+    // close handler checks tray before hiding the window.
+    console.warn("Tray unavailable", error);
+    tray = null;
+  }
 }
 
 function openExternalUrl(url: string): void {
@@ -104,6 +147,22 @@ async function createWindow(): Promise<void> {
   window.webContents.on("did-finish-load", () => bootTrace("did-finish-load"));
   window.once("ready-to-show", () => bootTrace("ready-to-show"));
 
+  window.on("close", (event) => {
+    if (quitting || !closeToTray() || tray === null) return;
+    event.preventDefault();
+    window.hide();
+    if (!trayHintShown && Notification.isSupported()) {
+      trayHintShown = true;
+      const zh = app.getLocale().toLowerCase().startsWith("zh");
+      new Notification({
+        title: zh ? "MAAX 仍在运行" : "MAAX is still running",
+        body: zh
+          ? "定时任务会继续执行；从托盘图标可以重新打开窗口。"
+          : "Scheduled runs continue. Reopen the window from the tray icon.",
+      }).show();
+    }
+  });
+
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
   });
@@ -154,6 +213,8 @@ async function shutdown(): Promise<void> {
   } catch (error) {
     console.error("Failed to shut down cleanly", error);
   } finally {
+    tray?.destroy();
+    tray = null;
     app.quit();
   }
 }
@@ -164,10 +225,7 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    showMainWindow();
   });
 
   void app
@@ -184,10 +242,13 @@ if (!hasSingleInstanceLock) {
       session.defaultSession.setPermissionCheckHandler(() => false);
 
       await createWindow();
+      createTray();
 
       app.on("activate", () => {
         if (BrowserWindow.getAllWindows().length === 0) {
           void createWindow();
+        } else {
+          showMainWindow();
         }
       });
     })
@@ -210,6 +271,10 @@ app.on("before-quit", (event) => {
 });
 
 app.on("window-all-closed", () => {
+  // A destroyed window is not a quit request while tray mode is enabled; the
+  // tray can recreate it. Window-manager closes are prevented in the close
+  // handler, so this covers programmatic closes too.
+  if (closeToTray() && tray !== null) return;
   if (process.platform !== "darwin") {
     app.quit();
   }

@@ -14,13 +14,18 @@ import type {
   CoreReleaseCheck,
   DeviceDraft,
   DeviceView,
+  LogEntry,
+  RecruitmentData,
   ResourceApplyResult,
   ResourceCheck,
   ResourceStatus,
+  RunHistory,
   RunSnapshot,
+  Schedule,
   Screenshot,
   StageCatalog,
   TaskPlan,
+  ToolKind,
 } from "./schemas";
 
 /**
@@ -45,6 +50,8 @@ export const COMMANDS = {
   refreshCores: "cores.refresh",
   downloadCore: "cores.download",
   checkCoreUpdate: "cores.check-update",
+  repairCore: "cores.repair",
+  moveCore: "cores.move",
   resourceStatus: "resources.status",
   checkResourceUpdate: "resources.check",
   updateResource: "resources.update",
@@ -75,6 +82,13 @@ export const COMMANDS = {
   startCopilot: "copilot.start",
   startRun: "runs.start",
   stopRun: "runs.stop",
+  runHistory: "runs.history",
+  clearHistory: "runs.clear",
+  saveSchedule: "schedules.save",
+  recruitmentData: "tools.recruitment",
+  startTool: "tools.start",
+  exportLogs: "logs.export",
+  exportDiagnostics: "diagnostics.export",
 } as const;
 
 export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -89,6 +103,8 @@ export interface CommandPayloads {
   "cores.refresh": undefined;
   "cores.download": undefined;
   "cores.check-update": undefined;
+  "cores.repair": { coreId: string };
+  "cores.move": { coreId: string };
   "resources.status": { coreId: string };
   "resources.check": { coreId: string };
   "resources.update": { coreId: string };
@@ -129,6 +145,13 @@ export interface CommandPayloads {
   "copilot.start": { deviceId: string };
   "runs.start": { deviceId: string; planId: string };
   "runs.stop": { deviceId: string };
+  "runs.history": undefined;
+  "runs.clear": undefined;
+  "schedules.save": { schedule: Schedule };
+  "tools.recruitment": undefined;
+  "tools.start": { deviceId: string; kind: ToolKind };
+  "logs.export": { entries: ReadonlyArray<LogEntry> };
+  "diagnostics.export": { entries: ReadonlyArray<LogEntry> };
 }
 
 export interface CommandResults {
@@ -141,6 +164,8 @@ export interface CommandResults {
   "cores.refresh": ReadonlyArray<CoreInfo>;
   "cores.download": CoreInfo | null;
   "cores.check-update": CoreReleaseCheck;
+  "cores.repair": ReadonlyArray<CoreInfo>;
+  "cores.move": ReadonlyArray<CoreInfo>;
   "resources.status": ResourceStatus;
   "resources.check": ResourceCheck;
   "resources.update": ResourceApplyResult;
@@ -171,6 +196,13 @@ export interface CommandResults {
   "copilot.start": RunSnapshot;
   "runs.start": RunSnapshot;
   "runs.stop": RunSnapshot;
+  "runs.history": RunHistory;
+  "runs.clear": RunHistory;
+  "schedules.save": ReadonlyArray<Schedule>;
+  "tools.recruitment": RecruitmentData;
+  "tools.start": RunSnapshot;
+  "logs.export": string | null;
+  "diagnostics.export": string | null;
 }
 
 export interface MaaxBridge {

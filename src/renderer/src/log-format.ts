@@ -242,6 +242,18 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
         message: `${t(locale, "log.subtask")} · ${str(details.task) || what} · done`,
       };
     case 20003: {
+      if (what === "ExceededLimit") {
+        const task = str(details.task);
+        const first = list(payload.first).filter((value): value is string => typeof value === "string");
+        const stageNavigation =
+          task === "FullStageNavigation" || first.some((value) => value.includes("FullStageNavigation"));
+        return {
+          level: "warn",
+          message: stageNavigation
+            ? `${chain} · ${t(locale, "log.copilotNavigation")}`
+            : `${chain} · ${task || what} · exceeded limit`,
+        };
+      }
       const summary = detailSummary(what, details, locale);
       return {
         level: summary.level,

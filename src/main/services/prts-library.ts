@@ -1,4 +1,5 @@
 import { Context, Effect, Layer } from "effect";
+import { copilotKindFromStageId } from "../../shared/copilot-kind";
 import type { CopilotLevel, CopilotResolveResult, CopilotSearchResult } from "../../shared/schemas";
 import { maaxError, type MaaxError } from "../errors";
 import { resolveCopilot, searchCopilot, type CopilotSearchParams } from "./copilot";
@@ -66,10 +67,15 @@ export const PrtsLibraryLive: Layer.Layer<PrtsLibrary, never, AppPaths> = Layer.
         const entries = yield* Effect.promise(() => catalogue.load().catch(() => []));
         return {
           ...result,
-          items: result.items.map((item) => ({
-            ...item,
-            stage: findLevel(entries, item.stage)?.code || item.stage,
-          })),
+          items: result.items.map((item) => {
+            const level = findLevel(entries, item.stage);
+            // The SSS protocol marks itself; Paradox and SSS maps are recognised
+            // by the catalogue's stage-id prefix. The marker wins when a brand
+            // new map is not in the cached catalogue yet.
+            const kind =
+              item.kind === "sss" || item.kind === "paradox" ? item.kind : copilotKindFromStageId(level?.stageId);
+            return { ...item, kind, stage: level?.code || item.stage };
+          }),
         };
       });
 

@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, flush, onSettled, untrack, type Component } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, flush, onSettled, untrack, type Component } from "solid-js";
 import type {
   AppSettingsPatch,
   Bootstrap,
@@ -10,8 +10,10 @@ import type {
   ResourceStatus,
   StageCatalogEntry,
   RunSnapshot,
+  Schedule,
   TaskPlan,
   TaskType,
+  ToolKind,
 } from "../../../shared/schemas";
 import { COMMANDS, type CommandName, type CommandPayloads, type CommandResults } from "../../../shared/ipc";
 import { formatResourceStamp } from "../../../shared/resource-version";
@@ -30,10 +32,12 @@ import { prefersReducedMotion } from "../motion";
 import { Copilot } from "../pages/Copilot";
 import { Devices } from "../pages/Devices";
 import { Overview } from "../pages/Overview";
+import { Runs } from "../pages/Runs";
 import { Settings } from "../pages/Settings";
 import { Tasks } from "../pages/Tasks";
+import { Tools } from "../pages/Tools";
 
-type View = "overview" | "tasks" | "copilot" | "devices" | "settings";
+type View = "overview" | "tasks" | "copilot" | "tools" | "runs" | "devices" | "settings";
 
 interface AppShellProps {
   readonly initial: Bootstrap;
@@ -42,13 +46,15 @@ interface AppShellProps {
 const NAV: ReadonlyArray<{
   view: View;
   icon: string;
-  key: "nav.overview" | "nav.tasks" | "nav.copilot" | "nav.devices" | "nav.settings";
+  key: "nav.overview" | "nav.tasks" | "nav.copilot" | "nav.tools" | "nav.runs" | "nav.devices" | "nav.settings";
 }> = [
   { view: "overview", icon: "dashboard", key: "nav.overview" },
   { view: "tasks", icon: "list-todo", key: "nav.tasks" },
   // Clearing a stage with a copilot is a one-off action, so it sits beside the
   // daily queue instead of inside it.
   { view: "copilot", icon: "swords", key: "nav.copilot" },
+  { view: "tools", icon: "wrench", key: "nav.tools" },
+  { view: "runs", icon: "clock", key: "nav.runs" },
   { view: "devices", icon: "smartphone", key: "nav.devices" },
   { view: "settings", icon: "settings", key: "nav.settings" },
 ];
@@ -271,6 +277,18 @@ export const AppShell: Component<AppShellProps> = (props) => {
       case "settings-updated":
         setData((current) => ({ ...current, settings: event.settings }));
         break;
+      case "history-updated":
+        setData((current) => ({ ...current, history: event.history }));
+        break;
+      case "schedules-updated":
+        setData((current) => ({ ...current, schedules: [...event.schedules] }));
+        break;
+      case "tools-updated":
+        setData((current) => ({
+          ...current,
+          tools: { ...current.tools, [event.deviceId]: event.snapshot },
+        }));
+        break;
       case "run-updated": {
         const previous = runs()[event.run.deviceId];
         setRuns((current) => ({ ...current, [event.run.deviceId]: event.run }));
@@ -335,12 +353,12 @@ export const AppShell: Component<AppShellProps> = (props) => {
   };
 
   const fail = (error: unknown): void => {
-    notify({
-      kind: "error",
-      title: tr("toast.error"),
-      message:
-        error instanceof DesktopBridgeError ? error.reason : error instanceof Error ? error.message : String(error),
-    });
+    const message =
+      error instanceof DesktopBridgeError ? error.reason : error instanceof Error ? error.message : String(error);
+    // Command failures used to exist only as a toast, so a failed copilot
+    // resolve/start left no trace to diagnose. Mirror them into the log stream.
+    appendLog({ level: "error", message: `${tr("toast.error")} · ${message}`, at: Date.now() });
+    notify({ kind: "error", title: tr("toast.error"), message });
   };
 
   async function send<C extends CommandName>(
@@ -672,10 +690,13 @@ export const AppShell: Component<AppShellProps> = (props) => {
     }
   };
 
-  const startRun = async (): Promise<void> => {
+  const startRun = async (requestedPlanId?: string): Promise<void> => {
     if (runActionPending) return;
     const device = selectedDevice();
-    const plan = selectedPlan();
+    const requested = requestedPlanId
+      ? data().plans.find((item) => item.id === requestedPlanId && item.deviceId === device?.profile.id)
+      : undefined;
+    const plan = requested ?? selectedPlan();
     if (!device) {
       setAddDeviceOpen(true);
       return;
@@ -725,6 +746,79 @@ export const AppShell: Component<AppShellProps> = (props) => {
       // here too produced two toasts for one click.
     } finally {
       runActionPending = false;
+    }
+  };
+
+  const saveSchedule = async (schedule: Schedule): Promise<boolean> => {
+    const next = await send(COMMANDS.saveSchedule, { schedule }, { busy: false });
+    if (!next) return false;
+    setData((current) => ({ ...current, schedules: [...next] }));
+    notify({ kind: "success", title: tr("runs.saved") });
+    return true;
+  };
+
+  const clearHistory = async (): Promise<void> => {
+    if (!window.confirm(tr("runs.clearConfirm"))) return;
+    const value = await send(COMMANDS.clearHistory, undefined, { busy: false });
+    if (!value) return;
+    setData((current) => ({ ...current, history: value }));
+    notify({ kind: "info", title: tr("runs.cleared") });
+  };
+
+  const startTool = async (kind: ToolKind): Promise<void> => {
+    if (runActionPending) return;
+    const device = selectedDevice();
+    if (!device) return;
+    runActionPending = true;
+    try {
+      const run = await send(COMMANDS.startTool, { deviceId: device.profile.id, kind });
+      if (!run) return;
+      setRuns((current) => ({ ...current, [run.deviceId]: run }));
+    } finally {
+      runActionPending = false;
+    }
+  };
+
+  const exportLogs = async (): Promise<void> => {
+    const entries = logs().map((entry) => ({ at: entry.at, level: entry.level, message: entry.message }));
+    const path = await send(COMMANDS.exportLogs, { entries }, { busy: false });
+    if (path) notify({ kind: "success", title: tr("settings.exported"), message: path });
+  };
+
+  const exportDiagnostics = async (): Promise<void> => {
+    const entries = logs().map((entry) => ({ at: entry.at, level: entry.level, message: entry.message }));
+    const path = await send(COMMANDS.exportDiagnostics, { entries }, { busy: false });
+    if (path) notify({ kind: "success", title: tr("settings.exported"), message: path });
+  };
+
+  const repairCore = async (id: string): Promise<void> => {
+    if (!window.confirm(tr("settings.coreRepairConfirm"))) return;
+    setCoreBusy(true);
+    try {
+      const cores = await send(COMMANDS.repairCore, { coreId: id }, { busy: false });
+      if (!cores) return;
+      setData((current) => ({ ...current, cores: [...cores] }));
+      notify({ kind: "success", title: tr("settings.coreRepaired") });
+      await reload();
+    } finally {
+      setCoreBusy(false);
+    }
+  };
+
+  const moveCore = async (id: string): Promise<void> => {
+    const before = data().cores.find((core) => core.id === id)?.root;
+    setCoreBusy(true);
+    try {
+      const cores = await send(COMMANDS.moveCore, { coreId: id }, { busy: false });
+      if (!cores) return;
+      setData((current) => ({ ...current, cores: [...cores] }));
+      const after = cores.find((core) => core.id === id)?.root;
+      if (after !== undefined && after !== before) {
+        notify({ kind: "success", title: tr("settings.coreMoved"), message: after });
+      }
+      await reload();
+    } finally {
+      setCoreBusy(false);
     }
   };
 
@@ -858,6 +952,13 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const resolveCopilotGlobal = async (input: string): Promise<boolean> => {
     const result = await send(COMMANDS.resolveCopilot, { input }, { busy: false });
     if (!result) return false;
+    const kinds = new Set([...data().copilot.items, ...result.items].map((item) => item.kind ?? "normal"));
+    if (kinds.size > 1) {
+      // Mixing kinds would silently send SSS/Paradox files through the normal
+      // task, and their entry screens differ. Refuse at add time.
+      fail(new Error(tr("copilot.mixedKinds")));
+      return false;
+    }
     await setCopilotItems([...data().copilot.items, ...result.items]);
     notify({
       kind: "success",
@@ -991,14 +1092,34 @@ export const AppShell: Component<AppShellProps> = (props) => {
             <span>{tr(NAV.find((item) => item.view === view())?.key ?? "nav.overview")}</span>
           </div>
           <div class="topbar-actions">
-            <button type="button" class="device-pill" onClick={() => navigate("devices")}>
-              <span>{selectedDevice()?.profile.name ?? tr("overview.noDevice")}</span>
+            <div class="device-pill">
+              <select
+                class="device-select"
+                value={effectiveDeviceId() ?? ""}
+                disabled={data().devices.length === 0}
+                aria-label={tr("overview.currentDevice")}
+                onChange={(event) => {
+                  const id = event.currentTarget.value;
+                  setSelectedDeviceId(id === "" ? undefined : id);
+                }}
+              >
+                <Show when={data().devices.length === 0}>
+                  <option value="">{tr("overview.noDevice")}</option>
+                </Show>
+                <For each={data().devices}>
+                  {(device) => (
+                    <option value={device.profile.id} selected={device.profile.id === effectiveDeviceId()}>
+                      {device.profile.name}
+                    </option>
+                  )}
+                </For>
+              </select>
               <StatusPill
                 status={selectedDevice()?.status ?? "offline"}
                 label={statusText(selectedDevice()?.status ?? "offline", locale())}
                 compact
               />
-            </button>
+            </div>
             <button type="button" class="icon-button" onClick={() => void toggleTheme()} title={tr("settings.theme")}>
               <Icon name={resolvedTheme() === "dark" ? "sun" : "moon"} />
             </button>
@@ -1079,6 +1200,36 @@ export const AppShell: Component<AppShellProps> = (props) => {
               onItems={(items) => void setCopilotItems(items)}
               onResolve={resolveCopilotGlobal}
               onBrowse={() => setCopilotBrowseOpen(true)}
+              logs={deviceLogs()}
+              onClearLogs={clearLogs}
+            />
+          </Show>
+          <Show when={view() === "tools"}>
+            <Tools
+              data={data()}
+              locale={locale()}
+              device={selectedDevice()}
+              run={selectedRun()}
+              busy={busy()}
+              connectBusy={connectBusy()}
+              onConnect={() => void connectDevice()}
+              onScan={(kind) => void startTool(kind)}
+            />
+          </Show>
+          <Show when={view() === "runs"}>
+            <Runs
+              data={data()}
+              locale={locale()}
+              device={selectedDevice()}
+              plans={devicePlans()}
+              run={selectedRun()}
+              history={data().history}
+              schedules={data().schedules}
+              busy={busy()}
+              connectBusy={connectBusy()}
+              onSaveSchedule={saveSchedule}
+              onRunNow={(planId) => void startRun(planId)}
+              onClearHistory={() => void clearHistory()}
             />
           </Show>
           <Show when={view() === "devices"}>
@@ -1108,7 +1259,12 @@ export const AppShell: Component<AppShellProps> = (props) => {
               onDownloadCore={() => void downloadCore()}
               onSetActiveCore={(id) => void setActiveCore(id)}
               onRemoveCore={(id) => void removeCore(id)}
+              onRepairCore={(id) => void repairCore(id)}
+              onMoveCore={(id) => void moveCore(id)}
               onRefreshCores={() => void refreshCores()}
+              onExportLogs={() => void exportLogs()}
+              onExportDiagnostics={() => void exportDiagnostics()}
+              logCount={logs().length}
               coreRelease={coreRelease()}
               onCheckCoreUpdate={() => void loadCoreRelease()}
               resourceStatuses={resourceStatuses()}

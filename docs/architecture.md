@@ -105,6 +105,19 @@ in Settings. A manual switch is refused while a run is preparing or running.
 Windows and macOS archives still need their own host variants, so
 `platformSuffixFor` only lists Linux.
 
+The component manager can also **repair** a managed core by downloading the
+matching release again and swapping the directory through a staging copy; the
+previous tree is restored if the archive or rename fails. **Move** relocates a
+managed core to a user-picked parent directory and updates its registry entry
+(paths and resource stamp) without touching the loaded library, so it is
+refused while a device holds a session on that core. Older installed versions
+stay listed and can be activated again, which is the rollback path.
+
+A host is keyed by core + resource server and shared by every attached device;
+`HostEntry.devices` tracks membership and the process is released when the
+last device leaves. Two devices on the same core therefore reuse one utility
+process while their sessions and runs remain independent.
+
 ## Main-process services
 
 | Service | Responsibility |
@@ -113,9 +126,12 @@ Windows and macOS archives still need their own host variants, so
 | `Settings` | Schema-validated preferences, atomic JSON writes |
 | `Workspace` | Devices and task plans, atomic JSON writes |
 | `CoreRegistry` | Installed/imported cores, validation, active version |
-| `CoreInstaller` | Official release metadata, confirmed download, tar extraction |
+| `CoreInstaller` | Official release metadata, confirmed download, tar extraction, in-place repair |
 | `CoreHostClient` | utility process lifecycle and request/callback transport |
-| `Application` | Device sessions, connection state machine, run projection |
+| `Application` | Device sessions, connection state machine, run projection, scheduler |
+| `RunHistory` | Terminal run records and aggregate statistics |
+| `ScheduleStore` | Per-device daily schedules and their last trigger |
+| `ToolData` | Recruitment/operator/depot data and per-device recognition snapshots |
 | `EventBus` | Synchronous event fan-out to every BrowserWindow |
 
 External boundaries are wrapped in `Effect.tryPromise`, typed with
@@ -137,6 +153,52 @@ window.maax.subscribe(listener) // returns unsubscribe
 `DesktopBridge` Effect Service decodes the envelope and the result with Effect
 Schema. Unknown commands and invalid payloads are rejected before touching
 application services.
+
+## Tools
+
+The Tools page is backed by data that already exists on disk or arrives through
+the normal callback path; there is no second native API surface.
+
+- **Recruitment** reads `recruitment.json` and `battle_data.json` from the
+  active core. Tag values stay Chinese because that is the key MaaCore and the
+  game use; English labels come from the shared translation map. The calculator
+  is pure renderer code in `src/shared/recruitment.ts`, so it is unit-tested
+  without a core.
+- **Operator box** and **Depot** start a one-off `OperBox` or `Depot` task
+  through the normal run pipeline (no plan, no queue). MaaCore streams partial
+  results as `SubTaskExtraInfo` callbacks with `what: "OperBoxInfo"` or
+  `"DepotInfo"`; every frame replaces the previous snapshot and the final
+  `done: true` frame is kept in `config/tools.json` per device. Depot's
+  payload carries a JSON *string* of `itemId -> count`; item names come from
+  the active core's `item_index.json`.
+
+## Run history and schedules
+
+Every terminal run (completed, stopped or failed) is recorded once, with the
+device name and plan name snapshotted so deleting a device does not erase the
+history. Statistics are derived in `src/shared/history.ts`: totals, success
+rate inputs, today, total duration, a seven-day window and per-task completion.
+
+Schedules are per device and stored in `config/schedules.json`. The main
+process checks them every 20 seconds while MAAX runs. A schedule fires when its
+local weekday matches, its time has passed today, it has not fired since that
+time, and it is still inside a two-hour grace window. A due schedule connects
+the device if necessary and starts the chosen plan (or the device's active plan
+when none is pinned); a device already running is marked as skipped rather than
+queued twice.
+
+## Tray, notifications and diagnostics
+
+Closing the window hides it to the system tray when the preference is enabled;
+the close handler is skipped during application shutdown and the tray menu can
+reopen or quit. A tray host is optional on Linux: if it cannot be created the
+window closes normally instead of becoming unreachable. Run-completion
+notifications still respect the existing preference.
+
+The Settings page can export the current renderer log to a file, or write a
+diagnostics folder containing runtime info, settings, cores, devices, plans,
+schedules, history, tool snapshots, the copilot setup and the same log. The
+folder is generated locally and is not uploaded anywhere.
 
 ## Renderer
 
@@ -173,6 +235,19 @@ application services.
   and raid runs of one file are two entries sharing a filename — the PRTS
   `difficulty` bitmask (1 normal, 2 raid, 3 both) decides how many entries
   `copilot.resolve` creates.
+- A batch uses MaaCore's multi-assignment mode, which starts on the **target
+  chapter's stage map**. The tab keeps that prerequisite visible and owns a log
+  stream; from the home screen or another chapter the core only swipes
+  `FullStageNavigation`, hits `ExceededLimit`, and never reaches the stage.
+  Command failures are also written to that log instead of existing only as a
+  toast.
+- Assignments are typed as `normal`, `sss` or `paradox`. Detection uses the
+  SSS protocol's `type: "SSS"` marker and the level catalogue's stage-id
+  prefixes (`lt_` for SSS, `mem_` for Paradox). A normal batch stays one
+  `Copilot` task with `copilot_list`; SSS files become `SSSCopilot` tasks
+  (one file per task, no auto formation); Paradox files become
+  `ParadoxCopilot` tasks. The three families start from different screens, so
+  a mixed batch is refused when adding and again when starting.
 
 #### Talking to PRTS politely
 
@@ -236,3 +311,9 @@ PRTS filters on the **Chinese** name, which is what the picker sends.
   reader (`yauzl` or equivalent) in a later pass.
 - The app updater is not wired yet; core/resource updates are independent of
   the app version.
+- Scheduled runs only fire while MAAX is open; close-to-tray keeps it alive but
+  does not install an OS-level autostart entry.
+- The diagnostics bundle intentionally contains device addresses and local
+  paths; review it before sharing.
+- The operator box and depot scans require a connected device and the game
+  screens they recognise; they cannot be exercised from a recorded fixture yet.

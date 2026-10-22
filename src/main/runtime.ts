@@ -7,7 +7,10 @@ import { AppPathsLive } from "./services/paths";
 import { CopilotSetupLive } from "./services/copilot-setup";
 import { PrtsLibraryLive } from "./services/prts-library";
 import { ResourceUpdaterLive } from "./services/resource-updater";
+import { RunHistoryLive } from "./services/run-history";
+import { ScheduleStoreLive } from "./services/schedules";
 import { SettingsLive } from "./services/settings";
+import { ToolDataLive } from "./services/tool-data";
 import { WorkspaceLive } from "./services/workspace";
 import { EventBus, EventBusLive } from "./events";
 
@@ -31,6 +34,9 @@ const AppLive = ApplicationLive.pipe(
   Layer.provideMerge(CopilotSetupLive),
   Layer.provideMerge(PrtsLibraryLive),
   Layer.provideMerge(ResourceUpdaterLive),
+  Layer.provideMerge(RunHistoryLive),
+  Layer.provideMerge(ScheduleStoreLive),
+  Layer.provideMerge(ToolDataLive),
   Layer.provideMerge(SettingsLive),
   Layer.provideMerge(WorkspaceLive),
   Layer.provideMerge(CoreRegistryLive),

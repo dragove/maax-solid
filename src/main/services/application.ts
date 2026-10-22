@@ -2,8 +2,8 @@ import { Context, Effect, Layer, Schema } from "effect";
 import { BrowserWindow, Notification, app, dialog } from "electron";
 import { randomUUID } from "node:crypto";
 import { cpus, release, totalmem } from "node:os";
-import { basename, extname, join } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, extname, join, resolve } from "node:path";
+import { cp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import type {
   AppSettings,
   AppSettingsPatch,
@@ -22,22 +22,36 @@ import type {
   DeviceStatus,
   DeviceView,
   EngineInfo,
+  LogEntry,
+  RecruitmentData,
   ScreencapCost,
   Resolution,
   ResourceApplyResult,
   ResourceCheck,
   ResourceStatus,
+  RunHistory,
+  RunHistoryEntry,
   RunSnapshot,
+  Schedule,
   Screenshot,
   StageCatalog,
   StageCatalogEntry,
   TaskPlan,
+  ToolKind,
   RuntimeInfo,
 } from "../../shared/schemas";
 import type { AppendTaskResult, ConnectResult, EngineCallback, InitResult } from "../../shared/engine";
 import { TaskConfigSchema } from "../../shared/schemas";
 import type { TaskConfig } from "../../shared/schemas";
-import { buildMaaTaskParams, createCopilotTask, createDefaultPlanTasks, firstMissingField } from "../../shared/tasks";
+import {
+  buildMaaTaskParams,
+  createCopilotRunTasks,
+  createDefaultPlanTasks,
+  createTask,
+  firstMissingField,
+} from "../../shared/tasks";
+import { scheduleDue } from "../../shared/schedule";
+import { setCloseToTray } from "../app-behavior";
 import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
 import { probeAdbConnection } from "./adb";
 
@@ -138,7 +152,10 @@ import { CopilotSetupStore } from "./copilot-setup";
 import { OperatorCatalogue } from "./operator-catalog";
 import { PrtsLibrary } from "./prts-library";
 import { ResourceUpdater, type ResourceProgress } from "./resource-updater";
+import { RunHistory as RunHistoryService } from "./run-history";
+import { ScheduleStore } from "./schedules";
 import { Settings } from "./settings";
+import { ToolData } from "./tool-data";
 import { Workspace } from "./workspace";
 
 interface HostEntry {
@@ -164,6 +181,8 @@ interface RunState {
   snapshot: RunSnapshot;
   readonly taskConfigIds: Map<number, string>;
   readonly hostKey: string;
+  /** Terminal snapshots are written to history once. */
+  recorded?: boolean;
 }
 
 export interface ApplicationApi {
@@ -176,6 +195,8 @@ export interface ApplicationApi {
   readonly refreshCores: Effect.Effect<ReadonlyArray<CoreInfo>>;
   readonly downloadCore: Effect.Effect<CoreInfo | null, MaaxError>;
   readonly checkCoreUpdate: Effect.Effect<CoreReleaseCheck, MaaxError>;
+  readonly repairCore: (id: string) => Effect.Effect<ReadonlyArray<CoreInfo>, MaaxError>;
+  readonly moveCore: (id: string) => Effect.Effect<ReadonlyArray<CoreInfo>, MaaxError>;
   readonly setActiveCore: (
     id: string,
   ) => Effect.Effect<{ settings: AppSettings; cores: ReadonlyArray<CoreInfo> }, MaaxError>;
@@ -205,6 +226,13 @@ export interface ApplicationApi {
   readonly startCopilot: (deviceId: string) => Effect.Effect<RunSnapshot, MaaxError>;
   readonly startRun: (deviceId: string, planId: string) => Effect.Effect<RunSnapshot, MaaxError>;
   readonly stopRun: (deviceId: string) => Effect.Effect<RunSnapshot, MaaxError>;
+  readonly runHistory: Effect.Effect<RunHistory>;
+  readonly clearHistory: Effect.Effect<RunHistory>;
+  readonly saveSchedule: (schedule: Schedule) => Effect.Effect<ReadonlyArray<Schedule>, MaaxError>;
+  readonly recruitmentData: Effect.Effect<RecruitmentData, MaaxError>;
+  readonly startTool: (deviceId: string, kind: ToolKind) => Effect.Effect<RunSnapshot, MaaxError>;
+  readonly exportLogs: (entries: ReadonlyArray<LogEntry>) => Effect.Effect<string | null, MaaxError>;
+  readonly exportDiagnostics: (entries: ReadonlyArray<LogEntry>) => Effect.Effect<string | null, MaaxError>;
   readonly resourceStatus: (coreId: string) => Effect.Effect<ResourceStatus, MaaxError>;
   readonly checkResourceUpdate: (coreId: string) => Effect.Effect<ResourceCheck, MaaxError>;
   readonly updateResource: (coreId: string) => Effect.Effect<ResourceApplyResult, MaaxError>;
@@ -271,6 +299,9 @@ export const ApplicationLive: Layer.Layer<
   | ResourceUpdater
   | PrtsLibrary
   | CopilotSetupStore
+  | RunHistoryService
+  | ScheduleStore
+  | ToolData
 > = Layer.effect(
   Application,
   Effect.gen(function* () {
@@ -283,6 +314,9 @@ export const ApplicationLive: Layer.Layer<
     const resources = yield* ResourceUpdater;
     const prts = yield* PrtsLibrary;
     const copilotSetup = yield* CopilotSetupStore;
+    const history = yield* RunHistoryService;
+    const schedules = yield* ScheduleStore;
+    const toolData = yield* ToolData;
 
     const emitCopilot = (setup: CopilotSetup): void => {
       bus.emit({ _tag: "copilot-updated", copilot: setup });
@@ -330,6 +364,7 @@ export const ApplicationLive: Layer.Layer<
 
     const refreshLocalState = Effect.gen(function* () {
       settingsCache = yield* settings.get;
+      setCloseToTray(settingsCache.closeToTray);
       const deviceList = yield* workspace.getDevices;
       profiles = new Map(deviceList.map((device) => [device.id, device]));
       plans = [...(yield* workspace.getPlans)];
@@ -390,6 +425,44 @@ export const ApplicationLive: Layer.Layer<
       bus.emit({ _tag: "run-updated", run: run.snapshot });
     };
 
+    /**
+     * Persist a terminal run once. Runs are projected from callbacks, so the
+     * same completion can be observed by the run event and the stop path; the
+     * flag on RunState makes the history entry idempotent.
+     */
+    const recordRun = (run: RunState): void => {
+      const snapshot = run.snapshot;
+      if (run.recorded) return;
+      if (snapshot.status !== "completed" && snapshot.status !== "failed" && snapshot.status !== "stopped") return;
+      run.recorded = true;
+      const plan = snapshot.planId === undefined ? undefined : plans.find((item) => item.id === snapshot.planId);
+      const entry: RunHistoryEntry = {
+        id: snapshot.id,
+        deviceId: snapshot.deviceId,
+        deviceName: profiles.get(snapshot.deviceId)?.name ?? snapshot.deviceId,
+        ...(snapshot.planId === undefined ? {} : { planId: snapshot.planId }),
+        ...(plan === undefined ? {} : { planName: plan.name }),
+        status: snapshot.status,
+        startedAt: snapshot.startedAt,
+        endedAt: snapshot.endedAt ?? Date.now(),
+        tasks: snapshot.tasks.map((task) => ({
+          type: task.type,
+          name: task.name,
+          status: task.status,
+          ...(task.startedAt === undefined ? {} : { startedAt: task.startedAt }),
+          ...(task.endedAt === undefined ? {} : { endedAt: task.endedAt }),
+        })),
+      };
+      // History is bookkeeping, not part of run control: a failed write must not
+      // turn a completed run into an error in the UI.
+      // oxlint-disable-next-line effecttsgo/run-effect-inside-effect
+      void Effect.runPromise(
+        history
+          .add(entry)
+          .pipe(Effect.tap((value) => Effect.sync(() => bus.emit({ _tag: "history-updated", history: value })))),
+      ).catch(() => undefined);
+    };
+
     const finishRun = (deviceId: string, status: RunSnapshot["status"], message?: string): void => {
       const run = runs.get(deviceId);
       if (!run) return;
@@ -400,6 +473,7 @@ export const ApplicationLive: Layer.Layer<
       setDeviceState(deviceId, { status: "online", lastError: message });
       emitDevice(deviceId);
       emitEngine();
+      recordRun(run);
     };
 
     const notifyRunFinished = (deviceId: string, failed: boolean): void => {
@@ -537,6 +611,24 @@ export const ApplicationLive: Layer.Layer<
 
       const what = typeof payload.what === "string" ? payload.what : "";
       const details = (payload.details ?? {}) as Record<string, unknown>;
+
+      // OperBox and Depot stream their recognition results through
+      // SubTaskExtraInfo; every frame replaces the previous snapshot, so the
+      // Tools page follows a scan in progress and keeps the final result.
+      if (item.msg === 20003 && (what === "OperBoxInfo" || what === "DepotInfo")) {
+        // oxlint-disable-next-line effecttsgo/run-effect-inside-effect
+        void Effect.runPromise(
+          toolData
+            .apply(deviceId, what, details)
+            .pipe(
+              Effect.tap((snapshot) =>
+                snapshot === undefined
+                  ? Effect.void
+                  : Effect.sync(() => bus.emit({ _tag: "tools-updated", deviceId, snapshot })),
+              ),
+            ),
+        ).catch(() => undefined);
+      }
 
       if (item.msg === 4 && what === "Connect") {
         const waiter = connectWaiters.get(deviceId);
@@ -960,6 +1052,7 @@ export const ApplicationLive: Layer.Layer<
         emitDevice(deviceId);
         emitRun(run);
         emitEngine();
+        recordRun(run);
         return run.snapshot;
       });
 
@@ -1080,10 +1173,20 @@ export const ApplicationLive: Layer.Layer<
         yield* ensureDeviceIdle(deviceId);
         const setup = yield* copilotSetup.get;
         if (setup.items.length === 0) return yield* maaxError("请先添加作业");
-        const task = createCopilotTask(setup);
-        const missing = firstMissingField(task);
-        if (missing) return yield* maaxError(`任务「${task.name || task.type}」缺少必备设置`, missing.zh);
-        return yield* launchTasks(deviceId, [task]);
+        const kinds = new Set(setup.items.map((item) => item.kind ?? "normal"));
+        if (kinds.size > 1) {
+          return yield* maaxError(
+            "同一批作业不能混合普通关卡、保全派驻和悖论模拟",
+            "它们从不同的游戏界面开始，请清空列表后分别运行",
+          );
+        }
+        const tasks = createCopilotRunTasks(setup);
+        if (tasks.length === 0) return yield* maaxError("没有可运行的作业");
+        for (const task of tasks) {
+          const missing = firstMissingField(task);
+          if (missing) return yield* maaxError(`任务「${task.name || task.type}」缺少必备设置`, missing.zh);
+        }
+        return yield* launchTasks(deviceId, tasks);
       });
 
     const stopRun = (deviceId: string) =>
@@ -1099,6 +1202,9 @@ export const ApplicationLive: Layer.Layer<
       profiles = new Map(deviceList.map((device) => [device.id, device]));
       plans = [...(yield* workspace.getPlans)];
       const cores = yield* registry.list;
+      const historyResult = yield* history.result;
+      const scheduleList = yield* schedules.list;
+      const tools = yield* toolData.state;
       return {
         runtime: readRuntimeInfo(),
         settings: settingsCache,
@@ -1107,6 +1213,9 @@ export const ApplicationLive: Layer.Layer<
         plans,
         engine,
         copilot: yield* copilotSetup.get,
+        history: historyResult,
+        schedules: scheduleList,
+        tools,
       } satisfies Bootstrap;
     });
 
@@ -1114,6 +1223,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const next = yield* settings.update(patch);
         settingsCache = next;
+        setCloseToTray(next.closeToTray);
         return next;
       });
 
@@ -1381,6 +1491,10 @@ export const ApplicationLive: Layer.Layer<
         cancelReconnect(id);
         // A pending connect must not settle a device that no longer exists.
         abortConnectWaiter(id, "设备已删除");
+        const existingRun = runs.get(id);
+        if (existingRun && (existingRun.snapshot.status === "running" || existingRun.snapshot.status === "preparing")) {
+          yield* stopRunInternal(id).pipe(Effect.ignore);
+        }
         const state = runtime.get(id);
         if (state?.sessionId && state.hostKey) {
           const host = hosts.get(state.hostKey);
@@ -1392,11 +1506,14 @@ export const ApplicationLive: Layer.Layer<
           }
         }
         yield* workspace.removeDevice(id);
+        yield* schedules.remove(id);
+        yield* toolData.clear(id);
         detachDevice(id);
         profiles.delete(id);
         runtime.delete(id);
         runs.delete(id);
         plans = [...(yield* workspace.getPlans)];
+        bus.emit({ _tag: "schedules-updated", schedules: [...(yield* schedules.list)] });
         emitEngine();
         return views();
       });
@@ -1623,8 +1740,312 @@ export const ApplicationLive: Layer.Layer<
       return yield* maaxError("同名作业文件过多，请先清理", paths.copilotDir);
     });
 
+    /* ---------------------------------------------------------------------- */
+    /* Component manager: repair and relocate                                  */
+    /* ---------------------------------------------------------------------- */
+
+    const failCoreAction = (title: string) => (error: MaaxError) =>
+      Effect.sync(() => {
+        bus.emit({ _tag: "toast", kind: "error", title, message: error.message });
+      });
+
+    const repairCore = (id: string) =>
+      Effect.gen(function* () {
+        const core = yield* registry.get(id);
+        if (!core) return yield* maaxError("核心不存在");
+        yield* ensureCoreIdle(id);
+        releaseCoreHosts(id);
+        const repaired = yield* installer.repair(core).pipe(Effect.tapError(failCoreAction("核心修复失败")));
+        const cores = yield* registry.list;
+        bus.emit({ _tag: "cores-updated", cores });
+        bus.emit({ _tag: "toast", kind: "success", title: "核心已修复", message: repaired.version });
+        return cores;
+      });
+
+    const moveCore = (id: string) =>
+      Effect.gen(function* () {
+        const core = yield* registry.get(id);
+        if (!core) return yield* maaxError("核心不存在");
+        if (!core.managed) {
+          return yield* maaxError("只能移动由 MaaX 下载安装的核心", "导入的核心请重新选择目录");
+        }
+        yield* ensureCoreIdle(id);
+        releaseCoreHosts(id);
+
+        const window = BrowserWindow.getFocusedWindow();
+        const options = {
+          title: "选择新的核心存放目录",
+          buttonLabel: "移动到这里",
+          properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
+        };
+        const picked = yield* Effect.tryPromise({
+          try: () => (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options)),
+          catch: (cause) => maaxError("打开目录对话框失败", cause),
+        });
+        const parent = picked.filePaths[0];
+        if (picked.canceled || parent === undefined) return yield* registry.list;
+
+        const target = join(parent, basename(core.root));
+        if (resolve(target) === resolve(core.root)) return yield* registry.list;
+        const exists = yield* Effect.promise(() =>
+          stat(target).then(
+            () => true,
+            () => false,
+          ),
+        );
+        if (exists) return yield* maaxError("目标目录已经存在", target);
+
+        const move = (from: string, to: string): Promise<void> =>
+          rename(from, to).catch(async (error: NodeJS.ErrnoException) => {
+            if (error.code !== "EXDEV") throw error;
+            await cp(from, to, { recursive: true, force: false, errorOnExist: true });
+            await rm(from, { recursive: true, force: true });
+          });
+
+        yield* Effect.tryPromise({
+          try: () => move(core.root, target),
+          catch: (cause) => maaxError("移动核心目录失败", cause),
+        });
+        const relocated = yield* registry.relocate(id, target).pipe(
+          Effect.tapError(() => Effect.promise(() => move(target, core.root).catch(() => undefined))),
+          Effect.tapError(failCoreAction("核心移动失败")),
+        );
+        const cores = yield* registry.list;
+        bus.emit({ _tag: "cores-updated", cores });
+        bus.emit({ _tag: "toast", kind: "success", title: "核心已移动", message: relocated.root });
+        return cores;
+      });
+
+    /* ---------------------------------------------------------------------- */
+    /* Tools, history and schedules                                            */
+    /* ---------------------------------------------------------------------- */
+
+    const recruitmentData = Effect.gen(function* () {
+      const core = yield* ensureActiveCore();
+      return yield* toolData.recruitment(core);
+    });
+
+    const startTool = (deviceId: string, kind: ToolKind) =>
+      Effect.gen(function* () {
+        yield* ensureDeviceIdle(deviceId);
+        const type = kind === "operbox" ? "OperBox" : "Depot";
+        const task = createTask(type);
+        return yield* launchTasks(deviceId, [task]);
+      });
+
+    const saveSchedule = (schedule: Schedule) =>
+      Effect.gen(function* () {
+        if (!profiles.has(schedule.deviceId)) return yield* maaxError("设备不存在");
+        if (
+          schedule.planId !== undefined &&
+          !plans.some((plan) => plan.id === schedule.planId && plan.deviceId === schedule.deviceId)
+        ) {
+          return yield* maaxError("任务计划不存在");
+        }
+        const next = yield* schedules.save(schedule);
+        bus.emit({ _tag: "schedules-updated", schedules: [...next] });
+        return next;
+      });
+
+    const runHistory: Effect.Effect<RunHistory> = history.result;
+    const clearHistory: Effect.Effect<RunHistory> = history.clear.pipe(
+      Effect.tap((value) => Effect.sync(() => bus.emit({ _tag: "history-updated", history: value }))),
+    );
+
+    const stampForFile = (): string => new Date().toISOString().replace(/[:.]/gu, "-").slice(0, 19);
+
+    const formatLogEntries = (entries: ReadonlyArray<LogEntry>): string =>
+      entries
+        .map((entry) => `${new Date(entry.at).toISOString()} [${entry.level.toUpperCase()}] ${entry.message}`)
+        .join("\n") + "\n";
+
+    const exportLogs = (entries: ReadonlyArray<LogEntry>): Effect.Effect<string | null, MaaxError> =>
+      Effect.gen(function* () {
+        const window = BrowserWindow.getFocusedWindow();
+        const options = {
+          title: "导出运行日志",
+          defaultPath: `maax-logs-${stampForFile()}.log`,
+          filters: [{ name: "Log", extensions: ["log", "txt"] }],
+        };
+        const picked = yield* Effect.tryPromise({
+          try: () => (window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options)),
+          catch: (cause) => maaxError("打开保存对话框失败", cause),
+        });
+        if (picked.canceled || !picked.filePath) return null;
+        const header = `# Maax ${app.getVersion()} logs\n# Exported ${new Date().toISOString()}\n\n`;
+        yield* Effect.tryPromise({
+          try: () => writeFile(picked.filePath!, header + formatLogEntries(entries), "utf8"),
+          catch: (cause) => maaxError("写入日志文件失败", cause),
+        });
+        return picked.filePath;
+      });
+
+    const exportDiagnostics = (entries: ReadonlyArray<LogEntry>): Effect.Effect<string | null, MaaxError> =>
+      Effect.gen(function* () {
+        const window = BrowserWindow.getFocusedWindow();
+        const options = {
+          title: "选择诊断包存放目录",
+          buttonLabel: "导出到这里",
+          properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
+        };
+        const picked = yield* Effect.tryPromise({
+          try: () => (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options)),
+          catch: (cause) => maaxError("打开目录对话框失败", cause),
+        });
+        const parent = picked.filePaths[0];
+        if (picked.canceled || parent === undefined) return null;
+
+        const cores = yield* registry.list;
+        const historyResult = yield* history.result;
+        const scheduleList = yield* schedules.list;
+        const tools = yield* toolData.state;
+        const copilot = yield* copilotSetup.get;
+        const base = join(parent, `maax-diagnostics-${stampForFile()}`);
+        const bundle = yield* Effect.tryPromise({
+          try: async () => {
+            let target = base;
+            for (let index = 2; index < 100; index += 1) {
+              const exists = await stat(target).then(
+                () => true,
+                () => false,
+              );
+              if (!exists) break;
+              target = `${base}-${index}`;
+            }
+            await mkdir(target, { recursive: false });
+            const summary = {
+              generatedAt: new Date().toISOString(),
+              runtime: readRuntimeInfo(),
+              settings: settingsCache,
+              engine,
+              cores,
+              devices: [...profiles.values()],
+              counts: { plans: plans.length, schedules: scheduleList.length, runs: historyResult.stats.total },
+            };
+            const files: ReadonlyArray<[string, string]> = [
+              ["summary.json", JSON.stringify(summary, null, 2)],
+              ["workspace.json", JSON.stringify({ plans }, null, 2)],
+              ["schedules.json", JSON.stringify(scheduleList, null, 2)],
+              ["history.json", JSON.stringify(historyResult, null, 2)],
+              ["tools.json", JSON.stringify(tools, null, 2)],
+              ["copilot.json", JSON.stringify(copilot, null, 2)],
+              ["logs.txt", formatLogEntries(entries)],
+              [
+                "README.txt",
+                [
+                  `Maax ${app.getVersion()} diagnostics bundle`,
+                  `Generated ${new Date().toISOString()}`,
+                  "",
+                  "This bundle contains local configuration, device addresses, installed",
+                  "core paths and recent run logs. Review it before sharing publicly.",
+                ].join("\n") + "\n",
+              ],
+            ];
+            await Promise.all(files.map(([name, text]) => writeFile(join(target, name), text, "utf8")));
+            return target;
+          },
+          catch: (cause) => maaxError("写入诊断包失败", cause),
+        });
+        bus.emit({ _tag: "toast", kind: "success", title: "诊断包已导出", message: bundle });
+        return bundle;
+      });
+
+    /**
+     * The scheduler only runs while MAAX is open (tray mode keeps it alive).
+     * A due schedule starts the device's plan even if the device is offline,
+     * because connecting is part of the scheduled operation.
+     */
+    let schedulerTimer: NodeJS.Timeout | undefined;
+    let schedulerStartTimer: NodeJS.Timeout | undefined;
+    let schedulerBusy = false;
+
+    const markSchedule = (
+      deviceId: string,
+      at: number,
+      status: NonNullable<Schedule["lastStatus"]>,
+      message?: string,
+    ) =>
+      schedules
+        .markTriggered(deviceId, at, status, message)
+        .pipe(Effect.tap((next) => Effect.sync(() => bus.emit({ _tag: "schedules-updated", schedules: [...next] }))));
+
+    const runDueSchedules: Effect.Effect<void> = Effect.gen(function* () {
+      const list = yield* schedules.list;
+      const now = Date.now();
+      for (const schedule of list) {
+        if (!scheduleDue(schedule, now).due) continue;
+        const device = profiles.get(schedule.deviceId);
+        if (!device) {
+          const next = yield* schedules.remove(schedule.deviceId);
+          bus.emit({ _tag: "schedules-updated", schedules: [...next] });
+          continue;
+        }
+        const plan =
+          (schedule.planId === undefined ? undefined : plans.find((item) => item.id === schedule.planId)) ??
+          plans.find((item) => item.id === device.activePlanId) ??
+          plans.find((item) => item.deviceId === device.id);
+        if (!plan) {
+          yield* markSchedule(device.id, now, "failed", "没有可用的任务计划");
+          bus.emit({ _tag: "toast", kind: "error", title: "定时任务未启动", message: device.name });
+          continue;
+        }
+
+        const current = runs.get(device.id);
+        if (current && (current.snapshot.status === "running" || current.snapshot.status === "preparing")) {
+          yield* markSchedule(device.id, now, "skipped", "设备正在运行任务");
+          continue;
+        }
+        if (runtime.get(device.id)?.status === "connecting") {
+          yield* markSchedule(device.id, now, "skipped", "设备正在连接");
+          continue;
+        }
+
+        const attempt = Effect.gen(function* () {
+          if (!runtime.get(device.id)?.sessionId) yield* connectDevice(device.id);
+          yield* startRun(device.id, plan.id);
+          yield* markSchedule(device.id, now, "started");
+          bus.emit({
+            _tag: "toast",
+            kind: "success",
+            title: "定时任务已开始",
+            message: `${device.name} · ${plan.name}`,
+          });
+          log("info", `定时任务已开始：${device.name} / ${plan.name}`);
+        });
+
+        yield* attempt.pipe(
+          Effect.catch((error: MaaxError) =>
+            Effect.gen(function* () {
+              const message = error.detail ? `${error.message}：${error.detail}` : error.message;
+              yield* markSchedule(device.id, now, "failed", message);
+              bus.emit({ _tag: "toast", kind: "error", title: "定时任务启动失败", message });
+              log("warn", `定时任务启动失败：${message}`);
+            }),
+          ),
+        );
+      }
+    });
+
+    const checkSchedules = (): void => {
+      if (shuttingDown || schedulerBusy) return;
+      schedulerBusy = true;
+      // Timer callbacks are a boundary outside Effect; the program itself uses
+      // the services captured by this layer.
+      // oxlint-disable-next-line effecttsgo/run-effect-inside-effect
+      void Effect.runPromise(runDueSchedules)
+        .catch((error: unknown) => console.warn("Scheduled run check failed", error))
+        .finally(() => {
+          schedulerBusy = false;
+        });
+    };
+
+    schedulerTimer = setInterval(checkSchedules, 20_000);
+    schedulerStartTimer = setTimeout(checkSchedules, 8_000);
+
     const shutdown = Effect.gen(function* () {
       shuttingDown = true;
+      if (schedulerTimer !== undefined) clearInterval(schedulerTimer);
+      if (schedulerStartTimer !== undefined) clearTimeout(schedulerStartTimer);
       for (const deviceId of reconnectTimers.keys()) cancelReconnect(deviceId);
       for (const host of hosts.values()) {
         yield* Effect.tryPromise({ try: () => host.client.stop(), catch: () => undefined }).pipe(Effect.ignore);
@@ -1642,6 +2063,8 @@ export const ApplicationLive: Layer.Layer<
       refreshCores,
       downloadCore,
       checkCoreUpdate,
+      repairCore,
+      moveCore,
       setActiveCore,
       addDevice,
       updateDevice,
@@ -1671,6 +2094,13 @@ export const ApplicationLive: Layer.Layer<
       startCopilot,
       startRun,
       stopRun,
+      runHistory,
+      clearHistory,
+      saveSchedule,
+      recruitmentData,
+      startTool,
+      exportLogs,
+      exportDiagnostics,
       resourceStatus,
       checkResourceUpdate,
       updateResource,

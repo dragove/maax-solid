@@ -20,6 +20,8 @@ export interface CoreRegistryApi {
     source?: CoreSource,
     managed?: boolean,
   ) => Effect.Effect<CoreInfo, import("../errors").MaaxError>;
+  /** Point an existing registry entry at a moved directory and revalidate it. */
+  readonly relocate: (id: string, root: string) => Effect.Effect<CoreInfo, import("../errors").MaaxError>;
   readonly remove: (id: string) => Effect.Effect<ReadonlyArray<CoreInfo>>;
   readonly markVersion: (id: string, version: string) => Effect.Effect<void>;
 }
@@ -140,6 +142,33 @@ export const CoreRegistryLive: Layer.Layer<CoreRegistry, never, AppPaths | FileS
         return core;
       });
 
+    const relocate = (id: string, root: string) =>
+      Effect.gen(function* () {
+        const current = yield* Ref.get(coreRef);
+        const existing = current.find((core) => core.id === id);
+        if (!existing) return yield* maaxError("核心不存在");
+        const absolute = root.trim();
+        const info = yield* inspectCore(fs, absolute);
+        if (info.status !== "ready") {
+          return yield* maaxError(
+            "移动后的目录不是有效的 MaaCore 安装",
+            `需要 ${join(absolute, "libMaaCore.so")} 与 ${join(absolute, "resource/config.json")}`,
+          );
+        }
+        const nextCore: CoreInfo = {
+          ...existing,
+          root: absolute,
+          libPath: info.libPath,
+          resourcePath: info.resourcePath,
+          status: info.status,
+          resourceStamp: info.resourceStamp,
+        };
+        const next = sortCores(current.map((core) => (core.id === id ? nextCore : core)));
+        yield* Ref.set(coreRef, next);
+        yield* persist(next);
+        return nextCore;
+      });
+
     const remove = (id: string) =>
       Effect.gen(function* () {
         const current = yield* Ref.get(coreRef);
@@ -166,6 +195,7 @@ export const CoreRegistryLive: Layer.Layer<CoreRegistry, never, AppPaths | FileS
         get,
         refresh,
         addLocal,
+        relocate,
         remove,
         markVersion,
       };
@@ -202,6 +232,7 @@ export const CoreRegistryLive: Layer.Layer<CoreRegistry, never, AppPaths | FileS
       get,
       refresh,
       addLocal,
+      relocate,
       remove,
       markVersion,
     };

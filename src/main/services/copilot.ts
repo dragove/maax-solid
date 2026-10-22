@@ -8,6 +8,7 @@ import type {
   CopilotSearchItem,
   CopilotSearchResult,
 } from "../../shared/schemas";
+import { copilotKindFromContent } from "../../shared/copilot-kind";
 import type { PrtsClient } from "./prts";
 
 /**
@@ -50,6 +51,7 @@ export const parseCopilotInput = (input: string): CopilotReference | undefined =
 };
 
 interface CopilotContent {
+  readonly type?: unknown;
   readonly stage_name?: unknown;
   readonly difficulty?: unknown;
   readonly doc?: { readonly title?: unknown };
@@ -65,11 +67,17 @@ export const itemsFromContent = (
   const title = typeof content.doc?.title === "string" && content.doc.title !== "" ? content.doc.title : stage;
   const raw = typeof content.difficulty === "number" ? content.difficulty : 0;
   const difficulty = raw === 0 ? DIFFICULTY_NORMAL : raw;
+  const kind = copilotKindFromContent(content.type);
+  // SSS and Paradox are not normal/raid pairs; their files carry no difficulty
+  // branch even if a malformed document still has the bitmask.
+  if (kind !== "normal") {
+    return [{ id: randomUUID(), copilotId, filename, stage, title, isRaid: false, kind }];
+  }
   const modes: boolean[] = [];
   if ((difficulty & DIFFICULTY_NORMAL) !== 0) modes.push(false);
   if ((difficulty & DIFFICULTY_RAID) !== 0) modes.push(true);
   if (modes.length === 0) modes.push(false);
-  return modes.map((isRaid) => ({ id: randomUUID(), copilotId, filename, stage, title, isRaid }));
+  return modes.map((isRaid) => ({ id: randomUUID(), copilotId, filename, stage, title, isRaid, kind }));
 };
 
 const unwrap = (raw: unknown): { code: number; message: string; data: unknown } => {
@@ -133,7 +141,7 @@ export const resolveCopilot = async (
   client: PrtsClient,
 ): Promise<CopilotResolveResult> => {
   const reference = parseCopilotInput(input);
-  if (!reference) throw new Error("请输入作业编号，或 prts://s/<编号> 形式的作业集");
+  if (!reference) throw new Error("请输入作业编号、PRTS 链接，或 prts://s/<作业集编号>");
   if (reference.kind === "set") {
     const { title, items } = await downloadSet(reference.id, copilotDir, client);
     return { kind: "set", title, items: [...items] };

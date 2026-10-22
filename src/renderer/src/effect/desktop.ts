@@ -15,6 +15,9 @@ import {
   IpcEnvelopeSchema,
   MaaxEventSchema,
   OperatorEntrySchema,
+  RecruitmentDataSchema,
+  RunHistorySchema,
+  ScheduleSchema,
   ResourceApplyResultSchema,
   ResourceCheckSchema,
   ResourceStatusSchema,
@@ -67,6 +70,8 @@ const resultSchemas = {
   [COMMANDS.refreshCores]: Schema.Array(CoreInfoSchema),
   [COMMANDS.downloadCore]: Schema.NullOr(CoreInfoSchema),
   [COMMANDS.checkCoreUpdate]: CoreReleaseCheckSchema,
+  [COMMANDS.repairCore]: Schema.Array(CoreInfoSchema),
+  [COMMANDS.moveCore]: Schema.Array(CoreInfoSchema),
   [COMMANDS.resourceStatus]: ResourceStatusSchema,
   [COMMANDS.checkResourceUpdate]: ResourceCheckSchema,
   [COMMANDS.updateResource]: ResourceApplyResultSchema,
@@ -97,6 +102,13 @@ const resultSchemas = {
   [COMMANDS.startCopilot]: RunSnapshotSchema,
   [COMMANDS.startRun]: RunSnapshotSchema,
   [COMMANDS.stopRun]: RunSnapshotSchema,
+  [COMMANDS.runHistory]: RunHistorySchema,
+  [COMMANDS.clearHistory]: RunHistorySchema,
+  [COMMANDS.saveSchedule]: Schema.Array(ScheduleSchema),
+  [COMMANDS.recruitmentData]: RecruitmentDataSchema,
+  [COMMANDS.startTool]: RunSnapshotSchema,
+  [COMMANDS.exportLogs]: Schema.NullOr(Schema.String),
+  [COMMANDS.exportDiagnostics]: Schema.NullOr(Schema.String),
 } as const;
 
 export function command<C extends CommandName>(

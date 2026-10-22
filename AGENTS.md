@@ -34,6 +34,9 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
 - **动画走 motion token**。按动作选曲线：进入用 `--ease-out`，真正离开屏幕的退出用 `--ease-in`，原地改变尺寸/透明度的动效（展开收起的两个方向、页面交叉淡入、滑块）用 `--ease-out` / `--ease-standard`——尺寸变化用 `--ease-in` 会先停住再猛收；时长按元素大小取 `--duration-*`；`<Show>` 分支默认只有进入动画，退出动画只能由组件自己多挂载一个节拍（Modal / Toaster），并且必须被 `prefers-reduced-motion` 兜底关闭；页面切换走 View Transition（`.content` 命名组）、展开收起用 `Collapse`、工具栏状态切换用 `SwapStack` 保持宽度稳定；日志、进度等高频内容不做动画。
 - **全局 `busy` 只属于会立即改变运行/设备状态的命令**。内核下载/导入是增量操作，设备连接可能要等 ADB/MaaCore 数十秒：它们都不占用全局 `busy`，分别用 `coreBusy`、`connectBusy` 只禁相关按钮，任务与计划在等待期间保持可用；只有任务处于 preparing/running 时才禁止切换内核。
 - **回调消息 ID 不等于日志级别**。在统一 formatter 中按 payload 语义分级：预期分支退出用 debug/info，可操作失败才用 error，并优先显示 `first`/`subtask`/`taskchain`，不要输出 `unknown`。
+- **工具识别只走既有回调**。OperBox/Depot 的结果来自 `SubTaskExtraInfo`（msg 20003）的 `OperBoxInfo` / `DepotInfo`；在 `src/shared/tools.ts` 解析、按设备保存最新快照，不要为此新增 native API。公开招募计算器只读活动核心的 `recruitment.json` 与 `battle_data.json`。
+- **终止态运行只写一次历史**。完成回调、停止、宿主崩溃与启动失败都经 `recordRun`；不要在渲染进程或事件处理器里重复记录。定时任务只在应用运行时检查，使用本地时间与两小时补跑窗口，失败/跳过也要写入 `lastStatus`。
+- **托盘关闭行为要可回来**。`closeToTray` 通过 `src/main/app-behavior.ts` 镜像给窗口关闭处理器；托盘不可用时正常关闭窗口，`window-all-closed` 在托盘模式下不得退出。诊断包只写本地目录，不自动上传。
 
 ## Effect boundary
 
