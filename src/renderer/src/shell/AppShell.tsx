@@ -15,7 +15,7 @@ import type {
 } from "../../../shared/schemas";
 import { COMMANDS, type CommandName, type CommandPayloads, type CommandResults } from "../../../shared/ipc";
 import { formatResourceStamp } from "../../../shared/resource-version";
-import { createTask } from "../../../shared/tasks";
+import { TASK_DEFINITIONS, createTask } from "../../../shared/tasks";
 import { AddDeviceDialog } from "../components/AddDeviceDialog";
 import { CopilotBrowser } from "../components/CopilotBrowser";
 import { Icon } from "../components/ui/Icon";
@@ -890,11 +890,19 @@ export const AppShell: Component<AppShellProps> = (props) => {
     return await resolveCopilotFor(taskId, String(id));
   };
 
-  const pickCopilotFile = async (taskId: string, key: string): Promise<void> => {
-    const file = await send(COMMANDS.importCopilot, undefined, { busy: false });
-    if (!file) return;
+  const pickTaskFile = async (taskId: string, key: string): Promise<void> => {
     const plan = selectedPlan();
     const task = plan?.tasks.find((item) => item.id === taskId);
+    const field = task ? TASK_DEFINITIONS[task.type].fields.find((item) => item.key === key) : undefined;
+    // A video is only referenced by its path; copilot JSON is copied into the
+    // app data directory and validated first.
+    if (field?.accept === "video") {
+      const path = await send(COMMANDS.pickVideo, undefined, { busy: false });
+      if (path) updateTaskParam(taskId, key, path);
+      return;
+    }
+    const file = await send(COMMANDS.importCopilot, undefined, { busy: false });
+    if (!file) return;
     const batch = Array.isArray(task?.params.copilot_list) ? task.params.copilot_list : [];
     if (batch.length === 0) {
       updateTaskParam(taskId, key, file.filename);
@@ -1049,7 +1057,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               onImportPlan={() => void importPlan()}
               onExportPlan={() => void exportPlan()}
               onDeletePlan={() => void deletePlan()}
-              onPickFile={(taskId, key) => void pickCopilotFile(taskId, key)}
+              onPickFile={(taskId, key) => void pickTaskFile(taskId, key)}
               onResolveCopilot={(taskId, input) => resolveCopilotFor(taskId, input)}
               onBrowseCopilot={(taskId) => setBrowserTaskId(taskId)}
               onClearLogs={clearLogs}

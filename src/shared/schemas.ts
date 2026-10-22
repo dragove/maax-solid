@@ -361,12 +361,16 @@ export const TaskTypeSchema = Schema.Literals([
   "Infrast",
   "Mall",
   "Award",
+  "Roguelike",
+  "Reclamation",
   "Copilot",
   "SSSCopilot",
   "ParadoxCopilot",
   "Depot",
   "OperBox",
   "Custom",
+  "SingleStep",
+  "VideoRecognition",
   "CloseDown",
 ]);
 export type TaskType = Schema.Schema.Type<typeof TaskTypeSchema>;

@@ -30,8 +30,10 @@
 - [x] Copilot (auto battle) as its own tab: assignments are added, run once
       and cleared, never queued. SSS Copilot, Paradox Copilot, Depot, OperBox and
       Custom stay available as queue tasks.
-- [ ] Remaining task types: Roguelike, Reclamation, SingleStep,
-      VideoRecognition.
+- [x] Remaining task types: Roguelike, Reclamation, SingleStep,
+      VideoRecognition. Roguelike covers theme, mode, squad, opening reset and
+      investment options; Reclamation covers both themes and the crafting mode;
+      SingleStep maps stage/start/action; VideoRecognition takes a recording path.
 - [x] Copilot workspace: add assignments by PRTS id, `prts://s/<id>` set link
       or by browsing, run them as a batch, and expand a dual-difficulty file into
       normal and raid runs.

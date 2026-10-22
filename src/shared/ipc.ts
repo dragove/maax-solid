@@ -65,6 +65,7 @@ export const COMMANDS = {
   exportPlan: "plans.export",
   setActivePlan: "plans.set-active",
   importCopilot: "copilot.import",
+  pickVideo: "videos.pick",
   resolveCopilot: "copilot.resolve",
   searchCopilot: "copilot.search",
   searchCopilotLevels: "copilot.levels",
@@ -108,6 +109,7 @@ export interface CommandPayloads {
   "plans.export": { planId: string };
   "plans.set-active": { deviceId: string; planId: string };
   "copilot.import": undefined;
+  "videos.pick": undefined;
   "copilot.resolve": { input: string };
   "copilot.search": {
     document?: string;
@@ -159,6 +161,7 @@ export interface CommandResults {
   "plans.export": string | null;
   "plans.set-active": DeviceView;
   "copilot.import": CopilotFile | null;
+  "videos.pick": string | null;
   "copilot.resolve": CopilotResolveResult;
   "copilot.search": CopilotSearchResult;
   "copilot.levels": ReadonlyArray<CopilotLevel>;

@@ -1,5 +1,12 @@
 import { For, Show, createSignal, untrack, type Component } from "solid-js";
-import type { CopilotItem, Locale, RunTaskState, StageCatalogEntry, TaskConfig } from "../../../shared/schemas";
+import type {
+  CopilotItem,
+  Locale,
+  RunTaskState,
+  StageCatalogEntry,
+  TaskConfig,
+  TaskType,
+} from "../../../shared/schemas";
 import type { FieldOption, TaskField } from "../../../shared/tasks";
 import { TASK_DEFINITIONS } from "../../../shared/tasks";
 import { pick, t } from "../i18n/i18n";
@@ -28,6 +35,12 @@ interface TaskCardProps {
   readonly onDrop: (event: DragEvent) => void;
 }
 
+const fieldOptionLabel = (type: TaskType, key: string, value: unknown, locale: Locale): string => {
+  const field = TASK_DEFINITIONS[type].fields.find((item) => item.key === key);
+  const option = field?.options?.find((item) => String(item.value) === String(value));
+  return option ? pick(locale, option.label) : "";
+};
+
 const summaryFor = (task: TaskConfig, locale: Locale): string => {
   const params = task.params;
   switch (task.type) {
@@ -55,6 +68,16 @@ const summaryFor = (task: TaskConfig, locale: Locale): string => {
       return locale === "en-US" ? "Credits & shopping" : "信用与购物";
     case "Award":
       return locale === "en-US" ? "Daily collection" : "日常领取";
+    case "Roguelike": {
+      const theme = fieldOptionLabel("Roguelike", "theme", params.theme, locale);
+      const mode = fieldOptionLabel("Roguelike", "mode", params.mode, locale);
+      return [theme, mode].filter((part) => part !== "").join(" · ") || "—";
+    }
+    case "Reclamation": {
+      const theme = fieldOptionLabel("Reclamation", "theme", params.theme, locale);
+      const mode = fieldOptionLabel("Reclamation", "mode", params.mode, locale);
+      return [theme, mode].filter((part) => part !== "").join(" · ") || "—";
+    }
     case "StartUp":
       return params.start_game_enabled === false
         ? locale === "en-US"
@@ -89,6 +112,15 @@ const summaryFor = (task: TaskConfig, locale: Locale): string => {
     case "Custom": {
       const names = Array.isArray(params.task_names) ? params.task_names.join(", ") : "";
       return names || "—";
+    }
+    case "SingleStep": {
+      const step = fieldOptionLabel("SingleStep", "subtask", params.subtask, locale);
+      const detail = params.subtask === "stage" ? params.stage : params.name;
+      return typeof detail === "string" && detail.trim() !== "" ? `${step} · ${detail}` : step || "—";
+    }
+    case "VideoRecognition": {
+      const name = fileNameOf(params.filename);
+      return name || (locale === "en-US" ? "No video" : "未选择视频");
     }
     case "CloseDown":
       return locale === "en-US" ? "After queue" : "队列结束后";

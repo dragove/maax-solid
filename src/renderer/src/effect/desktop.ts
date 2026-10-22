@@ -87,6 +87,7 @@ const resultSchemas = {
   [COMMANDS.exportPlan]: Schema.NullOr(Schema.String),
   [COMMANDS.setActivePlan]: DeviceViewSchema,
   [COMMANDS.importCopilot]: Schema.NullOr(CopilotFileSchema),
+  [COMMANDS.pickVideo]: Schema.NullOr(Schema.String),
   [COMMANDS.resolveCopilot]: CopilotResolveResultSchema,
   [COMMANDS.searchCopilot]: CopilotSearchResultSchema,
   [COMMANDS.searchCopilotLevels]: Schema.Array(CopilotLevelSchema),

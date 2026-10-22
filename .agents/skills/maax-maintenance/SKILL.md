@@ -388,12 +388,19 @@ Use a utility process/worker, one host per core version or resource set.
 - A plan mutation must broadcast `plans-updated`. The renderer keeps its own
   plan list; a stale list silently drops a plan switch because the select value
   points at an option that does not exist yet.
-- New task types touch four places at once: `TaskTypeSchema`, an entry in
-  `TASK_DEFINITIONS`, `getTaskDefaults`, and `buildMaaTaskParams` (plus
-  `TASK_PALETTE_ORDER`). The exhaustive switches fail the type check if one is
-  missed — do not cast around them.
+- New task types touch six places at once: `TaskTypeSchema`, an entry in
+  `TASK_DEFINITIONS`, `getTaskDefaults`, `buildMaaTaskParams`,
+  `TASK_PALETTE_ORDER` and `TaskCard`'s `summaryFor`. The exhaustive
+  switches fail the type check if one is missed — do not cast around them.
 - Required fields are validated in the main process before the first task is
   appended, so a missing copilot file cannot leave a half-built queue.
+  `firstMissingField` honours `visibleWhen`: SingleStep requires the stage only
+  in "set stage" and the operator/location only in "single action". A required
+  field the form hides would block the queue with no way to fill it.
+- A `file` field declares `accept`. Copilot JSON goes through
+  `copilot.import` (validated and copied into `userData/copilot`);
+  VideoRecognition records `accept: "video"`, is picked through `videos.pick`
+  and keeps the raw path because MaaCore reads the file itself.
 - A copilot batch's `copilot_list[].id` must be the entry's **position** in the
   whole list: the core sends it back with progress events. Never use the local
   item id or the PRTS id there.

@@ -148,8 +148,11 @@ application services.
 - Task forms are driven by `src/shared/tasks.ts`, a declarative catalogue of
   supported task types, defaults, localized labels and field definitions.
   `buildMaaTaskParams` maps the UI model to MaaCore's parameter JSON, and
-  `firstMissingField` rejects a queue whose copilot file or custom task names are
-  still empty before anything is appended to the core.
+  `firstMissingField` rejects a queue whose required field is still empty before
+  anything is appended to the core; fields hidden by the selected mode are not
+  required. File-backed fields declare `accept`: copilot JSON is imported,
+  validated and copied into `userData/copilot`, while a VideoRecognition
+  recording is only picked through `videos.pick` and keeps its path.
 - A plan is a device-scoped ordered task list. Create, duplicate, rename,
   import, export and remove all run in `Workspace`; every mutation broadcasts
   `plans-updated` so the renderer never shows a stale plan list.

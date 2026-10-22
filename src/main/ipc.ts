@@ -196,6 +196,8 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
       }
       case COMMANDS.importCopilot:
         return run((app) => app.importCopilotFile);
+      case COMMANDS.pickVideo:
+        return run((app) => app.pickVideoFile);
       case COMMANDS.resolveCopilot: {
         const { input } = decode(Schema.Struct({ input: Schema.String }), payload);
         return run((app) => app.resolveCopilot(input));

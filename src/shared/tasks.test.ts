@@ -255,3 +255,228 @@ describe("task parameter goldens", () => {
     });
   });
 });
+
+describe("integrated strategies", () => {
+  it("omits unlimited counts and empty optional strings", () => {
+    const task = createTask("Roguelike");
+    const params = buildMaaTaskParams({ ...task, params: { ...task.params, theme: "Sami", mode: 5 } }, settings);
+
+    expect(params).toMatchObject({ theme: "Sami", mode: 5, squad: "指挥分队", roles: "取长补短" });
+    expect(params).not.toHaveProperty("starts_count");
+    expect(params).not.toHaveProperty("investments_count");
+    expect(params).not.toHaveProperty("core_char");
+    expect(params).not.toHaveProperty("collectible_mode_start_list");
+    expect(params).not.toHaveProperty("collectible_mode_squad");
+    expect(params).not.toHaveProperty("first_floor_foldartal");
+    expect(params.expected_collapsal_paradigms).toEqual(["目空一些", "睁眼瞎", "图像损坏", "一抹黑"]);
+  });
+
+  it("keeps an explicit exploration limit", () => {
+    const task = createTask("Roguelike");
+    const params = buildMaaTaskParams({ ...task, params: { ...task.params, starts_count: 3 } }, settings);
+    expect(params.starts_count).toBe(3);
+  });
+
+  it("turns selected opening rewards into the core's flag object", () => {
+    const task = createTask("Roguelike");
+    const params = buildMaaTaskParams(
+      { ...task, params: { ...task.params, mode: 4, collectible_mode_start_list: ["hot_water", "hope"] } },
+      settings,
+    );
+    expect(params.collectible_mode_start_list).toMatchObject({
+      hot_water: true,
+      hope: true,
+      shield: false,
+      ideas: false,
+      ticket: false,
+    });
+  });
+});
+
+describe("reclamation", () => {
+  it("keeps the crafting defaults and drops an empty tool list", () => {
+    const task = createTask("Reclamation");
+    expect(buildMaaTaskParams(task, settings)).toMatchObject({
+      theme: "Fire",
+      mode: 0,
+      tools_to_craft: ["荧光棒"],
+      increment_mode: 0,
+      num_craft_batches: 16,
+    });
+    expect(
+      buildMaaTaskParams({ ...task, params: { ...task.params, tools_to_craft: [] } }, settings),
+    ).not.toHaveProperty("tools_to_craft");
+  });
+});
+
+describe("single step", () => {
+  it("builds stage, start and action payloads", () => {
+    const task = createTask("SingleStep");
+    expect(buildMaaTaskParams({ ...task, params: { ...task.params, stage: "1-7" } }, settings)).toEqual({
+      enable: true,
+      client_type: "Official",
+      type: "copilot",
+      subtask: "stage",
+      details: { stage: "1-7" },
+    });
+    expect(buildMaaTaskParams({ ...task, params: { ...task.params, subtask: "start" } }, settings)).toEqual({
+      enable: true,
+      client_type: "Official",
+      type: "copilot",
+      subtask: "start",
+    });
+
+    const action = buildMaaTaskParams(
+      {
+        ...task,
+        params: { ...task.params, subtask: "action", name: "史尔特尔", location: "4, 5", direction: "左", skill: 3 },
+      },
+      settings,
+    );
+    expect(action.details).toEqual({ name: "史尔特尔", location: [4, 5], direction: "左", skill: 3 });
+
+    const basic = buildMaaTaskParams(
+      { ...task, params: { ...task.params, subtask: "action", name: "史尔特尔", location: "4,5", skill: 0 } },
+      settings,
+    );
+    expect(basic.details).toEqual({ name: "史尔特尔", location: [4, 5], direction: "右" });
+  });
+
+  it("only requires the fields its current step shows", () => {
+    const task = createTask("SingleStep");
+    expect(firstMissingField(task)?.zh).toBe("关卡");
+    expect(firstMissingField({ ...task, params: { ...task.params, subtask: "start" } })).toBeUndefined();
+
+    const action = { ...task, params: { ...task.params, subtask: "action", name: "史尔特尔", location: "" } };
+    expect(firstMissingField(action)?.zh).toBe("部署位置");
+    expect(firstMissingField({ ...action, params: { ...action.params, location: "4-5" } })?.zh).toBe("部署位置");
+    expect(firstMissingField({ ...action, params: { ...action.params, location: "4,5" } })).toBeUndefined();
+  });
+});
+
+describe("video recognition", () => {
+  it("sends the picked path untouched and requires one", () => {
+    const task = createTask("VideoRecognition");
+    expect(firstMissingField(task)?.zh).toBe("作战录像");
+    expect(buildMaaTaskParams({ ...task, params: { filename: "/tmp/battle.mp4" } }, settings)).toMatchObject({
+      filename: "/tmp/battle.mp4",
+    });
+    expect(firstMissingField({ ...task, params: { filename: "/tmp/battle.mp4" } })).toBeUndefined();
+  });
+});
+
+describe("roguelike and reclamation", () => {
+  it("drops unlimited counts, empty operators and the empty reward list", () => {
+    const task = {
+      ...createTask("Roguelike"),
+      params: { ...getTaskDefaults("Roguelike"), theme: "Sami", mode: 5, starts_count: 3 },
+    };
+    const params = buildMaaTaskParams(task, settings);
+    expect(params).toMatchObject({
+      theme: "Sami",
+      mode: 5,
+      starts_count: 3,
+      squad: "指挥分队",
+      roles: "取长补短",
+      investment_enabled: true,
+      expected_collapsal_paradigms: ["目空一些", "睁眼瞎", "图像损坏", "一抹黑"],
+    });
+    expect(params).not.toHaveProperty("investments_count");
+    expect(params).not.toHaveProperty("core_char");
+    expect(params).not.toHaveProperty("first_floor_foldartal");
+    expect(params).not.toHaveProperty("collectible_mode_start_list");
+  });
+
+  it("turns the mode-4 opening rewards into the core's flag object", () => {
+    const base = createTask("Roguelike");
+    const params = buildMaaTaskParams(
+      { ...base, params: { ...base.params, mode: 4, collectible_mode_start_list: ["hot_water", "hope"] } },
+      settings,
+    );
+    expect(params.collectible_mode_start_list).toEqual({
+      hot_water: true,
+      shield: false,
+      ingot: false,
+      hope: true,
+      random: false,
+      key: false,
+      dice: false,
+      ideas: false,
+      ticket: false,
+    });
+  });
+
+  it("keeps the documented reclamation defaults and drops an empty tool list", () => {
+    const task = createTask("Reclamation");
+    expect(buildMaaTaskParams(task, settings)).toMatchObject({
+      theme: "Fire",
+      mode: 0,
+      tools_to_craft: ["荧光棒"],
+      increment_mode: 0,
+      num_craft_batches: 16,
+    });
+    expect(
+      buildMaaTaskParams({ ...task, params: { ...task.params, tools_to_craft: [] } }, settings),
+    ).not.toHaveProperty("tools_to_craft");
+  });
+});
+
+describe("single step and video recognition", () => {
+  it("maps each single-step mode onto the core subtask contract", () => {
+    const base = createTask("SingleStep");
+    expect(buildMaaTaskParams({ ...base, params: { ...base.params, stage: "1-7" } }, settings)).toEqual({
+      enable: true,
+      client_type: "Official",
+      type: "copilot",
+      subtask: "stage",
+      details: { stage: "1-7" },
+    });
+    expect(buildMaaTaskParams({ ...base, params: { ...base.params, subtask: "start" } }, settings)).toEqual({
+      enable: true,
+      client_type: "Official",
+      type: "copilot",
+      subtask: "start",
+    });
+
+    const action = buildMaaTaskParams(
+      {
+        ...base,
+        params: { ...base.params, subtask: "action", name: "史尔特尔", location: "4, 5", direction: "左", skill: 3 },
+      },
+      settings,
+    );
+    expect(action.details).toEqual({ name: "史尔特尔", location: [4, 5], direction: "左", skill: 3 });
+
+    const defaultSkill = buildMaaTaskParams(
+      { ...base, params: { ...base.params, subtask: "action", name: "史尔特尔", location: "4,5", skill: 0 } },
+      settings,
+    );
+    expect(defaultSkill.details).toEqual({ name: "史尔特尔", location: [4, 5], direction: "右" });
+  });
+
+  it("only requires the fields the chosen step actually shows", () => {
+    const base = createTask("SingleStep");
+    expect(firstMissingField(base)?.zh).toBe("关卡");
+    expect(firstMissingField({ ...base, params: { ...base.params, subtask: "start" } })).toBeUndefined();
+    expect(firstMissingField({ ...base, params: { ...base.params, subtask: "action", name: "史尔特尔" } })?.zh).toBe(
+      "部署位置",
+    );
+    expect(
+      firstMissingField({ ...base, params: { ...base.params, subtask: "action", name: "史尔特尔", location: "4-5" } })
+        ?.zh,
+    ).toBe("部署位置");
+    expect(
+      firstMissingField({ ...base, params: { ...base.params, subtask: "action", name: "史尔特尔", location: "4,5" } }),
+    ).toBeUndefined();
+  });
+
+  it("requires a recording and passes the picked path through", () => {
+    const base = createTask("VideoRecognition");
+    expect(firstMissingField(base)?.zh).toBe("作战录像");
+    expect(buildMaaTaskParams({ ...base, params: { filename: "/tmp/battle.mp4" } }, settings)).toEqual({
+      enable: true,
+      client_type: "Official",
+      filename: "/tmp/battle.mp4",
+    });
+  });
+});

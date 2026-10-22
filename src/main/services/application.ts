@@ -195,6 +195,7 @@ export interface ApplicationApi {
   readonly exportPlan: (planId: string) => Effect.Effect<string | null, MaaxError>;
   readonly setActivePlan: (deviceId: string, planId: string) => Effect.Effect<DeviceView, MaaxError>;
   readonly importCopilotFile: Effect.Effect<CopilotFile | null, MaaxError>;
+  readonly pickVideoFile: Effect.Effect<string | null, MaaxError>;
   readonly resolveCopilot: (input: string) => Effect.Effect<CopilotResolveResult, MaaxError>;
   readonly searchCopilot: (params: CopilotSearchParams) => Effect.Effect<CopilotSearchResult, MaaxError>;
   readonly copilotLevels: (query: string) => Effect.Effect<ReadonlyArray<CopilotLevel>, MaaxError>;
@@ -1562,6 +1563,22 @@ export const ApplicationLive: Layer.Layer<
         return picked.filePath;
       });
 
+    /** Pick a battle recording for the VideoRecognition task; the core reads the path itself. */
+    const pickVideoFile: Effect.Effect<string | null, MaaxError> = Effect.gen(function* () {
+      const window = BrowserWindow.getFocusedWindow();
+      const options = {
+        title: "选择作战录像",
+        filters: [{ name: "Video", extensions: ["mp4", "mkv", "avi", "mov", "flv", "webm"] }],
+        properties: ["openFile" as const],
+      };
+      const picked = yield* Effect.tryPromise({
+        try: () => (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options)),
+        catch: (cause) => maaxError("打开文件对话框失败", cause),
+      });
+      const path = picked.filePaths[0];
+      return picked.canceled || path === undefined ? null : path;
+    });
+
     /** Import a copilot JSON into the app data directory and return its path. */
     const importCopilotFile: Effect.Effect<CopilotFile | null, MaaxError> = Effect.gen(function* () {
       const window = BrowserWindow.getFocusedWindow();
@@ -1642,6 +1659,7 @@ export const ApplicationLive: Layer.Layer<
       exportPlan,
       setActivePlan,
       importCopilotFile,
+      pickVideoFile,
       resolveCopilot: prts.resolve,
       searchCopilot: prts.search,
       copilotLevels: prts.levels,
