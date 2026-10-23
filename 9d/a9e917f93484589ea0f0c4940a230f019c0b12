@@ -1,0 +1,28 @@
+package.json
+  s_d67d2ebfb6d9af::t_d71051566a45ff 29,46
+  s_d67d2ebfb6d9af::t_650b2db5d63f23 42
+  s_d67d2ebfb6d9af::t_ab62ecf0e46fdf 28
+  s_d67d2ebfb6d9af::t_1743474037cf99 30-32
+  s_d67d2ebfb6d9af::t_1740a047ad049d 45
+pnpm-workspace.yaml
+  s_d67d2ebfb6d9af::t_0302d5468345ec 13-19
+  s_d67d2ebfb6d9af::t_1b9a7fb969f88e 5-11
+  s_d67d2ebfb6d9af::t_64b40a0cc5cdc8 12
+  s_d67d2ebfb6d9af::t_84c9b5cbdb7d21 20-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "9da9e917f93484589ea0f0c4940a230f019c0b12",
+  "prompts": {},
+  "sessions": {
+    "s_d67d2ebfb6d9af": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a16745-91e9-7697-b947-b1751722ceea",
+        "model": "deepseek-v4.1-flash-fast"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
