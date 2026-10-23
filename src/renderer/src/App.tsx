@@ -2,17 +2,10 @@ import { Show, createSignal, onSettled, type Component } from "solid-js";
 import type { Bootstrap } from "../../shared/schemas";
 import { AppShell } from "./shell/AppShell";
 import { traceRendererBoot } from "./boot-trace";
-import { DesktopBridgeError, DesktopBridgeLive, bootstrap as bootstrapEffect } from "./effect/desktop";
+import { DesktopBridgeLive, bootstrap as bootstrapEffect, describeError } from "./effect/desktop";
 import { RuntimeContext, createRuntime, useAppRuntime } from "./effect/solid-effect";
 import { Toaster } from "./components/ui/Toaster";
 import { Icon } from "./components/ui/Icon";
-
-function describeError(cause: unknown): string {
-  if (cause instanceof DesktopBridgeError) {
-    return `${cause.operation}: ${cause.reason}`;
-  }
-  return cause instanceof Error ? cause.message : String(cause);
-}
 
 const FatalScreen: Component<{ error: unknown; onRetry: () => void }> = (props) => (
   <div class="fatal-screen">

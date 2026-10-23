@@ -1351,22 +1351,6 @@ select.input {
   color: var(--muted);
 }
 
-.panel-icon {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  color: var(--text-soft);
-  background: var(--surface-alt);
-  border-radius: var(--radius-control);
-}
-
-.panel-icon .icon {
-  width: 14px;
-  height: 14px;
-}
-
 .panel-meta {
   display: flex;
   flex-wrap: wrap;
@@ -3663,13 +3647,6 @@ select.input {
 
 .link-button:hover {
   text-decoration: underline;
-}
-
-.page--tools,
-.page--runs {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .tool-tabs {

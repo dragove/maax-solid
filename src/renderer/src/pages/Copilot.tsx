@@ -95,7 +95,7 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
   const remove = (id: string): void => props.onItems(props.items.filter((item) => item.id !== id));
 
   return (
-    <div class="page page--copilot">
+    <div class="page">
       <header class="page-head">
         <div>
           <h1>{t(props.locale, "copilotPage.title")}</h1>
@@ -142,7 +142,7 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
         </div>
       </header>
 
-      <p class={kind() === "mixed" ? "copilot-prereq copilot-prereq--mixed" : "copilot-prereq"}>
+      <p class={["copilot-prereq", { "copilot-prereq--mixed": kind() === "mixed" }]}>
         <Icon name={kind() === "mixed" ? "alert-triangle" : "info"} />
         {prerequisite()}
       </p>
@@ -185,24 +185,28 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
             fallback={<p class="copilot-empty">{t(props.locale, "copilot.empty")}</p>}
           >
             <ul class="copilot-items">
-              <For each={props.items}>
+              {/* Entries keep their id across saves, so keying by it stops the row
+                  entrance animation from replaying whenever the batch is rewritten. */}
+              <For each={props.items} keyed={(item) => item.id}>
                 {(item, index) => (
                   <li class="copilot-item">
                     <span class="copilot-index">{index() + 1}</span>
-                    <span class={item.isRaid ? "copilot-mode copilot-mode--raid" : "copilot-mode"}>
-                      {t(props.locale, item.isRaid ? "copilot.raid" : "copilot.normal")}
+                    <span class={["copilot-mode", { "copilot-mode--raid": item().isRaid }]}>
+                      {t(props.locale, item().isRaid ? "copilot.raid" : "copilot.normal")}
                     </span>
-                    <Show when={(item.kind ?? "normal") !== "normal"}>
-                      <span class={`copilot-kind copilot-kind--${item.kind}`}>{kindLabel(item.kind ?? "normal")}</span>
+                    <Show when={(item().kind ?? "normal") !== "normal"}>
+                      <span class={["copilot-kind", `copilot-kind--${item().kind}`]}>
+                        {kindLabel(item().kind ?? "normal")}
+                      </span>
                     </Show>
-                    <span class="copilot-title">{item.title || item.stage || item.filename}</span>
-                    <span class="copilot-stage">{item.stage}</span>
+                    <span class="copilot-title">{item().title || item().stage || item().filename}</span>
+                    <span class="copilot-stage">{item().stage}</span>
                     <button
                       type="button"
                       class="icon-button"
                       title={t(props.locale, "common.remove")}
                       disabled={running()}
-                      onClick={() => remove(item.id)}
+                      onClick={() => remove(item().id)}
                     >
                       <Icon name="x" />
                     </button>

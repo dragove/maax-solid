@@ -12,6 +12,7 @@
     {
       "files": [
         "src/main/runtime.ts",
+        "src/main/services/copilot-setup.ts",
         "src/main/services/core-registry.ts",
         "src/main/services/json-store.ts",
         "src/main/services/settings.ts",

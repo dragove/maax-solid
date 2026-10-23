@@ -46,16 +46,23 @@ export const SetupPanel: Component<SetupPanelProps> = (props) => {
         <p>{t(props.locale, "setup.subtitle")}</p>
       </div>
       <ol class="setup-steps">
-        <For each={steps()}>
+        {/* Positional list: `steps()` rebuilds its descriptors on every prop read, so the
+            rows must survive a new array instead of remounting. */}
+        <For each={steps()} keyed={false}>
           {(step, index) => (
-            <li class={step.done ? "setup-step setup-step--done" : "setup-step"}>
-              <span class="setup-index">{step.done ? <Icon name="check" /> : index() + 1}</span>
+            <li class={["setup-step", { "setup-step--done": step().done }]}>
+              <span class="setup-index">{step().done ? <Icon name="check" /> : index + 1}</span>
               <span class="setup-copy">
-                <strong>{step.title}</strong>
-                <span>{step.hint}</span>
+                <strong>{step().title}</strong>
+                <span>{step().hint}</span>
               </span>
-              <Button size="sm" variant={step.done ? "ghost" : "secondary"} disabled={step.done} onClick={step.onClick}>
-                {step.done ? t(props.locale, "setup.done") : step.action}
+              <Button
+                size="sm"
+                variant={step().done ? "ghost" : "secondary"}
+                disabled={step().done}
+                onClick={() => step().onClick()}
+              >
+                {step().done ? t(props.locale, "setup.done") : step().action}
               </Button>
             </li>
           )}

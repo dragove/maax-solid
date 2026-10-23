@@ -10,7 +10,7 @@ interface SwitchProps {
 export const Switch: Component<SwitchProps> = (props) => (
   <button
     type="button"
-    class={props.checked ? "switch switch--on" : "switch"}
+    class={["switch", { "switch--on": props.checked }]}
     role="switch"
     aria-checked={props.checked ? "true" : "false"}
     aria-label={props.label ?? "toggle"}

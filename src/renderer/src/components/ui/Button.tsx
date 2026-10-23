@@ -15,7 +15,7 @@ interface ButtonProps {
 export const Button: Component<ButtonProps> = (props) => (
   <button
     type={props.type ?? "button"}
-    class={`btn btn--${props.variant ?? "secondary"} btn--${props.size ?? "md"}${props.class ? ` ${props.class}` : ""}`}
+    class={["btn", `btn--${props.variant ?? "secondary"}`, `btn--${props.size ?? "md"}`, props.class]}
     disabled={props.disabled}
     title={props.title}
     onClick={props.onClick}

@@ -50,6 +50,14 @@ export class DesktopBridgeError extends Schema.TaggedError<DesktopBridgeError, {
   },
 ) {}
 
+/** Human-readable text for a failed command, including typed bridge errors. */
+export function describeError(cause: unknown): string {
+  if (cause instanceof DesktopBridgeError) {
+    return `${cause.operation}: ${cause.reason}`;
+  }
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 function getBridge(): MaaxBridge {
   if (!window.maax) {
     throw new Error("The secure preload bridge is unavailable.");

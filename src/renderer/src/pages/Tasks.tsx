@@ -385,7 +385,7 @@ export const Tasks: Component<TasksProps> = (props) => {
                   <ul class="run-task-list">
                     <For each={run().tasks}>
                       {(task) => (
-                        <li class={`run-task run-task--${task.status}`}>
+                        <li class="run-task">
                           <span class="run-task-name">
                             {task.name && task.name !== task.type
                               ? task.name

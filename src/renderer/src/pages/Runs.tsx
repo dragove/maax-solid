@@ -156,12 +156,11 @@ export const Runs: Component<RunsProps> = (props) => {
     }
   };
 
-  const history = () => props.history;
-  const stats = () => history().stats;
+  const stats = () => props.history.stats;
   const entries = () =>
     deviceOnly() && props.device
-      ? history().entries.filter((entry) => entry.deviceId === props.device?.profile.id)
-      : history().entries;
+      ? props.history.entries.filter((entry) => entry.deviceId === props.device?.profile.id)
+      : props.history.entries;
   const successRate = () => {
     const value = stats();
     const settled = value.completed + value.failed;
@@ -170,7 +169,7 @@ export const Runs: Component<RunsProps> = (props) => {
   const maxDay = () => Math.max(1, ...stats().byDay.map((day) => day.total));
 
   return (
-    <div class="page page--runs">
+    <div class="page">
       <header class="page-head">
         <div>
           <h1>{t(props.locale, "runs.title")}</h1>
@@ -248,8 +247,16 @@ export const Runs: Component<RunsProps> = (props) => {
                       void save({ planId });
                     }}
                   >
-                    <option value="">{t(props.locale, "runs.activePlan")}</option>
-                    <For each={props.plans}>{(plan) => <option value={plan.id}>{plan.name}</option>}</For>
+                    <option value="" selected={!schedule().planId}>
+                      {t(props.locale, "runs.activePlan")}
+                    </option>
+                    <For each={props.plans}>
+                      {(plan) => (
+                        <option value={plan.id} selected={plan.id === (schedule().planId ?? "")}>
+                          {plan.name}
+                        </option>
+                      )}
+                    </For>
                   </select>
                 </label>
               </div>
@@ -260,7 +267,7 @@ export const Runs: Component<RunsProps> = (props) => {
                     {(day) => (
                       <button
                         type="button"
-                        class={schedule().weekdays.includes(day) ? "weekday weekday--on" : "weekday"}
+                        class={["weekday", { "weekday--on": schedule().weekdays.includes(day) }]}
                         aria-pressed={schedule().weekdays.includes(day) ? "true" : "false"}
                         onClick={() => toggleDay(day)}
                       >
@@ -384,31 +391,33 @@ export const Runs: Component<RunsProps> = (props) => {
               }
             >
               <div class="history-list">
-                <For each={entries()}>
+                {/* History arrives as a whole decoded list, so key by the entry id: an
+                    appended run must not remount every row above it. */}
+                <For each={entries()} keyed={(entry) => entry.id}>
                   {(entry) => (
                     <article class="history-row">
                       <div class="history-main">
                         <div class="history-title">
-                          <strong>{entry.planName ?? entry.tasks[0]?.name ?? entry.id.slice(0, 8)}</strong>
-                          <span class="tag">{entry.deviceName}</span>
+                          <strong>{entry().planName ?? entry().tasks[0]?.name ?? entry().id.slice(0, 8)}</strong>
+                          <span class="tag">{entry().deviceName}</span>
                         </div>
                         <div class="history-meta">
-                          <span>{dateTimeText(entry.startedAt, props.locale)}</span>
-                          <span>{durationText(entry.endedAt - entry.startedAt, props.locale)}</span>
+                          <span>{dateTimeText(entry().startedAt, props.locale)}</span>
+                          <span>{durationText(entry().endedAt - entry().startedAt, props.locale)}</span>
                           <span>
-                            {entry.tasks.length} {t(props.locale, "runs.tasks")}
+                            {entry().tasks.length} {t(props.locale, "runs.tasks")}
                           </span>
                         </div>
                       </div>
                       <StatusPill
                         status={
-                          statusTone(entry.status) === "ok"
+                          statusTone(entry().status) === "ok"
                             ? "online"
-                            : statusTone(entry.status) === "bad"
+                            : statusTone(entry().status) === "bad"
                               ? "error"
                               : "running"
                         }
-                        label={statusLabel(entry.status, props.locale)}
+                        label={statusLabel(entry().status, props.locale)}
                         compact
                       />
                     </article>

@@ -48,6 +48,13 @@ export const Collapse: Component<CollapseProps> = (props) => {
   createEffect(
     () => props.open,
     (open) => {
+      // The apply phase re-runs whenever the compute re-evaluates, not only when
+      // its value changes, and `open` is usually a getter riding on a larger
+      // object (a task card's `expanded` depends on the whole task). Re-arming
+      // the animation on unrelated churn re-measures the section: a flyout open
+      // inside it lands in `scrollHeight`, so the card briefly grows to the
+      // full menu height and snaps back. Only a real state change animates.
+      if (initialised && wantOpen === open) return;
       wantOpen = open;
       if (!el) return;
       if (!initialised) {

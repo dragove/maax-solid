@@ -33,6 +33,9 @@ const statusText = (status: DeviceView["status"], locale: Locale): string => {
   }
 };
 
+const resolutionText = (resolution: DeviceView["resolution"]): string =>
+  resolution ? `${resolution.width}×${resolution.height}` : "—";
+
 const lastConnected = (timestamp: number | undefined, locale: Locale): string => {
   if (!timestamp) return t(locale, "devices.neverConnected");
   return new Intl.DateTimeFormat(locale, {
@@ -47,7 +50,7 @@ export const Devices: Component<DevicesProps> = (props) => {
   const activeCore = () =>
     props.data.cores.find((core) => core.id === props.data.settings.activeCoreId) ?? props.data.cores[0];
   return (
-    <div class="page page--devices">
+    <div class="page">
       <header class="page-head">
         <div>
           <h1>{t(props.locale, "devices.title")}</h1>
@@ -78,25 +81,28 @@ export const Devices: Component<DevicesProps> = (props) => {
         }
       >
         <div class="device-grid">
-          <For each={props.data.devices}>
+          {/* Keyed by profile id: a bootstrap reload decodes every device into a new
+              object, and identity keying would remount the card (refading its
+              screenshot) for nothing. */}
+          <For each={props.data.devices} keyed={(device) => device.profile.id}>
             {(device) => {
-              const connected = () => device.status === "online" || device.status === "running";
+              const connected = () => device().status === "online" || device().status === "running";
               return (
-                <article class={connected() ? "device-card device-card--online" : "device-card"}>
+                <article class={["device-card", { "device-card--online": connected() }]}>
                   <header class="device-card-head">
                     <span class="device-mark">
                       <Icon name="smartphone" />
                     </span>
                     <div class="device-heading">
-                      <h2>{device.profile.name}</h2>
-                      <p class="mono-line">{device.profile.address}</p>
+                      <h2>{device().profile.name}</h2>
+                      <p class="mono-line">{device().profile.address}</p>
                     </div>
-                    <StatusPill status={device.status} label={statusText(device.status, props.locale)} compact />
+                    <StatusPill status={device().status} label={statusText(device().status, props.locale)} compact />
                   </header>
 
                   <div class="device-shot">
                     <Show
-                      when={props.screenshots[device.profile.id]}
+                      when={props.screenshots[device().profile.id]}
                       fallback={
                         <div class="device-shot-empty">
                           <Icon name="camera" />
@@ -105,7 +111,7 @@ export const Devices: Component<DevicesProps> = (props) => {
                             size="sm"
                             variant="ghost"
                             disabled={!connected() || props.busy}
-                            onClick={() => props.onScreenshot(device.profile.id)}
+                            onClick={() => props.onScreenshot(device().profile.id)}
                           >
                             {t(props.locale, "devices.screenshot")}
                           </Button>
@@ -114,12 +120,12 @@ export const Devices: Component<DevicesProps> = (props) => {
                     >
                       {(shot) => (
                         <>
-                          <img class="device-shot-image" src={shot().url} alt={`${device.profile.name} screenshot`} />
+                          <img class="device-shot-image" src={shot().url} alt={`${device().profile.name} screenshot`} />
                           <span class="device-shot-meta">
                             <span>
                               {shot().width}×{shot().height} · {shot().durationMs} ms
                             </span>
-                            <Show when={device.screencapCost}>
+                            <Show when={device().screencapCost}>
                               {(cost) => (
                                 <span>
                                   core {cost().min} / {cost().avg} / {cost().max} ms
@@ -130,13 +136,13 @@ export const Devices: Component<DevicesProps> = (props) => {
                         </>
                       )}
                     </Show>
-                    <Show when={props.screenshots[device.profile.id]}>
+                    <Show when={props.screenshots[device().profile.id]}>
                       <button
                         type="button"
                         class="device-shot-refresh icon-button"
                         title={t(props.locale, "devices.screenshot")}
                         disabled={!connected() || props.busy}
-                        onClick={() => props.onScreenshot(device.profile.id)}
+                        onClick={() => props.onScreenshot(device().profile.id)}
                       >
                         <Icon name="refresh-cw" />
                       </button>
@@ -146,23 +152,23 @@ export const Devices: Component<DevicesProps> = (props) => {
                   <dl class="device-meta">
                     <div>
                       <dt>{t(props.locale, "common.clientType")}</dt>
-                      <dd>{device.profile.clientType}</dd>
+                      <dd>{device().profile.clientType}</dd>
                     </div>
                     <div>
                       <dt>{t(props.locale, "common.connectionConfig")}</dt>
-                      <dd>{device.profile.config}</dd>
+                      <dd>{device().profile.config}</dd>
                     </div>
                     <div>
                       <dt>{t(props.locale, "devices.resolution")}</dt>
-                      <dd>{device.resolution ? `${device.resolution.width}×${device.resolution.height}` : "—"}</dd>
+                      <dd>{resolutionText(device().resolution)}</dd>
                     </div>
                     <div>
                       <dt>{t(props.locale, "devices.lastConnected")}</dt>
-                      <dd>{lastConnected(device.profile.lastConnectedAt, props.locale)}</dd>
+                      <dd>{lastConnected(device().profile.lastConnectedAt, props.locale)}</dd>
                     </div>
                   </dl>
 
-                  <Show when={device.lastError}>
+                  <Show when={device().lastError}>
                     {(error) => (
                       <p class="device-error">
                         <Icon name="alert-triangle" />
@@ -178,20 +184,20 @@ export const Devices: Component<DevicesProps> = (props) => {
                       disabled={
                         props.busy ||
                         !activeCore() ||
-                        (!connected() && (props.connectBusy || device.status === "connecting"))
+                        (!connected() && (props.connectBusy || device().status === "connecting"))
                       }
                       onClick={() =>
-                        connected() ? props.onDisconnect(device.profile.id) : props.onConnect(device.profile.id)
+                        connected() ? props.onDisconnect(device().profile.id) : props.onConnect(device().profile.id)
                       }
                     >
-                      <Icon name={connected() ? "wifi-off" : device.status === "connecting" ? "loader" : "wifi"} />
+                      <Icon name={connected() ? "wifi-off" : device().status === "connecting" ? "loader" : "wifi"} />
                       {connected()
                         ? t(props.locale, "common.disconnect")
-                        : device.status === "connecting"
+                        : device().status === "connecting"
                           ? t(props.locale, "status.connecting")
                           : t(props.locale, "common.connect")}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => props.onRemove(device.profile.id)}>
+                    <Button size="sm" variant="ghost" onClick={() => props.onRemove(device().profile.id)}>
                       <Icon name="trash-2" />
                       {t(props.locale, "common.remove")}
                     </Button>

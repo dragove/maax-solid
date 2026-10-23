@@ -12,6 +12,11 @@ import type { DesktopBridge } from "./desktop";
  */
 export type AppRuntime = ManagedRuntime.ManagedRuntime<DesktopBridge, never>;
 
+/**
+ * Optional by design: `createRuntime` looks up the parent runtime to share its
+ * memo map, and the root of the tree legitimately has none. `useAppRuntime`
+ * turns "not provided" into one typed error instead of a null at every read.
+ */
 export const RuntimeContext = createContext<AppRuntime | null>(null);
 
 /** Build a ManagedRuntime owned by the current Solid subtree. */

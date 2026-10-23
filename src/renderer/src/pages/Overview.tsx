@@ -77,7 +77,7 @@ export const Overview: Component<OverviewProps> = (props) => {
   });
 
   /** Explain why the CTA is disabled or what the run is doing. */
-  const hint = (): string | undefined => {
+  const hint = createMemo<string | undefined>(() => {
     if (connecting()) return t(props.locale, "overview.connectingHint");
     // Another device connecting keeps this device's Connect CTA disabled.
     if (props.connectBusy && !connected()) return t(props.locale, "overview.connectingHint");
@@ -95,7 +95,7 @@ export const Overview: Component<OverviewProps> = (props) => {
     if (connected() && enabledTasks().length === 0) return t(props.locale, "overview.noEnabledHint");
     if (props.busy) return t(props.locale, "common.working");
     return undefined;
-  };
+  });
 
   return (
     <div class="page page--overview">
@@ -238,7 +238,7 @@ export const Overview: Component<OverviewProps> = (props) => {
       </Show>
 
       <section class="workspace">
-        <article class="panel panel--queue">
+        <article class="panel">
           <div class="panel-head">
             <div>
               <h3>{props.plan?.name ?? t(props.locale, "overview.planSummary")}</h3>
@@ -279,7 +279,7 @@ export const Overview: Component<OverviewProps> = (props) => {
           </Show>
         </article>
 
-        <article class="panel panel--activity">
+        <article class="panel">
           <div class="panel-head">
             <div>
               <h3>{t(props.locale, "overview.activity")}</h3>
@@ -293,7 +293,7 @@ export const Overview: Component<OverviewProps> = (props) => {
             <ul class="activity-list">
               <For each={lastLogs()}>
                 {(entry) => (
-                  <li class={`activity-line activity-line--${entry.level}`}>
+                  <li class={["activity-line", `activity-line--${entry.level}`]}>
                     <span class="activity-time">{entry.time}</span>
                     <span>{firstLine(entry.message)}</span>
                   </li>

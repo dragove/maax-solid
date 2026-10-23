@@ -392,7 +392,15 @@ export const AppShell: Component<AppShellProps> = (props) => {
   onSettled(() => {
     void runtime
       .runPromise(command(COMMANDS.stageCatalog, undefined))
-      .then((catalog) => setStages(catalog.entries))
+      .then((catalog) => {
+        setStages(catalog.entries);
+        // The fallback list is usable, so this is a warning rather than an
+        // error: without it the only symptom of a failed fetch is a missing
+        // event group in the stage picker.
+        if (catalog.warning) {
+          notify({ kind: "warning", title: tr("tasks.stageWarning"), message: catalog.warning });
+        }
+      })
       .catch((error: unknown) => console.warn("Stage catalog unavailable", error));
     const unsubscribe = subscribeEvents(applyEvent);
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -634,6 +642,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
   // Resource rows and the release banner live on the settings page; refresh them
   // when it opens or the core list changes, and never poll in the background.
+  // The apply phase re-runs on any churn in the compute (every bootstrap push
+  // recreates `data`), so the last key is remembered to keep this to the two
+  // events it is named for.
+  let lastCoreKey: string | undefined;
   createEffect(
     () =>
       view() === "settings"
@@ -642,6 +654,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
             .join("|")
         : "",
     (coreIds) => {
+      if (coreIds === lastCoreKey) return;
+      lastCoreKey = coreIds;
       if (coreIds === "") return;
       void loadCoreRelease();
       for (const coreId of coreIds.split("|")) void loadResourceStatus(coreId);
@@ -1061,18 +1075,18 @@ export const AppShell: Component<AppShellProps> = (props) => {
         </div>
 
         <nav class="sidebar-nav" aria-label="Main navigation">
-          {NAV.map((item) => (
-            <button
-              type="button"
-              class={view() === item.view ? "nav-item nav-item--active" : "nav-item"}
-              onClick={() => {
-                navigate(item.view);
-              }}
-            >
-              <Icon name={item.icon} />
-              <span>{tr(item.key)}</span>
-            </button>
-          ))}
+          <For each={NAV}>
+            {(item) => (
+              <button
+                type="button"
+                class={["nav-item", { "nav-item--active": view() === item.view }]}
+                onClick={() => navigate(item.view)}
+              >
+                <Icon name={item.icon} />
+                <span>{tr(item.key)}</span>
+              </button>
+            )}
+          </For>
         </nav>
 
         <div class="sidebar-foot">

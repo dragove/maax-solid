@@ -8,30 +8,25 @@ interface StatusPillProps {
   readonly compact?: boolean;
 }
 
+const isActive = (status: string): boolean => status === "running" || status === "starting" || status === "connecting";
+
 const toneFor = (status: string): string => {
   if (status === "online" || status === "ready") return "ok";
-  if (status === "running" || status === "starting" || status === "connecting") return "busy";
+  if (isActive(status)) return "busy";
   if (status === "error" || status === "crashed") return "bad";
   return "muted";
 };
 
 const iconFor = (status: string): string => {
   if (status === "online" || status === "ready") return "wifi";
-  if (status === "running" || status === "starting" || status === "connecting") return "loader";
+  if (isActive(status)) return "loader";
   if (status === "error" || status === "crashed") return "alert-triangle";
   return "wifi-off";
 };
 
 export const StatusPill: Component<StatusPillProps> = (props) => (
   <span class={`status-pill status-pill--${toneFor(props.status)}`}>
-    <Icon
-      name={iconFor(props.status)}
-      class={
-        props.status === "starting" || props.status === "connecting" || props.status === "running"
-          ? "spin"
-          : "status-icon"
-      }
-    />
+    <Icon name={iconFor(props.status)} class={isActive(props.status) ? "spin" : "status-icon"} />
     <span>{props.label}</span>
   </span>
 );

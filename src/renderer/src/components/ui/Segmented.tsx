@@ -81,15 +81,15 @@ export function Segmented<T extends string>(props: SegmentedProps<T>): JSX.Eleme
           transform: `translate(${placement().x}px, ${placement().y}px)`,
         }}
       />
-      <For each={props.options}>
+      <For each={props.options} keyed={false}>
         {(option) => (
           <button
             type="button"
-            class={option.value === props.value ? "segmented-item segmented-item--on" : "segmented-item"}
-            data-active={option.value === props.value ? "true" : "false"}
-            onClick={() => props.onChange(option.value)}
+            class={["segmented-item", { "segmented-item--on": option().value === props.value }]}
+            data-active={option().value === props.value ? "true" : "false"}
+            onClick={() => props.onChange(option().value)}
           >
-            {option.label}
+            {option().label}
           </button>
         )}
       </For>

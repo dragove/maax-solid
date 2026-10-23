@@ -1403,10 +1403,7 @@ export const ApplicationLive: Layer.Layer<
       }).pipe(
         Effect.orElseSucceed(() => ({
           entries: [] as StageCatalogEntry[],
-          warning:
-            locale === "zh-CN"
-              ? "活动关卡获取失败，已显示常驻推荐关卡。"
-              : "Could not load event stages; showing permanent recommendations.",
+          warning: locale === "zh-CN" ? "已显示常驻推荐关卡。" : "Showing permanent stage recommendations only.",
         })),
       );
 

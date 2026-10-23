@@ -142,7 +142,7 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
       </div>
       <Show when={open()}>
         <div
-          class={dropUp() ? "stage-menu stage-menu--up" : "stage-menu"}
+          class={["stage-menu", { "stage-menu--up": dropUp() }]}
           style={{ "max-height": `${menuMax()}px` }}
           role="listbox"
           onMouseDown={(event) => event.preventDefault()}
@@ -156,7 +156,7 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
                     {(entry) => (
                       <button
                         type="button"
-                        class={entry.value === props.value ? "stage-option stage-option--active" : "stage-option"}
+                        class={["stage-option", { "stage-option--active": entry.value === props.value }]}
                         role="option"
                         aria-selected={entry.value === props.value ? "true" : "false"}
                         onClick={() => select(entry.value)}

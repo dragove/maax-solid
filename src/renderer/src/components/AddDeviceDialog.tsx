@@ -1,4 +1,4 @@
-import { createEffect, createSignal, untrack, type Component } from "solid-js";
+import { For, createEffect, createSignal, untrack, type Component } from "solid-js";
 import type { AppSettings, ClientType, Locale } from "../../../shared/schemas";
 import type { DeviceDraft } from "../../../shared/schemas";
 import { t } from "../i18n/i18n";
@@ -106,9 +106,13 @@ export const AddDeviceDialog: Component<AddDeviceDialogProps> = (props) => {
           <label class="field">
             <span class="field-label">{t(props.locale, "common.connectionConfig")}</span>
             <select class="input" value={config()} onChange={(event) => setConfig(event.currentTarget.value)}>
-              {CONNECTION_PROFILES.map((profile) => (
-                <option value={profile}>{profile}</option>
-              ))}
+              <For each={CONNECTION_PROFILES}>
+                {(profile) => (
+                  <option value={profile} selected={profile === config()}>
+                    {profile}
+                  </option>
+                )}
+              </For>
             </select>
           </label>
           <label class="field">
@@ -118,9 +122,13 @@ export const AddDeviceDialog: Component<AddDeviceDialogProps> = (props) => {
               value={clientType()}
               onChange={(event) => setClientType(event.currentTarget.value as ClientType)}
             >
-              {CLIENT_TYPES.map((client) => (
-                <option value={client}>{client}</option>
-              ))}
+              <For each={CLIENT_TYPES}>
+                {(client) => (
+                  <option value={client} selected={client === clientType()}>
+                    {client}
+                  </option>
+                )}
+              </For>
             </select>
           </label>
         </div>

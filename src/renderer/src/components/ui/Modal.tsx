@@ -60,10 +60,10 @@ export const Modal: Component<ModalProps> = (props) => {
 
   return (
     <Show when={props.open || hold()}>
-      <div class={closing() ? "modal-layer modal-layer--closing" : "modal-layer"}>
+      <div class={["modal-layer", { "modal-layer--closing": closing() }]}>
         <button class="modal-backdrop" type="button" aria-label="Close" onClick={props.onClose} />
         <dialog
-          class={props.wide ? "modal modal--wide" : "modal"}
+          class={["modal", { "modal--wide": props.wide }]}
           open
           aria-modal="true"
           onCancel={(event) => {

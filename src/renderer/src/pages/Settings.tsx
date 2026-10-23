@@ -169,7 +169,7 @@ export const Settings: Component<SettingsProps> = (props) => {
             </header>
             <Show when={props.coreRelease}>
               {(release) => (
-                <div class={release().available ? "core-release core-release--new" : "core-release"}>
+                <div class={["core-release", { "core-release--new": release().available }]}>
                   <Icon name={release().available ? "sparkles" : "check"} />
                   <span>
                     {t(props.locale, release().available ? "settings.coreUpdateAvailable" : "settings.coreUpToDate")}
@@ -246,7 +246,7 @@ export const Settings: Component<SettingsProps> = (props) => {
                       return activeIndex >= 0 && index() > activeIndex;
                     };
                     return (
-                      <li class={active() ? "core-row core-row--active" : "core-row"}>
+                      <li class={["core-row", { "core-row--active": active() }]}>
                         <div class="core-row-top">
                           <div class="core-main">
                             <div class="core-title">
@@ -403,7 +403,13 @@ export const Settings: Component<SettingsProps> = (props) => {
                   value={settings().clientType}
                   onChange={(event) => props.onUpdateSettings({ clientType: event.currentTarget.value as ClientType })}
                 >
-                  <For each={clientTypes}>{(client) => <option value={client}>{client}</option>}</For>
+                  <For each={clientTypes}>
+                    {(client) => (
+                      <option value={client} selected={client === settings().clientType}>
+                        {client}
+                      </option>
+                    )}
+                  </For>
                 </select>
               </label>
               <label class="field">
@@ -413,7 +419,13 @@ export const Settings: Component<SettingsProps> = (props) => {
                   value={settings().touchMode}
                   onChange={(event) => props.onUpdateSettings({ touchMode: event.currentTarget.value as TouchMode })}
                 >
-                  <For each={touchModes}>{(mode) => <option value={mode}>{mode}</option>}</For>
+                  <For each={touchModes}>
+                    {(mode) => (
+                      <option value={mode} selected={mode === settings().touchMode}>
+                        {mode}
+                      </option>
+                    )}
+                  </For>
                 </select>
               </label>
             </div>
@@ -424,7 +436,13 @@ export const Settings: Component<SettingsProps> = (props) => {
                 value={settings().connectionConfig}
                 onChange={(event) => props.onUpdateSettings({ connectionConfig: event.currentTarget.value })}
               >
-                <For each={connectionProfiles}>{(profile) => <option value={profile}>{profile}</option>}</For>
+                <For each={connectionProfiles}>
+                  {(profile) => (
+                    <option value={profile} selected={profile === settings().connectionConfig}>
+                      {profile}
+                    </option>
+                  )}
+                </For>
               </select>
             </label>
           </section>

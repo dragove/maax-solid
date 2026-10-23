@@ -23,11 +23,12 @@ interface SwapStackProps {
  */
 export const SwapStack: Component<SwapStackProps> = (props) => (
   <span class="swap-stack" title={props.title}>
-    <For each={props.items}>
-      {(item) => {
-        const on = () => item.id === props.current;
-        return <span class={on() ? "swap-stack-item swap-stack-item--current" : "swap-stack-item"}>{item.node}</span>;
-      }}
+    <For each={props.items} keyed={false}>
+      {(item) => (
+        <span class={["swap-stack-item", { "swap-stack-item--current": item().id === props.current }]}>
+          {item().node}
+        </span>
+      )}
     </For>
   </span>
 );

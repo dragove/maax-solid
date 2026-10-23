@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup, type Component } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, untrack, type Component } from "solid-js";
 import type {
   CopilotLevel,
   CopilotSearchItem,
@@ -142,7 +142,9 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
       }
       if (searched) return;
       searched = true;
-      void search(1, currentFilters());
+      // The apply phase is not a tracking scope, so the initial filter snapshot
+      // (and the `loading()` guard inside `search`) is an explicit untracked read.
+      void untrack(() => search(1, currentFilters()));
     },
   );
 
@@ -335,7 +337,7 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
         <ul class="browser-list">
           <For each={result()?.items ?? []}>
             {(item) => (
-              <li class={detailId() === item.id ? "browser-item browser-item--open" : "browser-item"}>
+              <li class={["browser-item", { "browser-item--open": detailId() === item.id }]}>
                 <div class="browser-row">
                   <div class="browser-main">
                     <div class="browser-title">
@@ -343,7 +345,7 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
                       <span class="browser-code">{stageLabel(item)}</span>
                       <For each={modesOf(item.difficulty)}>
                         {(mode) => (
-                          <span class={mode === "raid" ? "copilot-mode copilot-mode--raid" : "copilot-mode"}>
+                          <span class={["copilot-mode", { "copilot-mode--raid": mode === "raid" }]}>
                             {t(props.locale, mode === "raid" ? "copilot.raid" : "copilot.normal")}
                           </span>
                         )}

@@ -12,7 +12,7 @@ import type {
 } from "../../../shared/schemas";
 import { COMMANDS } from "../../../shared/ipc";
 import { matchRecruitment, recruitmentTagLabel, type RecruitmentMatch } from "../../../shared/recruitment";
-import { command } from "../effect/desktop";
+import { command, describeError } from "../effect/desktop";
 import { runEffect } from "../effect/solid-effect";
 import { t } from "../i18n/i18n";
 import { Icon } from "../components/ui/Icon";
@@ -79,7 +79,7 @@ const RecruitmentPanel: Component<{ locale: Locale; data: RecruitmentData }> = (
             {(tag) => (
               <button
                 type="button"
-                class={selected().includes(tag.name) ? "chip chip--on" : "chip"}
+                class={["chip", { "chip--on": selected().includes(tag.name) }]}
                 aria-pressed={selected().includes(tag.name) ? "true" : "false"}
                 onClick={() => toggle(tag.name)}
               >
@@ -106,7 +106,7 @@ const RecruitmentPanel: Component<{ locale: Locale; data: RecruitmentData }> = (
         <div class="recruit-summary">
           <div class="recruit-guarantee">
             <span>{t(props.locale, "tools.recruitmentGuaranteed")}</span>
-            <strong class={match().guaranteedRarity >= 4 ? "rarity-badge rarity-badge--good" : "rarity-badge"}>
+            <strong class={["rarity-badge", { "rarity-badge--good": match().guaranteedRarity >= 4 }]}>
               {rarityLabel(match().guaranteedRarity)}
             </strong>
           </div>
@@ -145,7 +145,7 @@ const RecruitmentPanel: Component<{ locale: Locale; data: RecruitmentData }> = (
                   <strong>{props.locale === "en-US" ? operator.nameEn : operator.name}</strong>
                   <span class="recruit-oper-alt">{props.locale === "en-US" ? operator.name : operator.nameEn}</span>
                 </div>
-                <span class={operator.rarity >= 4 ? "rarity-badge rarity-badge--good" : "rarity-badge"}>
+                <span class={["rarity-badge", { "rarity-badge--good": operator.rarity >= 4 }]}>
                   {rarityLabel(operator.rarity)}
                 </span>
               </div>
@@ -245,25 +245,27 @@ const OperatorPanel: Component<{
             </Show>
           </div>
           <div class="oper-grid">
-            <For each={filtered()}>
+            {/* A scan pushes a fresh snapshot per callback batch; keying by the operator id
+                keeps the cards mounted instead of rebuilding the whole grid. */}
+            <For each={filtered()} keyed={(entry) => entry.id}>
               {(entry) => (
                 <article class="oper-card">
                   <div class="oper-card-top">
-                    <strong>{props.locale === "en-US" ? entry.nameEn : entry.name}</strong>
-                    <span class={entry.rarity >= 4 ? "rarity-badge rarity-badge--good" : "rarity-badge"}>
-                      {rarityLabel(entry.rarity)}
+                    <strong>{props.locale === "en-US" ? entry().nameEn : entry().name}</strong>
+                    <span class={["rarity-badge", { "rarity-badge--good": entry().rarity >= 4 }]}>
+                      {rarityLabel(entry().rarity)}
                     </span>
                   </div>
-                  <span class="oper-card-alt">{props.locale === "en-US" ? entry.name : entry.nameEn}</span>
+                  <span class="oper-card-alt">{props.locale === "en-US" ? entry().name : entry().nameEn}</span>
                   <div class="oper-card-meta">
                     <span>
-                      {t(props.locale, "tools.elite")} {entry.elite ?? 0}
+                      {t(props.locale, "tools.elite")} {entry().elite ?? 0}
                     </span>
                     <span>
-                      {t(props.locale, "tools.level")} {entry.level ?? "—"}
+                      {t(props.locale, "tools.level")} {entry().level ?? "—"}
                     </span>
                     <span>
-                      {t(props.locale, "tools.potential")} {entry.potential ?? "—"}
+                      {t(props.locale, "tools.potential")} {entry().potential ?? "—"}
                     </span>
                   </div>
                 </article>
@@ -357,16 +359,16 @@ const DepotPanel: Component<{
             </span>
           </div>
           <ul class="depot-list">
-            <For each={filtered()}>
+            <For each={filtered()} keyed={(item) => item.itemId}>
               {(item) => (
                 <li class="depot-row">
                   <div class="depot-main">
-                    <strong>{item.name}</strong>
-                    <span class="mono-line">#{item.itemId}</span>
+                    <strong>{item().name}</strong>
+                    <span class="mono-line">#{item().itemId}</span>
                   </div>
-                  <span class="tag">{item.group}</span>
+                  <span class="tag">{item().group}</span>
                   <span class="depot-count">
-                    {t(props.locale, "tools.count")} <strong>{item.count}</strong>
+                    {t(props.locale, "tools.count")} <strong>{item().count}</strong>
                   </span>
                 </li>
               )}
@@ -398,7 +400,7 @@ export const Tools: Component<ToolsProps> = (props) => {
   };
 
   return (
-    <div class="page page--tools">
+    <div class="page">
       <header class="page-head">
         <div>
           <h1>{t(props.locale, "tools.title")}</h1>
@@ -438,11 +440,12 @@ export const Tools: Component<ToolsProps> = (props) => {
           }
         >
           <Errored
-            fallback={(error: unknown) => (
+            fallback={(error) => (
               <div class="tool-empty">
                 <Icon name="alert-triangle" />
                 <p>{t(props.locale, "tools.noCore")}</p>
-                <span class="mono-line">{error instanceof Error ? error.message : String(error)}</span>
+                {/* `error` is an accessor, not the thrown value. */}
+                <span class="mono-line">{describeError(error())}</span>
               </div>
             )}
           >

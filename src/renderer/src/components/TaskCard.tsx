@@ -217,7 +217,11 @@ const FieldControl: Component<{
             }}
           >
             <For each={options()}>
-              {(option) => <option value={String(option.value)}>{pick(props.locale, option.label)}</option>}
+              {(option) => (
+                <option value={String(option.value)} selected={String(option.value) === String(current())}>
+                  {pick(props.locale, option.label)}
+                </option>
+              )}
             </For>
           </select>
         </label>
@@ -237,7 +241,7 @@ const FieldControl: Component<{
                 return (
                   <button
                     type="button"
-                    class={on() ? "chip chip--on" : "chip"}
+                    class={["chip", { "chip--on": on() }]}
                     onClick={() =>
                       props.onChange(
                         on()
@@ -261,7 +265,7 @@ const FieldControl: Component<{
         <div class="field field--wide" title={description()}>
           <span class="field-label">{label()}</span>
           <div class="file-field">
-            <span class={name() === "" ? "file-name file-name--empty" : "file-name"}>
+            <span class={["file-name", { "file-name--empty": name() === "" }]}>
               {name() || (props.field.placeholder ? pick(props.locale, props.field.placeholder) : "—")}
             </span>
             <Button size="sm" variant="secondary" onClick={props.onPickFile}>
@@ -371,20 +375,22 @@ const CopilotBatch: Component<{
         fallback={<span class="copilot-empty">{t(props.locale, "copilot.empty")}</span>}
       >
         <ul class="copilot-items">
-          <For each={props.items}>
+          {/* Keyed by entry id: the batch is rewritten through IPC on every add/remove,
+              and an identity key would replay the row entrance animation. */}
+          <For each={props.items} keyed={(item) => item.id}>
             {(item) => (
               <li class="copilot-item">
-                <span class={item.isRaid ? "copilot-mode copilot-mode--raid" : "copilot-mode"}>
-                  {t(props.locale, item.isRaid ? "copilot.raid" : "copilot.normal")}
+                <span class={["copilot-mode", { "copilot-mode--raid": item().isRaid }]}>
+                  {t(props.locale, item().isRaid ? "copilot.raid" : "copilot.normal")}
                 </span>
-                <span class="copilot-title">{item.title || item.stage}</span>
-                <span class="copilot-stage">{item.stage}</span>
+                <span class="copilot-title">{item().title || item().stage}</span>
+                <span class="copilot-stage">{item().stage}</span>
                 <button
                   type="button"
                   class="icon-button"
                   title={t(props.locale, "common.remove")}
                   disabled={props.disabled === true}
-                  onClick={() => props.onRemove(item.id)}
+                  onClick={() => props.onRemove(item().id)}
                 >
                   <Icon name="x" />
                 </button>
@@ -431,7 +437,14 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
 
   return (
     <article
-      class={`task-card${!props.task.enabled ? " task-card--disabled" : ""}${props.expanded ? " task-card--expanded" : ""}${props.runTask?.status === "running" ? " task-card--running" : ""}`}
+      class={[
+        "task-card",
+        {
+          "task-card--disabled": !props.task.enabled,
+          "task-card--expanded": props.expanded,
+          "task-card--running": props.runTask?.status === "running",
+        },
+      ]}
       draggable={!props.disabled ? "true" : "false"}
       onDragStart={props.onDragStart}
       onDragOver={props.onDragOver}

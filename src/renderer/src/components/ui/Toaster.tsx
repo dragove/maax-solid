@@ -128,7 +128,7 @@ export const Toaster: Component = () => (
       <For each={toasts()}>
         {(toast) => (
           <li
-            class={leaving().has(toast.id) ? `toast toast--${toast.kind} toast--leaving` : `toast toast--${toast.kind}`}
+            class={["toast", `toast--${toast.kind}`, { "toast--leaving": leaving().has(toast.id) }]}
             role={toast.kind === "error" ? "alert" : "status"}
             onPointerEnter={() => pause(toast)}
             onPointerLeave={() => resume(toast)}
