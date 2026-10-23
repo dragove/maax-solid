@@ -1,6 +1,6 @@
 ---
-name: solid2
-description: Solid 2 primer for coding agents. Use when writing, reviewing or migrating Solid 2.0 code. The API differs from Solid 1.x and from React; read this before generating
+name: solid-2.0
+description: Solid 2.0 primer for coding agents. Use when writing, reviewing or migrating Solid 2.0 code (solid-js 2.x, @solidjs/web). The API differs from Solid 1.x and from React; read this before generating, then check unfamiliar names against node_modules/solid-js/CHEATSHEET.md.
 ---
 
 # Solid 2.0 for agents
@@ -49,12 +49,17 @@ Nothing in the left column exists in 2.0.
 | `classList={{ a: x() }}`                       | `class={{ a: x() }}` or `class={["base", { a: x() }]}`            |
 | `use:dir={x}` / `attr:` / `on:` / `tabIndex`   | `ref={dir(x)}` / plain attributes / `onClick` / `tabindex`        |
 | `onError` / `catchError`                       | `<Errored>` or `createEffect(c, { effect, error })`               |
-| `from(source)` / `observable`                  | return an AsyncIterable from a computation                        |
+| `from(source)` / `observable`                  | `createMemo(() => from(source))`; push out with `createEffect`    |
 
 Also:
 
 - Reads lag writes: `setX(1); x()` still returns the old value until the
   microtask or `flush()`. In tests, `flush()` before asserting.
+- Effects never compare: when the compute re-runs, apply and the previous
+  cleanup run again even if compute returned an equal value. To skip work on
+  an unchanged value, read a memo in the compute:
+  `const active = createMemo(() => status() === "active"); createEffect(() => active(), v => ...)`.
+  The memo's `equals` (default `===`) stops the re-run.
 - No writes inside a memo, effect compute, or component body (dev throws).
   Write from event handlers, `onSettled`, or actions.
 - No reactive reads at the top of a component body; read in JSX, a memo, or
@@ -63,6 +68,14 @@ Also:
 - `<For>`: default gives a raw item and an index accessor; `keyed={false}`
   gives an item accessor and a plain number. `<Repeat>`: `i` is a number.
 - `onClick={cond() ? a : b}` binds once; decide inside a stable handler.
+- `on:`, `oncapture:`, `attr:`, `bool:`, `use:` and `classList` on a native
+  element are compile errors; the message names the replacement above.
+- Inputs aren't strictly controlled: `value={x()}` writes only when the
+  binding re-runs — and a change to any other dynamic attribute in the same
+  template re-runs it (dev warns `UNCOMMITTED_INPUT_OVERWRITTEN` when that
+  erases typed text). Keep typing in a draft signal (`onInput`), commit on
+  `onChange`/submit; when a handler rejects input, also set
+  `e.currentTarget.value = next` (an unchanged signal won't revert the DOM).
 
 ## Primitives to reach for
 
@@ -81,21 +94,8 @@ Also:
 
 ## Pointers
 
-- Quick reference, offline: `node_modules/solid-js/CHEATSHEET.md`. That package
-  ships one skill only, `node_modules/solid-js/skills/reactivity-diagnostics/`;
-  there is no `solid-2.0-cheatsheet` skill.
-- Official docs, downloaded under this skill's `references/` (snapshot of
-  2026-10-17). All paths below are relative to the skill directory:
-  - `references/llms.txt` — index of the v2 docs, one line per page with a
-    link; find the page here, then read that page's own `.md` for detail.
-    Its links use the preview host `v2-rebuild--solid-docs-v2.netlify.app`,
-    not `v2.solidjs.com`; both serve the same content.
-  - `references/llms-small.txt` — one line per `solid-js` export plus the
-    React-vs-Solid and 1.x→2.0 rules; the fastest check when the cheatsheet
-    and this file do not answer a naming question.
-  - `references/llms-full.txt` — the whole corpus (~42k lines, 1.7 MB). Grep
-    it, never read it whole, e.g.
-    `grep -n 'createProjection' references/llms-full.txt`.
+- Full reference: `node_modules/solid-js/CHEATSHEET.md`; the same text is
+  the `solid-2.0-cheatsheet` skill in `node_modules/solid-js/skills/`.
 - Diagnostics: dev builds print `[CODE] message` plus an `in <App> › …`
   owner line and, when the build wrote source locations, an
   `at src/App.tsx:18:3` line. The first report of each code ends with a
@@ -109,9 +109,6 @@ Also:
   `costs`, `end`).
 - Lint: `eslint-plugin-solid`, config `v2`
   (`import solid from "eslint-plugin-solid/configs/v2"`) or `v2-strict`.
-- Live docs: https://v2.solidjs.com (`/llms.txt`, `/llms-small.txt`,
-  `/llms-full.txt`). Refresh the local copies with
-  `cd <this skill dir>/references && for f in llms llms-small llms-full; do curl -sSO "https://v2.solidjs.com/$f.txt"; done`.
-- Migration: `references/llms.txt` lists six migration pages (from Solid 1.x,
-  data fetching, SolidStart, Router, Meta, React); read the matching one
-  before migrating.
+- Docs: https://v2.solidjs.com (Solid 2.0 docs; `/llms.txt` and
+  `/llms-full.txt` for agents). Migration guide: `documentation/solid-2.0/MIGRATION.md`
+  in the repository.

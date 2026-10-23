@@ -24,7 +24,8 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
 
 ## 高频回归红线
 
-- **`<For>` 默认按对象引用 key**。位置型列表若原地编辑，用 `keyed={false}`；该模式给 item accessor 和普通 number 索引，不要写 `index()`。否则更新会重建行并丢失输入焦点。
+- **`<For>` 默认按对象引用 key**。位置型列表若原地编辑，用 `keyed={false}`；该模式给 item accessor 和普通 number 索引，不要写 `index()`。否则更新会重建行并丢失输入焦点。整批替换的实体列表（IPC 快照、扫描批次）要按实体自身 id key（`keyed={(row) => row.id}`），否则每批更新都会重挂载所有行并重放入场动画。
+- **`<Errored>` 的 `fallback` 收到的是 error accessor**：写 `error()`，不要直接把 `error` 插进 JSX（会渲染函数源码）；面向用户的错误文案统一用 `effect/desktop.ts` 的 `describeError`。
 - **组件体只运行一次**。不要把 `props.value` 缓存进普通常量；多选状态、当前选项等必须经 accessor/memo 读取，否则数据已保存但视觉状态不更新。
 - **动态原生 `<select>`** 不要只绑定静态 `value`；用响应式 current 比较 `<option selected={...}>`，避免选项挂载前设置 value 导致显示错误。
 - **Solid dev 诊断即缺陷**。`pnpm dev` 控制台不允许残留 `STRICT_READ_UNTRACKED` / `PENDING_ASYNC_*`：组件体和 `createEffect` 的 apply 段都不是追踪作用域，一次性快照写 `untrack(() => props.x)`，其余读值移入 JSX / memo / compute。诊断报出的名字可能是 props getter 穿透到的父信号，不一定是当前 prop。

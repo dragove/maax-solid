@@ -46,6 +46,24 @@ whose rows are edited in place, use `keyed={false}` so the row survives updates:
 - If rows have stable unique IDs, keying by ID is an equally valid choice; the
   rule is to choose identity deliberately, not to inherit reference identity by
   accident.
+- **Entity lists that update in place need the entity's own id.** A bootstrap
+  reload, a `tools-updated` scan batch, a history append or a batch save
+  decodes a whole new array, so identity keying remounts every row: entrance
+  animations replay (`.copilot-item`, `.device-shot-image`), a hundred-row grid
+  is rebuilt per batch, and mounted state is thrown away. Use
+  `keyed={(row) => row.id}` (or `itemId`, `profile.id`) and read `row()`.
+  Lists that only change when the user re-fetches them (core rows) may keep
+  identity keying: the remount there is the refresh.
+- **Fixed-position slot lists rebuild their array on every parent update.** The
+  `SwapStack` action slot, the `Segmented` options and the setup steps all pass
+  freshly built arrays, so they must be `keyed={false}`; otherwise the slot
+  spans are recreated and the cross-fade never runs. The wrappers survive, but
+  the JSX the caller passes as a slot node is still rebuilt with the array — do
+  not put an entrance animation on it.
+- Filtering a list of stable entity objects needs no key; keying matters when
+  the source array is re-decoded (bullet above). A derived array of freshly
+  built descriptors (`steps()`, `[{ id: "run", node }]`) can never match by
+  identity, so `keyed={false}` is the only useful keying there.
 - Symptom of the default mistake: typing in a row pauses or loses focus, and a
   save indicator flickers on every keystroke because the input is recreated.
 
@@ -98,7 +116,19 @@ createEffect(
 ```
 
 Use `untrack()` when a one-time snapshot is the intended semantics; otherwise
-move the read into JSX, a memo, or the compute function.
+move the read into JSX, a memo, or the compute function. A whole imperative call
+can be the snapshot: `void untrack(() => search(1, currentFilters()))` covers the
+filters it reads _and_ the `loading()` guard inside `search` — that is
+`CopilotBrowser`'s first-search effect.
+
+### Non-idempotent effect applies
+
+`Collapse` measures `scrollHeight`, so its apply may only run on a real
+open/close flip. An open `StagePicker` flyout is absolutely positioned but still
+counts into that `scrollHeight`, so a re-run on unrelated churn (any keystroke
+into a task param) grows the card to the menu height and snaps it back. Refresh
+effects keep the same guard by key: `Runs` `lastDeviceId`, `CopilotBrowser`
+`searched`, `AppShell` `lastCoreKey`.
 
 ### Branching on a prop inside a component body
 
@@ -156,7 +186,11 @@ Pick the curve by what the element does, not by open/close:
   `flush`; `.content` carries `view-transition-name: content`, so the sidebar
   and topbar are not captured. Never wrap every `setView` call again by hand,
   and never add a CSS entrance to `.page` — the new snapshot would be captured
-  mid-fade.
+  mid-fade. A reload or a second transition while one is still running makes
+  Chromium skip the first and reject its own `ViewTransition.ready` with
+  `AbortError: Transition was skipped`; two empty
+  `document.startViewTransition` calls reproduce it, so it is platform noise,
+  not an app error.
 - Animate the element that is created, not its page: cards, flyouts, empty
   states, list rows and dialogs carry their own entrance.
 - Solid disposes a `<Show>` branch as soon as the condition flips, so an exit
@@ -194,9 +228,12 @@ Pick the curve by what the element does, not by open/close:
 
 ### Dynamic native controls
 
-When options are rendered dynamically, setting a native `<select value={...}>`
-before those options exist can display the wrong option even when state is
-correct. Make the selection explicit per option:
+Solid 2 writes `<select value>` through `writeSelectValue`: it tries the value,
+remembers it, and re-applies it in a microtask, so options rendered in the same
+frame are covered. Options that arrive later (an async list, hydration) are not
+— the select then shows its first option while state says otherwise. Make the
+selection explicit per option, which also keeps the display correct when the
+option list or the locale is rewritten:
 
 ```tsx
 const current = () => (typeof props.value === "string" ? props.value : "");
@@ -236,32 +273,82 @@ or transforms it. A missing `case` returns `undefined` and surfaces later as
 ### Solid 2 API traps
 
 - `classList` does not exist; use `class={...}` with a string or object.
+- **Class expressions are array/object form.** `class={["btn", { "btn--danger":
+  danger() }]}` — no template literals stitching a base onto conditionals, and
+  no `filter(Boolean).join(" ")`. A pure dynamic suffix stays a template
+  (`class={["log-line", `log-line--${level}`]}`). Falsy array entries are
+  skipped, so `props.class` can sit in the array. Modifier keys need quotes —
+  `{ "toast--leaving": leaving() }`; `--` is not legal in a bare object key.
 - `JSX` is exported by `@solidjs/web`, not `solid-js`.
 - Default `<For>` gives `(item, indexAccessor)`; `keyed={false}` gives
-  `(itemAccessor, number)`.
+  `(itemAccessor, number)`; a key function gives accessors for both.
+- `<Errored>`'s `fallback` receives an **error accessor**, not the thrown
+  value: `fallback={(error) => <p>{describeError(error())}</p>}` (that formatter
+  lives in `effect/desktop.ts`, see IPC below). Rendering `error` prints the
+  accessor's source.
 - Avoid reactive reads at the top of a component body; read in JSX, a memo, or
-  `untrack`.
+  `untrack`. Flow callbacks (`<For>`, `<Show>`, `<Match>`) are owners, not
+  tracking scopes: read their accessor arguments in JSX, not in the callback's
+  first statements.
+- **`onSettled` never runs if its owner disposes before the first settle** —
+  the setup and the cleanup it returns are both dropped. So DOM teardown that
+  must always happen registers `onCleanup` in the component body (`Modal`
+  closing a still-open `<dialog>`, `Collapse` cancelling its animation,
+  `CopilotBrowser` clearing its debounce timers, `createRuntime` disposing the
+  managed runtime). Reach for `onSettled`'s returned cleanup only for work that
+  genuinely starts after the first settle.
 
 ## Renderer diagnostics and styling
 
 `pnpm dev` prints `[renderer:warning]` diagnostics from Solid's dev build.
 Treat each code as a defect, not console noise.
 
-To reproduce without Electron, point a browser at the running Vite dev server
-and stub the bridge in an `addInitScript`: `window.maax.invoke` answers
+### Driving the real renderer
+
+Prefer the real Electron host over a stubbed browser: it keeps the preload
+bridge and the dev-grade Solid build, so diagnostics are live.
+
+1. `pnpm exec electron-vite dev --remoteDebuggingPort <port>`; read the
+   `DevTools listening on ws://127.0.0.1:<port>` line for the port it actually
+   bound.
+2. `curl -s http://127.0.0.1:<port>/json/list` for the page target.
+3. Drive it over CDP: `Runtime.enable`, then `Runtime.evaluate` to click
+   `.nav-item` / open cards and to read the DOM back; collect
+   `Runtime.consoleAPICalled`, `Log.entryAdded` and `Runtime.exceptionThrown`.
+   Walk the views with a pause between clicks so the View Transition settles.
+4. `window.maax` comes through contextBridge, so reassigning `invoke` from the
+   page does not take effect and an on-the-fly failure stub cannot be installed
+   there. For the no-core / failure screens run the built app against a throwaway
+   profile:
+   `pnpm exec electron out/main/index.js --user-data-dir=<temp dir>`.
+   Afterwards delete config the probe wrote (a toggled schedule or locale) so
+   the next run starts from the user's real state.
+
+Stubbing stays the fallback for when Electron cannot run: point a browser at the
+Vite dev server and install the stub before navigation
+(`Page.addScriptToEvaluateOnNewDocument`). `window.maax.invoke` answers
 `{ ok: true, value }` envelopes (a schema-valid `Bootstrap`, plus the results of
 the commands the screen exercises), and `subscribe` returns an unsubscribe
-function. Click through the screens, then read `console` — a stub that returns
-`{ ok: false, error }` for everything else is enough to reach most UI.
+function; a stub that returns `{ ok: false, error }` for everything else reaches
+most UI.
 
 An `animation: name …` whose `@keyframes` was deleted is silent too, so keep
 keyframes and references together.
 
-Class names are the other silent failure. After a stylesheet rewrite, every
-class used by `src/renderer/src/**/*.tsx` must still have a rule: a deleted block
-compiles cleanly and only shows up as a misplaced control, an unstyled menu, or
-an icon in the wrong corner. Extract the class names from the TSX files and diff
-them against `styles.css` instead of eyeballing the CSS.
+Class names are the other silent failure, in both directions. A class used by
+TSX but missing from `styles.css` shows up as a misplaced control, an unstyled
+menu or an icon in the wrong corner; a rule nothing references is dead CSS
+(`.panel-icon`, the duplicated `.page--tools` block). Audit mechanically instead
+of eyeballing:
+
+- Every class literal in `class="…"` / `class={…}` is a candidate. Normalize
+  each template's `${…}` to `*` and match CSS selectors by prefix **and**
+  suffix, or one dynamic family (`log-line--*`) hides every variant behind a
+  single "missing" entry.
+- Strings inside the same `class={…}` expression that are comparison operands
+  (`=== "running"`) are not classes; a naive scan reports them as missing rules.
+- Run it both ways before shipping: no class without a rule, no rule without a
+  class.
 
 ## Effect 4
 
@@ -283,10 +370,15 @@ them against `styles.css` instead of eyeballing the CSS.
 - `Effect.runPromise` / `runtime.runPromise` belong at IPC handlers, event
   handlers, `onSettled`, and tests, not in render computation.
 - `effect/FileSystem` is the only filesystem service in Effect 4 and is
-  annotated `@stability unstable` upstream. `.oxlintrc.json` scopes the
-  `unstable-api-usage` diagnostic to the modules that own that boundary
-  (`json-store`, `settings`, `core-registry`, `workspace`, `runtime`); put new
-  filesystem code in one of them instead of adding another exception.
+  annotated `@stability unstable` upstream. `.oxlintrc.json` `overrides` turns
+  `effecttsgo/unstable-api-usage` off for the six modules that own that
+  boundary (`json-store`, `settings`, `core-registry`, `workspace`,
+  `copilot-setup`, `runtime`); `pnpm check` is clean, so any new occurrence is a
+  module that took the service without joining the list. Put new filesystem code
+  in one of them instead of growing the list.
+  `json-store`'s `writeJson` already creates the parent directory (`recursive`)
+  and `readJson` falls back when the file is missing, so a store does not need
+  its own `makeDirectory`.
 - Cross-boundary numbers use `Schema.Finite`, not `Schema.Number`, so `NaN`,
   `Infinity` and `-Infinity` are rejected at the IPC edge.
 
@@ -303,6 +395,10 @@ them against `styles.css` instead of eyeballing the CSS.
   `ipcRenderer` bridge.
 - Result envelopes should preserve enough structure for the renderer to show a
   typed failure without parsing strings.
+- Renderer failures have one formatter: `effect/desktop.ts#describeError` turns
+  a `DesktopBridgeError` into `operation: reason` and anything else into its
+  message. Toasts, the log mirror and `<Errored>` fallbacks all use it; do not
+  rebuild the message inline or print the raw error object.
 
 ## Native process isolation
 
@@ -429,6 +525,11 @@ write JSON with a bare `writeFile` in place.
   `TASK_DEFINITIONS`, `getTaskDefaults`, `buildMaaTaskParams`,
   `TASK_PALETTE_ORDER` and `TaskCard`'s `summaryFor`. The exhaustive
   switches fail the type check if one is missed — do not cast around them.
+- The stage picker's list is built in the main process: a hard-coded permanent
+  list plus the live windows of `StageActivityV2.json` from `api.maa.plus`,
+  cached per `client:locale` for ten minutes. A failed fetch still returns the
+  permanent list with `warning` set, which the renderer shows as a `warning`
+  toast, not an `error`.
 - Required fields are validated in the main process before the first task is
   appended, so a missing copilot file cannot leave a half-built queue.
   `firstMissingField` honours `visibleWhen`: SingleStep requires the stage only
@@ -550,10 +651,11 @@ toolset/compression changes with the artifact on the same filesystem.
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Reactive control     | update twice; verify focus, visual selection, and persisted value                                                                             |
 | Motion               | sample `getAnimations()` across frames: collapse reverses mid-flight, page switch runs a `content` view transition, reduced motion skips both |
-| Reactive warning     | `pnpm dev` console stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen                                              |
-| Stylesheet rewrite   | every class used by TSX still has a rule; screenshot affected screens in both themes                                                          |
+| Reactive warning     | `pnpm dev` console (or the CDP loop above) stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen                      |
+| Stylesheet / classes | class audit both ways: no TSX class without a rule, no rule without a class; screenshot affected screens in both themes                       |
 | Modal                | open it from a focused launcher: focus lands inside, Esc and backdrop close                                                                   |
 | Dynamic list         | add/remove/reorder; confirm no unexpected remount                                                                                             |
+| Snapshot list        | replace a scan/batch/history list: only new rows enter, untouched rows keep their DOM so entrance animations do not replay                    |
 | Effect service       | type check, layer boot, and one failure path                                                                                                  |
 | IPC contract         | invalid payload is rejected; valid payload round-trips                                                                                        |
 | Native host          | connect, perform one operation, stop; inspect native log                                                                                      |
