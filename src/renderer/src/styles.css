@@ -888,16 +888,18 @@ select.input {
   color: var(--text-soft);
 }
 
+/* A switch stacks like every other field. The old inset row only lined up with
+   other switches; next to a label-over-control field it floated taller than the
+   input and put its label on a different baseline. The 22px toggle is centred
+   in the 32px band the inputs occupy, so every field keeps one rhythm. */
 .field--switch {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 30px;
-  padding: 0 8px;
-  background: var(--inset);
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-control);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.field--switch .switch {
+  margin: 5px 0;
 }
 
 /* --- stage picker --------------------------------------------------------- */
@@ -3196,6 +3198,33 @@ select.input {
   color: var(--faint);
 }
 
+.copilot-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+
+.copilot-item[draggable="true"] {
+  cursor: grab;
+}
+
+.copilot-item--dragging {
+  opacity: 0.55;
+}
+
+.copilot-item--drop {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.copilot-item--disabled .copilot-title,
+.copilot-item--disabled .copilot-stage,
+.copilot-item--disabled .copilot-mode,
+.copilot-item--disabled .copilot-kind {
+  opacity: 0.5;
+}
+
 .copilot-items {
   display: flex;
   flex-direction: column;
@@ -3207,13 +3236,107 @@ select.input {
 
 .copilot-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   padding: 4px 6px;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-control);
   background: var(--inset);
   animation: surface-in var(--duration-fast) var(--ease-out);
+}
+
+.copilot-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copilot-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 2px;
+  border-top: 1px dashed var(--stroke);
+}
+
+.copilot-detail-notes {
+  margin: 0;
+  max-height: 140px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.copilot-detail-min {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.copilot-opers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.copilot-opers li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: var(--radius-control);
+  background: var(--surface-alt);
+  font-size: 11px;
+}
+
+.copilot-oper-name {
+  color: var(--text);
+}
+
+.copilot-opers small {
+  color: var(--faint);
+}
+
+.copilot-detail-label {
+  margin: 2px 0 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+}
+
+.copilot-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.copilot-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+}
+
+.copilot-group-name {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.copilot-group-hint {
+  font-size: 10px;
+  color: var(--faint);
+}
+
+.copilot-group .copilot-opers {
+  flex: 1 1 100%;
+  padding-top: 2px;
 }
 
 .copilot-mode {
@@ -3253,6 +3376,13 @@ select.input {
   font-size: 12px;
   line-height: 1.55;
   color: var(--muted);
+}
+
+.copilot-option-note--single {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .copilot-option-note--warning {
@@ -3384,6 +3514,82 @@ select.input {
   font-size: 11px;
 }
 
+.browser-batch {
+  margin-top: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-surface);
+  background: var(--surface-alt);
+}
+
+.browser-batch-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.browser-batch-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.browser-batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.browser-batch-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+  font-size: 11px;
+}
+
+.browser-batch-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.browser-batch-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-soft);
+}
+
+.browser-batch-item .copilot-detail {
+  padding: 4px 0 0;
+}
+
+.browser-batch-item .copilot-detail-notes {
+  max-height: 120px;
+}
+
+.browser-added-badge {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
 .browser-error {
   margin: 8px 0 0;
   color: var(--danger);
@@ -3479,50 +3685,38 @@ select.input {
 }
 
 .browser-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   padding: 0 8px 8px;
   border-top: 1px dashed var(--stroke);
 }
 
-.browser-details {
-  margin: 6px 0;
-  max-height: 140px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  font-size: 12px;
-  color: var(--muted);
+.browser-item > .copilot-opers {
+  padding: 0 8px 8px;
 }
 
-.browser-min {
-  margin: 0 0 6px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--faint);
-}
-
-.browser-opers {
+.browser-group-names {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   margin: 0;
-  padding: 0;
+  padding: 0 8px 8px;
   list-style: none;
 }
 
-.browser-opers li {
+.browser-group-name {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 4px;
-  padding: 2px 6px;
+  padding: 1px 6px;
+  border: 1px dashed var(--stroke);
   border-radius: var(--radius-control);
-  background: var(--surface-alt);
+  color: var(--text-soft);
   font-size: 11px;
 }
 
-.browser-oper-name {
-  color: var(--text);
-}
-
-.browser-opers small {
+.browser-group-name .icon {
   color: var(--faint);
 }
 
@@ -3602,13 +3796,25 @@ select.input {
   gap: 8px;
 }
 
+.copilot-order {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  /* The row gap is 8px; the handle and its index are one visual unit. */
+  gap: 2px;
+}
+
+.copilot-order .drag-handle {
+  width: 16px;
+}
+
 .copilot-index {
   flex: 0 0 auto;
-  min-width: 18px;
+  min-width: 12px;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--faint);
-  text-align: right;
+  text-align: left;
 }
 
 .copilot-options {

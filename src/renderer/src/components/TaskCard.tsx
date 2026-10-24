@@ -7,9 +7,11 @@ import type {
   TaskConfig,
   TaskType,
 } from "../../../shared/schemas";
+import { copilotEntryMode, copilotModeLabelKey, isCopilotItem } from "../../../shared/copilot-mode";
 import type { FieldOption, TaskField } from "../../../shared/tasks";
 import { TASK_DEFINITIONS } from "../../../shared/tasks";
 import { pick, t } from "../i18n/i18n";
+import { CopilotDetailBody, createCopilotDetails } from "./CopilotDetail";
 import { StagePicker } from "./StagePicker";
 import { Button } from "./ui/Button";
 import { Collapse } from "./ui/Collapse";
@@ -307,16 +309,6 @@ const FieldControl: Component<{
   }
 };
 
-const isCopilotItem = (value: unknown): value is CopilotItem => {
-  const item = value as Partial<CopilotItem> | null;
-  return (
-    typeof item?.id === "string" &&
-    typeof item.filename === "string" &&
-    typeof item.isRaid === "boolean" &&
-    typeof item.stage === "string"
-  );
-};
-
 const CopilotBatch: Component<{
   items: ReadonlyArray<CopilotItem>;
   locale: Locale;
@@ -327,6 +319,9 @@ const CopilotBatch: Component<{
 }> = (props) => {
   const [input, setInput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  // The card is mounted while it is expanded; each entry reads its downloaded
+  // JSON once so the same detail panel as the browser is available here too.
+  const details = createCopilotDetails(() => props.items);
 
   const submit = async (): Promise<void> => {
     const value = input().trim();
@@ -380,20 +375,30 @@ const CopilotBatch: Component<{
           <For each={props.items} keyed={(item) => item.id}>
             {(item) => (
               <li class="copilot-item">
-                <span class={["copilot-mode", { "copilot-mode--raid": item().isRaid }]}>
-                  {t(props.locale, item().isRaid ? "copilot.raid" : "copilot.normal")}
-                </span>
-                <span class="copilot-title">{item().title || item().stage}</span>
-                <span class="copilot-stage">{item().stage}</span>
-                <button
-                  type="button"
-                  class="icon-button"
-                  title={t(props.locale, "common.remove")}
-                  disabled={props.disabled === true}
-                  onClick={() => props.onRemove(item().id)}
-                >
-                  <Icon name="x" />
-                </button>
+                <div class="copilot-item-row">
+                  <span class={["copilot-mode", { "copilot-mode--raid": copilotEntryMode(item()) === "raid" }]}>
+                    {t(props.locale, copilotModeLabelKey(copilotEntryMode(item()) === "raid", item().stage))}
+                  </span>
+                  <span class="copilot-title">{item().title || item().stage}</span>
+                  <span class="copilot-stage">{item().stage}</span>
+                  <Show when={details.hasDetail(item().id)}>
+                    <Button size="sm" variant="ghost" onClick={() => details.toggle(item().id)}>
+                      {t(props.locale, "browser.detail")}
+                    </Button>
+                  </Show>
+                  <button
+                    type="button"
+                    class="icon-button"
+                    title={t(props.locale, "common.remove")}
+                    disabled={props.disabled === true}
+                    onClick={() => props.onRemove(item().id)}
+                  >
+                    <Icon name="x" />
+                  </button>
+                </div>
+                <Collapse open={details.isOpen(item().id)}>
+                  {() => <CopilotDetailBody detail={details.detail(item().id)} locale={props.locale} />}
+                </Collapse>
               </li>
             )}
           </For>

@@ -5,6 +5,7 @@ interface SwitchProps {
   readonly onChange: (checked: boolean) => void;
   readonly disabled?: boolean;
   readonly label?: string;
+  readonly title?: string;
 }
 
 export const Switch: Component<SwitchProps> = (props) => (
@@ -15,6 +16,7 @@ export const Switch: Component<SwitchProps> = (props) => (
     aria-checked={props.checked ? "true" : "false"}
     aria-label={props.label ?? "toggle"}
     disabled={props.disabled ?? false}
+    title={props.title}
     onClick={(event) => {
       event.stopPropagation();
       props.onChange(!props.checked);

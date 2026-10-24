@@ -1,5 +1,9 @@
 import { For, Show, createEffect, createSignal, onCleanup, untrack, type Component } from "solid-js";
+import { copilotKindFromStageId } from "../../../shared/copilot-kind";
+import { copilotEntryMode, copilotModeLabelKey, copilotModes, type CopilotMode } from "../../../shared/copilot-mode";
 import type {
+  CopilotGroup,
+  CopilotItem,
   CopilotLevel,
   CopilotSearchItem,
   CopilotSearchResult,
@@ -10,6 +14,7 @@ import { COMMANDS } from "../../../shared/ipc";
 import { command } from "../effect/desktop";
 import { useAppRuntime } from "../effect/solid-effect";
 import { t } from "../i18n/i18n";
+import { CopilotDetailBody, CopilotGroups, CopilotOperators, createCopilotDetails } from "./CopilotDetail";
 import { Button } from "./ui/Button";
 import { Collapse } from "./ui/Collapse";
 import { Icon } from "./ui/Icon";
@@ -19,20 +24,39 @@ interface CopilotBrowserProps {
   readonly open: boolean;
   readonly locale: Locale;
   readonly onClose: () => void;
-  /** Download the assignment by id and append it to the batch. */
-  readonly onAdd: (id: number) => Promise<boolean>;
+  /** The batch this browser adds to; rows read it so their state stays in sync. */
+  readonly added: ReadonlyArray<CopilotItem>;
+  /** Download the assignment by id and append it with the requested difficulty. */
+  readonly onAdd: (id: number, mode: CopilotMode) => Promise<boolean>;
+  /** Drop one batch entry; the batch list in the panel behind the dialog owns it. */
+  readonly onRemoveItem: (item: CopilotItem) => void;
 }
 
 const PAGE_SIZE = 12;
 const SUGGESTION_DEBOUNCE_MS = 400;
 
-const modesOf = (difficulty: number): ReadonlyArray<"normal" | "raid"> => {
-  if (difficulty === 0) return ["normal"];
-  const modes: Array<"normal" | "raid"> = [];
-  if ((difficulty & 1) !== 0) modes.push("normal");
-  if ((difficulty & 2) !== 0) modes.push("raid");
-  return modes.length === 0 ? ["normal"] : modes;
-};
+/**
+ * Group names in the compact result row. The expanded detail lists the
+ * candidates; here the icon and dashed pill are enough to distinguish a group
+ * from a fixed operator without adding the word "组".
+ */
+const GroupNameChips: Component<{
+  readonly groups: ReadonlyArray<CopilotGroup>;
+  readonly locale: Locale;
+}> = (props) => (
+  <Show when={props.groups.length > 0}>
+    <ul class="browser-group-names">
+      <For each={props.groups}>
+        {(group) => (
+          <li class="browser-group-name" title={t(props.locale, "browser.groupOneOf")}>
+            <Icon name="users" />
+            <span>{group.name || "—"}</span>
+          </li>
+        )}
+      </For>
+    </ul>
+  </Show>
+);
 
 /**
  * Copilot browser.
@@ -54,9 +78,17 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
   const [result, setResult] = createSignal<CopilotSearchResult>();
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal("");
-  const [detailId, setDetailId] = createSignal<number | null>(null);
+  // Details are independent: comparing several assignments must not close the
+  // one opened before them.
+  const [openDetails, setOpenDetails] = createSignal<ReadonlySet<number>>(new Set());
   const [suggestions, setSuggestions] = createSignal<ReadonlyArray<CopilotLevel>>([]);
-  const [adding, setAdding] = createSignal<number | null>(null);
+  const [adding, setAdding] = createSignal<string | null>(null);
+  // The summary entries read their downloaded JSON through the shared
+  // controller, only while this dialog is open.
+  const addedDetails = createCopilotDetails(
+    () => props.added,
+    () => props.open,
+  );
   let suggestionTimer: number | undefined;
   let operatorTimer: number | undefined;
   let searched = false;
@@ -109,7 +141,7 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
       );
       setResult(value);
       setPage(nextPage);
-      setDetailId(null);
+      setOpenDetails(new Set<number>());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -178,16 +210,70 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
     }, SUGGESTION_DEBOUNCE_MS);
   };
 
-  const add = async (item: CopilotSearchItem): Promise<void> => {
-    setAdding(item.id);
+  const stageLabel = (item: CopilotSearchItem): string => item.stageCode || item.stage || "—";
+
+  /** Batch entries of one PRTS assignment, whichever difficulty they carry. */
+  const addedFor = (id: number): ReadonlyArray<CopilotItem> => props.added.filter((entry) => entry.copilotId === id);
+
+  const isModeAdded = (item: CopilotSearchItem, mode: CopilotMode): boolean =>
+    addedFor(item.id).some((entry) => (entry.kind ?? "normal") === "normal" && copilotEntryMode(entry) === mode);
+
+  const isDetailOpen = (id: number): boolean => openDetails().has(id);
+
+  const toggleDetail = (id: number): void => {
+    setOpenDetails((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const entryLabel = (entry: CopilotItem): string => {
+    switch (entry.kind) {
+      case "sss":
+        return t(props.locale, "copilot.kind.sss");
+      case "paradox":
+        return t(props.locale, "copilot.kind.paradox");
+      default:
+        return t(props.locale, copilotModeLabelKey(copilotEntryMode(entry) === "raid", entry.stage));
+    }
+  };
+
+  const add = async (id: number, mode: CopilotMode): Promise<void> => {
+    if (adding() !== null) return;
+    const key = `${id}:${mode}`;
+    setAdding(key);
     try {
-      await props.onAdd(item.id);
+      await props.onAdd(id, mode);
     } finally {
       setAdding(null);
     }
   };
 
-  const stageLabel = (item: CopilotSearchItem): string => item.stageCode || item.stage || "—";
+  const removeEntries = (entries: ReadonlyArray<CopilotItem>): void => {
+    for (const entry of entries) props.onRemoveItem(entry);
+  };
+
+  const toggleMode = (item: CopilotSearchItem, mode: CopilotMode): void => {
+    if (!isModeAdded(item, mode)) {
+      void add(item.id, mode);
+      return;
+    }
+    removeEntries(
+      addedFor(item.id).filter((entry) => (entry.kind ?? "normal") === "normal" && copilotEntryMode(entry) === mode),
+    );
+  };
+
+  /** SSS and paradox files have one entry and no difficulty switch. */
+  const toggleWithoutMode = (item: CopilotSearchItem): void => {
+    const entries = addedFor(item.id);
+    if (entries.length > 0) {
+      removeEntries(entries);
+      return;
+    }
+    void add(item.id, "normal");
+  };
 
   return (
     <Modal
@@ -314,6 +400,50 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
         </div>
       </Show>
 
+      <Show when={props.added.length > 0}>
+        <section class="browser-batch">
+          <div class="browser-batch-head">
+            <span class="field-label">{t(props.locale, "browser.batch")}</span>
+            <span class="browser-batch-count">{props.added.length}</span>
+          </div>
+          <ul class="browser-batch-list">
+            <For each={props.added} keyed={(entry) => entry.id}>
+              {(entry) => {
+                const detail = () => addedDetails.detail(entry().id);
+                return (
+                  <li class="browser-batch-item">
+                    <div class="browser-batch-row">
+                      <span class={["copilot-mode", { "copilot-mode--raid": copilotEntryMode(entry()) === "raid" }]}>
+                        {entryLabel(entry())}
+                      </span>
+                      <span class="browser-batch-title" title={entry().stage}>
+                        {entry().title || entry().stage || entry().filename}
+                      </span>
+                      <Show when={addedDetails.hasDetail(entry().id)}>
+                        <Button size="sm" variant="ghost" onClick={() => addedDetails.toggle(entry().id)}>
+                          {t(props.locale, "browser.detail")}
+                        </Button>
+                      </Show>
+                      <button
+                        type="button"
+                        class="icon-button"
+                        title={t(props.locale, "browser.removeAdded")}
+                        onClick={() => props.onRemoveItem(entry())}
+                      >
+                        <Icon name="x" />
+                      </button>
+                    </div>
+                    <Collapse open={addedDetails.isOpen(entry().id)}>
+                      {() => <CopilotDetailBody detail={detail()} locale={props.locale} />}
+                    </Collapse>
+                  </li>
+                );
+              }}
+            </For>
+          </ul>
+        </section>
+      </Show>
+
       <Show when={error() !== ""}>
         <p class="browser-error">{error()}</p>
       </Show>
@@ -336,91 +466,107 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
         </div>
         <ul class="browser-list">
           <For each={result()?.items ?? []}>
-            {(item) => (
-              <li class={["browser-item", { "browser-item--open": detailId() === item.id }]}>
-                <div class="browser-row">
-                  <div class="browser-main">
-                    <div class="browser-title">
-                      <strong>{item.title || item.stage}</strong>
-                      <span class="browser-code">{stageLabel(item)}</span>
-                      <For each={modesOf(item.difficulty)}>
-                        {(mode) => (
-                          <span class={["copilot-mode", { "copilot-mode--raid": mode === "raid" }]}>
-                            {t(props.locale, mode === "raid" ? "copilot.raid" : "copilot.normal")}
-                          </span>
-                        )}
-                      </For>
+            {(item) => {
+              const kind = copilotKindFromStageId(item.stage);
+              const modes = kind === "normal" ? copilotModes(item.difficulty, item.stage) : [];
+              const added = () => addedFor(item.id);
+              return (
+                <li class={["browser-item", { "browser-item--open": isDetailOpen(item.id) }]}>
+                  <div class="browser-row">
+                    <div class="browser-main">
+                      <div class="browser-title">
+                        <strong>{item.title || item.stage}</strong>
+                        <span class="browser-code">{stageLabel(item)}</span>
+                        <Show when={kind === "normal"}>
+                          <For each={modes}>
+                            {(mode) => (
+                              <span class={["copilot-mode", { "copilot-mode--raid": mode === "raid" }]}>
+                                {t(props.locale, copilotModeLabelKey(mode === "raid", item.stage))}
+                              </span>
+                            )}
+                          </For>
+                        </Show>
+                        <Show when={added().length > 0}>
+                          <span class="browser-added-badge">{t(props.locale, "browser.added")}</span>
+                        </Show>
+                      </div>
+                      <div class="browser-sub">
+                        <button
+                          type="button"
+                          class="browser-author"
+                          onClick={() => commit({ uploaderId: item.uploaderId })}
+                        >
+                          {item.uploader || "—"}
+                        </button>
+                        <span>
+                          {item.views} {t(props.locale, "browser.views")}
+                        </span>
+                        <span>★ {item.ratingLevel}</span>
+                        <span>
+                          {item.operators.length} {t(props.locale, "browser.opers")}
+                        </span>
+                      </div>
                     </div>
-                    <div class="browser-sub">
-                      <button
-                        type="button"
-                        class="browser-author"
-                        onClick={() => commit({ uploaderId: item.uploaderId })}
+                    <div class="browser-actions">
+                      <Button size="sm" variant="ghost" onClick={() => toggleDetail(item.id)}>
+                        {t(props.locale, "browser.detail")}
+                      </Button>
+                      <Show
+                        when={kind === "normal"}
+                        fallback={
+                          <Button
+                            size="sm"
+                            variant={added().length > 0 ? "ghost" : "secondary"}
+                            disabled={adding() !== null}
+                            title={added().length > 0 ? t(props.locale, "browser.removeAdded") : undefined}
+                            onClick={() => toggleWithoutMode(item)}
+                          >
+                            <Icon name={added().length > 0 ? "check" : "plus"} />
+                            {added().length > 0 ? t(props.locale, "browser.added") : t(props.locale, "browser.add")}
+                          </Button>
+                        }
                       >
-                        {item.uploader || "—"}
-                      </button>
-                      <span>
-                        {item.views} {t(props.locale, "browser.views")}
-                      </span>
-                      <span>★ {item.ratingLevel}</span>
-                      <span>
-                        {item.operators.length} {t(props.locale, "browser.opers")}
-                      </span>
-                    </div>
-                  </div>
-                  <div class="browser-actions">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setDetailId(detailId() === item.id ? null : item.id)}
-                    >
-                      {t(props.locale, "browser.detail")}
-                    </Button>
-                    <Button size="sm" variant="secondary" disabled={adding() !== null} onClick={() => void add(item)}>
-                      <Icon name="plus" />
-                      {t(props.locale, "browser.add")}
-                    </Button>
-                  </div>
-                </div>
-                <Collapse open={detailId() === item.id}>
-                  {() => (
-                    <div class="browser-detail">
-                      <Show when={item.details !== ""}>
-                        <p class="browser-details">{item.details}</p>
-                      </Show>
-                      <Show when={item.minimumRequired !== ""}>
-                        <p class="browser-min">MaaCore {item.minimumRequired}</p>
-                      </Show>
-                      <ul class="browser-opers">
-                        <For each={item.operators}>
-                          {(oper) => (
-                            <li>
-                              <span class="browser-oper-name">{oper.name}</span>
-                              <Show when={oper.role !== ""}>
-                                <small>{oper.role}</small>
-                              </Show>
-                              <Show when={oper.elite !== undefined}>
-                                <small>
-                                  E{oper.elite} {oper.level ?? ""}
-                                </small>
-                              </Show>
-                              <Show when={oper.skill !== 0}>
-                                <small>
-                                  {t(props.locale, "browser.skill")} {oper.skill}
-                                </small>
-                              </Show>
-                              <Show when={(oper.module ?? 0) > 0}>
-                                <small>M{oper.module}</small>
-                              </Show>
-                            </li>
-                          )}
+                        <For each={modes}>
+                          {(mode) => {
+                            const key = `${item.id}:${mode}`;
+                            const isAdded = () => isModeAdded(item, mode);
+                            return (
+                              <Button
+                                size="sm"
+                                variant={isAdded() ? "ghost" : "secondary"}
+                                disabled={adding() !== null}
+                                title={isAdded() ? t(props.locale, "browser.removeAdded") : undefined}
+                                onClick={() => toggleMode(item, mode)}
+                              >
+                                <Icon name={adding() === key ? "loader" : isAdded() ? "check" : "plus"} />
+                                {t(props.locale, copilotModeLabelKey(mode === "raid", item.stage))}
+                              </Button>
+                            );
+                          }}
                         </For>
-                      </ul>
+                      </Show>
                     </div>
-                  )}
-                </Collapse>
-              </li>
-            )}
+                  </div>
+                  <Show when={item.operators.length > 0}>
+                    <CopilotOperators operators={item.operators} locale={props.locale} />
+                  </Show>
+                  <GroupNameChips groups={item.groups} locale={props.locale} />
+                  <Collapse open={isDetailOpen(item.id)}>
+                    {() => (
+                      <div class="browser-detail">
+                        <Show when={item.details !== ""}>
+                          <p class="copilot-detail-notes">{item.details}</p>
+                        </Show>
+                        <Show when={item.minimumRequired !== ""}>
+                          <p class="copilot-detail-min">MaaCore {item.minimumRequired}</p>
+                        </Show>
+                        <CopilotGroups groups={item.groups} locale={props.locale} />
+                      </div>
+                    )}
+                  </Collapse>
+                </li>
+              );
+            }}
           </For>
         </ul>
         <div class="browser-pager">
