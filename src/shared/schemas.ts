@@ -187,6 +187,8 @@ export const CopilotItemSchema = Schema.Struct({
   title: Schema.String,
   isRaid: Schema.Boolean,
   kind: Schema.optional(CopilotKindSchema),
+  /** Batch switch in the Copilot tab; missing means enabled. */
+  enabled: Schema.optional(Schema.Boolean),
 });
 export type CopilotItem = Schema.Schema.Type<typeof CopilotItemSchema>;
 
@@ -201,6 +203,27 @@ export const CopilotOperatorSchema = Schema.Struct({
 });
 export type CopilotOperator = Schema.Schema.Type<typeof CopilotOperatorSchema>;
 
+/** An interchangeable operator group; any listed candidate satisfies it. */
+export const CopilotGroupSchema = Schema.Struct({
+  name: Schema.String,
+  operators: Schema.Array(CopilotOperatorSchema),
+});
+export type CopilotGroup = Schema.Schema.Type<typeof CopilotGroupSchema>;
+
+/**
+ * What a downloaded assignment file carries besides its batch entry: the
+ * author's notes, fixed operators, alternative groups and the minimum MaaCore
+ * version. Kept separate from `CopilotSearchItem` because it comes from the
+ * local JSON, not from a PRTS search response.
+ */
+export const CopilotDetailSchema = Schema.Struct({
+  details: Schema.String,
+  operators: Schema.Array(CopilotOperatorSchema),
+  groups: Schema.Array(CopilotGroupSchema),
+  minimumRequired: Schema.String,
+});
+export type CopilotDetail = Schema.Schema.Type<typeof CopilotDetailSchema>;
+
 export const CopilotSearchItemSchema = Schema.Struct({
   id: Schema.Finite,
   title: Schema.String,
@@ -210,6 +233,7 @@ export const CopilotSearchItemSchema = Schema.Struct({
   stageCode: Schema.String,
   difficulty: Schema.Int,
   operators: Schema.Array(CopilotOperatorSchema),
+  groups: Schema.Array(CopilotGroupSchema),
   uploader: Schema.String,
   uploaderId: Schema.String,
   views: Schema.Finite,

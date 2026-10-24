@@ -1,3 +1,4 @@
+import { isToughStage } from "./copilot-mode";
 import type { AppSettings, CopilotSetup, TaskConfig, TaskType } from "./schemas";
 
 /**
@@ -1329,20 +1330,31 @@ export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Rec
       };
       if (Number(task.params.formation_index) > 0) params.formation_index = Number(task.params.formation_index);
 
+      const manual = task.params.manual_start === true;
       const batch = Array.isArray(task.params.copilot_list) ? task.params.copilot_list : [];
       const entries = batch.flatMap((item) => {
-        const entry = item as { filename?: unknown; isRaid?: unknown };
+        const entry = item as { filename?: unknown; isRaid?: unknown; stage?: unknown; enabled?: unknown };
+        if (entry.enabled === false) return [];
         if (typeof entry.filename !== "string" || entry.filename.trim() === "") return [];
+        // A `tough_` stage stored before difficulty inference landed still has
+        // isRaid false; the stage id keeps that saved batch on the 磨难 map.
+        const isRaid = entry.isRaid === true || (typeof entry.stage === "string" && isToughStage(entry.stage));
         // The core reports progress by this index, so it must be the position in
         // the whole list; normal and raid runs of one file share the file.
-        return [{ id: 0, filename: entry.filename, is_raid: entry.isRaid === true }];
+        return [{ id: 0, filename: entry.filename, is_raid: isRaid }];
       });
-      if (entries.length > 0) {
+      if (entries.length > 0 && (!manual || entries.length !== 1)) {
         return { ...params, copilot_list: entries.map((entry, index) => ({ ...entry, id: index })) };
       }
-      // Legacy single file: send the stored parameters and drop the empty batch.
+      // Legacy single file or manual start: send the stored parameters and drop
+      // the batch. Manual start deliberately carries one filename instead of
+      // `copilot_list`, so MaaCore starts from the current formation screen and
+      // leaves the in-game difficulty (including 沙盘推演) untouched.
       const single: Record<string, unknown> = { ...common, ...task.params };
       delete single.copilot_list;
+      delete single.manual_start;
+      delete single.is_raid;
+      if (manual && entries.length === 1) single.filename = entries[0]!.filename;
       if (Number(task.params.formation_index) <= 0) delete single.formation_index;
       single.loop_times = params.loop_times;
       return single;
@@ -1389,15 +1401,20 @@ export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Rec
   }
 }
 
-/** Build the normal-stage batch task the copilot tab runs. */
-export function createCopilotTask(setup: CopilotSetup, id = crypto.randomUUID()): TaskConfig {
+/**
+ * Build the normal-stage batch task the copilot tab runs.
+ *
+ * `manual` switches it to MaaCore's single-file path: one filename, started
+ * from the current formation screen instead of navigating from the stage map.
+ */
+export function createCopilotTask(setup: CopilotSetup, id = crypto.randomUUID(), manual = false): TaskConfig {
   return {
     id,
     type: "Copilot",
     enabled: true,
     name: "",
     params: {
-      copilot_list: [...setup.items],
+      copilot_list: setup.items.filter((item) => item.enabled !== false),
       filename: "",
       formation: setup.options.formation,
       add_trust: setup.options.addTrust,
@@ -1406,6 +1423,7 @@ export function createCopilotTask(setup: CopilotSetup, id = crypto.randomUUID())
       support_unit_usage: setup.options.supportUnitUsage,
       loop_times: setup.options.loopTimes,
       formation_index: setup.options.formationIndex,
+      manual_start: manual,
     },
     createdAt: 0,
   };
@@ -1420,14 +1438,20 @@ export function createCopilotTask(setup: CopilotSetup, id = crypto.randomUUID())
  * only passes one filename, so those also become sequential tasks. Mixing the
  * three families is refused: they start from different screens.
  */
-export function createCopilotRunTasks(setup: CopilotSetup, id = crypto.randomUUID()): ReadonlyArray<TaskConfig> {
-  if (setup.items.length === 0) return [];
-  const kinds = new Set(setup.items.map((item) => item.kind ?? "normal"));
+export function createCopilotRunTasks(
+  setup: CopilotSetup,
+  id = crypto.randomUUID(),
+  manual = false,
+): ReadonlyArray<TaskConfig> {
+  const items = setup.items.filter((item) => item.enabled !== false);
+  if (items.length === 0) return [];
+  const kinds = new Set(items.map((item) => item.kind ?? "normal"));
   if (kinds.size > 1) return [];
-  const kind = setup.items[0]!.kind ?? "normal";
+  const kind = items[0]!.kind ?? "normal";
+  const enabledSetup: CopilotSetup = { ...setup, items };
 
   if (kind === "sss") {
-    return setup.items.map((item, index) => {
+    return items.map((item, index) => {
       const task = createTask("SSSCopilot", index === 0 ? id : crypto.randomUUID());
       return {
         ...task,
@@ -1442,13 +1466,13 @@ export function createCopilotRunTasks(setup: CopilotSetup, id = crypto.randomUUI
   }
 
   if (kind === "paradox") {
-    return setup.items.map((item, index) => {
+    return items.map((item, index) => {
       const task = createTask("ParadoxCopilot", index === 0 ? id : crypto.randomUUID());
       return { ...task, params: { ...task.params, filename: item.filename } };
     });
   }
 
-  return [createCopilotTask(setup, id)];
+  return [createCopilotTask(enabledSetup, id, manual)];
 }
 
 /**

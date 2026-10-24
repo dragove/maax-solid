@@ -2,6 +2,7 @@ import type {
   AppSettings,
   AppSettingsPatch,
   Bootstrap,
+  CopilotDetail,
   CopilotFile,
   CopilotLevel,
   CopilotResolveResult,
@@ -74,6 +75,7 @@ export const COMMANDS = {
   importCopilot: "copilot.import",
   pickVideo: "videos.pick",
   resolveCopilot: "copilot.resolve",
+  readCopilotDetail: "copilot.detail",
   searchCopilot: "copilot.search",
   searchCopilotLevels: "copilot.levels",
   searchOperators: "copilot.operators",
@@ -127,6 +129,7 @@ export interface CommandPayloads {
   "copilot.import": undefined;
   "videos.pick": undefined;
   "copilot.resolve": { input: string };
+  "copilot.detail": { filename: string };
   "copilot.search": {
     document?: string;
     operator?: string;
@@ -142,7 +145,7 @@ export interface CommandPayloads {
   "copilot.operators": { query: string };
   "copilot.options": Partial<CopilotOptions>;
   "copilot.items": { items: ReadonlyArray<CopilotItem> };
-  "copilot.start": { deviceId: string };
+  "copilot.start": { deviceId: string; itemId?: string };
   "runs.start": { deviceId: string; planId: string };
   "runs.stop": { deviceId: string };
   "runs.history": undefined;
@@ -188,6 +191,7 @@ export interface CommandResults {
   "copilot.import": CopilotFile | null;
   "videos.pick": string | null;
   "copilot.resolve": CopilotResolveResult;
+  "copilot.detail": CopilotDetail | null;
   "copilot.search": CopilotSearchResult;
   "copilot.levels": ReadonlyArray<CopilotLevel>;
   "copilot.operators": ReadonlyArray<OperatorEntry>;

@@ -1,6 +1,26 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { AppSettingsSchema, DEFAULT_SETTINGS } from "./schemas";
+import { AppSettingsSchema, CopilotSetupSchema, DEFAULT_COPILOT_OPTIONS, DEFAULT_SETTINGS } from "./schemas";
+
+describe("copilot setup schema", () => {
+  const item = { id: "a", copilotId: 1, filename: "/tmp/a.json", stage: "1-7", title: "t", isRaid: false };
+
+  it("reads an assignment saved before the per-item switch existed", () => {
+    const decoded = Schema.decodeSync(CopilotSetupSchema)({
+      items: [item],
+      options: DEFAULT_COPILOT_OPTIONS,
+    });
+    expect(decoded.items[0]?.enabled).toBeUndefined();
+  });
+
+  it("keeps an explicitly switched-off assignment off", () => {
+    const decoded = Schema.decodeSync(CopilotSetupSchema)({
+      items: [{ ...item, enabled: false }],
+      options: DEFAULT_COPILOT_OPTIONS,
+    });
+    expect(decoded.items[0]?.enabled).toBe(false);
+  });
+});
 
 describe("settings schema", () => {
   it("ignores retired keys from an existing settings file", () => {

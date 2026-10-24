@@ -4,6 +4,7 @@ import { COMMANDS } from "../../../shared/ipc";
 import {
   AppSettingsSchema,
   BootstrapSchema,
+  CopilotDetailSchema,
   CopilotFileSchema,
   CopilotSetupSchema,
   CopilotLevelSchema,
@@ -102,6 +103,7 @@ const resultSchemas = {
   [COMMANDS.importCopilot]: Schema.NullOr(CopilotFileSchema),
   [COMMANDS.pickVideo]: Schema.NullOr(Schema.String),
   [COMMANDS.resolveCopilot]: CopilotResolveResultSchema,
+  [COMMANDS.readCopilotDetail]: Schema.NullOr(CopilotDetailSchema),
   [COMMANDS.searchCopilot]: CopilotSearchResultSchema,
   [COMMANDS.searchCopilotLevels]: Schema.Array(CopilotLevelSchema),
   [COMMANDS.searchOperators]: Schema.Array(OperatorEntrySchema),

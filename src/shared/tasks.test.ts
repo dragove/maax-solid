@@ -115,6 +115,58 @@ describe("task catalogue", () => {
     });
   });
 
+  it("switches a manual start to single-file mode", () => {
+    const setup = {
+      items: [
+        {
+          id: "a",
+          copilotId: 91658,
+          filename: "/tmp/copilot/prts-91658.json",
+          stage: "main_17-07",
+          title: "17-8",
+          isRaid: false,
+          kind: "normal" as const,
+        },
+      ],
+      options: { ...DEFAULT_COPILOT_OPTIONS, loopTimes: 2 },
+    };
+    const task = createCopilotTask(setup, undefined, true);
+    expect(task.params).toMatchObject({ manual_start: true, filename: "" });
+
+    const params = buildMaaTaskParams(task, settings);
+    expect(params).toMatchObject({
+      filename: "/tmp/copilot/prts-91658.json",
+      formation: true,
+      loop_times: 2,
+    });
+    expect(params).not.toHaveProperty("copilot_list");
+    expect(params).not.toHaveProperty("manual_start");
+    expect(params).not.toHaveProperty("is_raid");
+  });
+
+  it("keeps multi mode when a manual start somehow has several entries", () => {
+    const item = (id: string): CopilotItem => ({
+      id,
+      copilotId: 1,
+      filename: `/tmp/${id}.json`,
+      stage: "main_17-07",
+      title: id,
+      isRaid: false,
+      kind: "normal",
+    });
+    const task = createCopilotTask(
+      {
+        items: [item("a"), item("b")],
+        options: DEFAULT_COPILOT_OPTIONS,
+      },
+      undefined,
+      true,
+    );
+    const params = buildMaaTaskParams(task, settings);
+    expect(params.copilot_list).toHaveLength(2);
+    expect(params).not.toHaveProperty("manual_start");
+  });
+
   it("gives every task a default payload", () => {
     for (const type of TASK_PALETTE_ORDER) {
       expect(getTaskDefaults(type)).toBeTypeOf("object");
@@ -156,6 +208,34 @@ describe("copilot task dispatch", () => {
     const tasks = createCopilotRunTasks(setup([item("paradox", "/tmp/a.json")]));
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({ type: "ParadoxCopilot", params: { filename: "/tmp/a.json" } });
+  });
+
+  it("runs only switched-on assignments", () => {
+    const disabled: CopilotItem = { ...item("normal", "/tmp/a.json", "a"), enabled: false };
+    const enabled: CopilotItem = { ...item("normal", "/tmp/b.json", "b"), enabled: true };
+    const tasks = createCopilotRunTasks(setup([disabled, enabled]));
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.params.copilot_list as ReadonlyArray<{ id: string }>).toEqual([
+      expect.objectContaining({ id: "b" }),
+    ]);
+
+    const task = createCopilotTask(setup([disabled, enabled]));
+    expect(buildMaaTaskParams(task, settings).copilot_list).toEqual([
+      { id: 0, filename: "/tmp/b.json", is_raid: false },
+    ]);
+  });
+
+  it("drops switched-off files from a sequential batch too", () => {
+    const disabled: CopilotItem = { ...item("sss", "/tmp/a.json", "a"), enabled: false };
+    const enabled: CopilotItem = { ...item("sss", "/tmp/b.json", "b"), enabled: true };
+    const tasks = createCopilotRunTasks(setup([disabled, enabled]));
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.params.filename).toBe("/tmp/b.json");
+  });
+
+  it("returns nothing when every assignment is switched off", () => {
+    const disabled: CopilotItem = { ...item("normal", "/tmp/a.json"), enabled: false };
+    expect(createCopilotRunTasks(setup([disabled]))).toEqual([]);
   });
 
   it("refuses a batch that mixes task families", () => {
@@ -272,6 +352,23 @@ describe("task parameter goldens", () => {
       { id: 1, filename: "/tmp/prts-7.json", is_raid: true },
     ]);
     expect(params).not.toHaveProperty("filename");
+  });
+
+  it("keeps a saved tough entry on the 磨难 map", () => {
+    const task = createTask("Copilot");
+    const params = buildMaaTaskParams(
+      {
+        ...task,
+        params: {
+          ...task.params,
+          copilot_list: [
+            { id: "a", copilotId: 7, filename: "/tmp/tough.json", stage: "tough_12-16", title: "12-18", isRaid: false },
+          ],
+        },
+      },
+      settings,
+    );
+    expect(params.copilot_list).toEqual([{ id: 0, filename: "/tmp/tough.json", is_raid: true }]);
   });
 
   it("clamps a zero copilot loop count to one", () => {
