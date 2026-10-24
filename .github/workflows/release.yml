@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Release builds must not overlap: each run derives the next version from the
+# tags created by the previous one.
+concurrency:
+  group: release-master
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux AppImage and tar.gz
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # pnpm 版本由 package.json 的 packageManager 字段决定。
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve release version
+        id: release
+        run: |
+          version=$(node scripts/next-version.mjs)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Next release: v$version"
+
+      - name: Stamp package version
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: pnpm pkg set "version=$VERSION"
+
+      - name: Check and test
+        run: |
+          pnpm check
+          pnpm test
+
+      - name: Build Linux packages
+        run: |
+          pnpm run build
+          pnpm exec electron-builder --linux AppImage tar.gz --publish never
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          gh release create "v$VERSION" \
+            dist/*.AppImage dist/*.tar.gz \
+            --target "$GITHUB_SHA" \
+            --title "Maax $VERSION" \
+            --generate-notes

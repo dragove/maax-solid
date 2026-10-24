@@ -80,12 +80,22 @@ MAAX_DEV_CORE=/path/to/MAA-vX.Y.Z-linux-x86_64 pnpm dev
 | `pnpm check`         | lint + format check                            |
 | `pnpm build`         | lint 后构建到 `out/`                           |
 | `pnpm package`       | 生成免安装目录 `dist/linux-unpacked`           |
-| `pnpm dist`          | 生成 AppImage / deb                            |
+| `pnpm dist`          | 生成 AppImage / tar.gz / deb                   |
 | `pnpm bench:startup` | 对比三种启动方式的耗时与内存（见下文）         |
 
 `pnpm bench:startup` 使用同一份 app.asar，分别启动 `linux-unpacked`、
 AppImage 和本地 Electron + app.asar，测量到工作台首帧的耗时与稳定后的 PSS/RSS。
 准备步骤、指标定义和限制见 [docs/startup-benchmark.md](docs/startup-benchmark.md)。
+
+## 分支与发布
+
+`dev` 是默认开发分支，功能改动先合入 `dev`；`master` 只接收 `dev` 的合并。
+`dev` 合并到 `master` 后，`master` 的 push 会触发
+[`.github/workflows/release.yml`](.github/workflows/release.yml)，构建 Linux AppImage
+与 `.tar.gz` 并创建 GitHub Release。版本号按已有 `v*` tag 自动递增 patch，首次发布
+为 `0.1.0`；需要指定 minor / major 版本时，在 `dev` 上直接修改 `package.json` 的
+`version` 再合并。发布流程不会把递增后的版本写回仓库。产物命名为
+`Maax-<version>-linux-x86_64.AppImage` 与 `Maax-<version>-linux-x64.tar.gz`。
 
 ## 架构
 

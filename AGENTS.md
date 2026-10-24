@@ -53,6 +53,13 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
 - Solid 只负责视图与本地同步状态，Effect 负责异步与服务编排。不要把本地同步值或渲染计算搬进 Effect。
 - Solid 与 Effect 由 Vite 打包进 `out/`，当前位于 `devDependencies`；迁移到 `dependencies` 前必须同步检查 electron-vite externalization 与 electron-builder 产物。
 
+## 分支与发布
+
+`dev` 是默认开发分支，功能改动先合入 `dev`；`master` 只接收 `dev` 的合并。
+`master` push 会运行 `.github/workflows/release.yml`：按已有 `v*` tag 自动递增 patch
+（首次使用 `package.json` 的 `0.1.0`），构建 Linux AppImage 与 `.tar.gz` 并创建
+GitHub Release。需要指定新版本时，在 `dev` 上直接修改 `package.json` 的 `version`。
+
 ## 质量与完成
 
 - 类型检查由 Oxlint 的 `typeAware` / `typeCheck` 完成；**没有 `tsc` / `typecheck` 脚本**。Oxlint 与 Oxfmt 是唯一 lint / format 工具。

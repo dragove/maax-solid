@@ -25,6 +25,7 @@ artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 linux:
   target:
     - AppImage
+    - tar.gz
     - deb
   category: Development
   executableName: maax
