@@ -16,6 +16,11 @@ files:
   - LICENSE
   - NOTICE
   - "!**/*.map"
+# MaaX only ships Chinese and English UI; the other Chromium locales add
+# roughly 9 MB to the installed tree and about 1.5 MB to each compressed package.
+electronLanguages:
+  - en-US
+  - zh-CN
 asar: true
 asarUnpack:
   - node_modules/koffi/**/*
@@ -26,6 +31,7 @@ linux:
   target:
     - AppImage
     - tar.gz
+    - tar.xz
     - deb
   category: Development
   executableName: maax

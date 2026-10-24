@@ -4,6 +4,11 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the build as a GitHub release
+        type: boolean
+        default: false
 
 # Release builds must not overlap: each run derives the next version from the
 # tags created by the previous one.
@@ -16,27 +21,39 @@ permissions:
 
 jobs:
   linux:
-    name: Linux AppImage and tar.gz
+    name: Linux AppImage, tar.gz and tar.xz
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       # pnpm 版本由 package.json 的 packageManager 字段决定。
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
+      # Electron 与 electron-builder 的工具链下载量大，单独缓存，避免每次
+      # 重新下载 Electron 和 AppImage 工具集。
+      - name: Cache Electron and builder tools
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml', 'electron-builder.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Resolve release version
         id: release
@@ -58,15 +75,19 @@ jobs:
       - name: Build Linux packages
         run: |
           pnpm run build
-          pnpm exec electron-builder --linux AppImage tar.gz --publish never
+          pnpm exec electron-builder --linux AppImage tar.gz tar.xz --publish never
+
+      - name: Show package sizes
+        run: ls -lh dist/*.AppImage dist/*.tar.gz dist/*.tar.xz
 
       - name: Publish GitHub release
+        if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || inputs.publish)
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
           gh release create "v$VERSION" \
-            dist/*.AppImage dist/*.tar.gz \
+            dist/*.AppImage dist/*.tar.gz dist/*.tar.xz \
             --target "$GITHUB_SHA" \
             --title "Maax $VERSION" \
             --generate-notes
