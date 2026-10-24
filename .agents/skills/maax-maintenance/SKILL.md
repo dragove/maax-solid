@@ -546,6 +546,52 @@ write JSON with a bare `writeFile` in place.
   `config/copilot.json` and starts a run with no `planId`. Do not add it back to
   `TASK_PALETTE_ORDER`; a first clear is one-off, everything after it uses the
   game's own auto-battle inside the Fight task.
+- Manual start ("单作业" row action) is MaaCore's single-file path and the only
+  way to run a sandbox assignment. It is a transient run choice, not a saved
+  option: the renderer sends `copilot.start` with `itemId`, main builds a
+  one-item setup with `createCopilotRunTasks(..., manual = true)`, and
+  `buildMaaTaskParams` sends one `filename` while omitting
+  `copilot_list`/`is_raid`. The saved batch and options stay unchanged. It
+  starts from the current formation screen, so the user must enter 险地 →
+  沙盘推演 and select assumptions first; the core cannot select them. Only a
+  normal item is selectable; choosing another row moves the target, and
+  "整批运行" clears it.
+- The Copilot batch is reordered by native HTML5 drag on the keyed row
+  (`<li draggable>` plus a `drag-handle`), not by rebuilding the array at render
+  time. Keep item-id keys so moving a row preserves its switch, detail expansion
+  and single-run selection; persist the whole reordered array through
+  `onItems`, and disable dragging while a run is preparing or running.
+- Every batch entry has an optional `enabled` switch (missing means on). All
+  task builders filter `enabled === false`; the Copilot tab's start uses only
+  enabled entries, and a single-item override forces its target on so a retired
+  assignment can still be re-run explicitly. Use `CopilotSetupStore.patchItems`
+  for these updates: it holds a `Semaphore` so an auto-retire cannot race a
+  user toggle.
+- A copilot run's `RunState.copilot` tracks the enabled items, their task
+  config ids and the last loaded file. On `TaskChainCompleted` a normal batch
+  retires every entry; on `TaskChainError` it retires only the files loaded
+  before the failing one (`lastLoaded`). SSS/paradox complete one task per file,
+  so each completion retires exactly that file. Retired entries are switched
+  off, and each newly completed PRTS assignment is liked once through
+  `PrtsClient.postJson("/copilot/rating", { id, rating: "Like" })` — never a
+  direct `fetch`, never for local files (`copilotId === 0`), and deduped because
+  the two difficulty entries of one assignment share a `copilotId`.
+- A Copilot assignment has two operator lists: `opers` (fixed operators) and
+  `groups` (interchangeable candidates, e.g. 地刺 ⇒ 狮蝎 / 伊桑). MaaCore
+  validates every member of both, so a bad requirement inside a group rejects
+  the whole file even when the fixed list looks fine. `CopilotDetail` and
+  `CopilotSearchItem` carry both; render groups separately with a "one of"
+  label (the search row keeps its compact fixed-operator chips, the expanded
+  detail shows the groups).
+- Before a Copilot launch, `repairCopilotFile` normalises downloaded PRTS
+  assignments: MaaCore's `parse_oper_usage` rejects a whole file when an
+  operator's `requirements.elite` is lower than its `skill_level` or `module`
+  implies. Raise `elite` to that minimum for operators present in the active
+  core's `battle_data.json`; leave unknown names alone (MaaCore skips the
+  check), and emit a warning toast naming the operator. This is why a
+  syntactically valid assignment can still surface as `CopilotFileReadError`;
+  that log entry now says MaaCore could not parse the file, not that reading
+  failed.
 - MAA's multi-assignment mode (`copilot_list`) starts at the **target chapter's
   stage map**. From the home screen or another chapter, the core only swipes
   `FullStageNavigation`, hits `ExceededLimit`, and never reaches the stage.
@@ -563,9 +609,35 @@ write JSON with a bare `writeFile` in place.
   normal branch, and refuse a mixed batch at add and start time. Their entry
   screens differ: normal needs the target chapter map, SSS the deployment
   preparation screen, Paradox the formation screen after choosing a skill.
+- All list surfaces (browser results, the browser's added summary, the Copilot
+  tab and task cards) label the hard bit through `copilotModeLabelKey`: chapters
+  15+ show 险地, `tough_` stages show 磨难, everything else 突袭. Do not hardcode
+  `copilot.raid` in a new surface.
 - Copilot `difficulty` is a bitmask (1 normal, 2 raid, 3 both), not an enum.
   Expanding "both" into two entries that share one file is what makes a normal
-  and a raid run back to back possible.
+  and a raid run back to back possible. The site usually omits the mask on main
+  story uploads: a `tough_` stage id is the 磨难 map and must resolve with
+  `is_raid` (otherwise the core enters the standard stage), and the browser
+  offers both modes when the mask is unset so 险地 can be chosen as a raid run.
+  MaaCore has no 沙盘推演 switch — its raid task only selects 突袭/磨难/险地.
+  Chapters 15+ call the hard bit 险地, so label it accordingly; a sandbox
+  assignment (its details say something like 沙盘全选右) still needs the user
+  to enter 险地 → 沙盘推演 and pick the assumptions manually. The copilot task
+  cannot select them, and multi-assignment mode navigates to the normal/hazard
+  stage first, so such an assignment must be run in single-file mode from the
+  formation screen.
+- The browser's "added" state is the caller's live batch (`copilot.items` for
+  the tab, the task's `copilot_list` for a task card); never keep a local copy,
+  or the row buttons drift from the list behind the dialog.
+- Batch entries in all three lists — the browser's "added" summary, the
+  copilot tab and a task card — expand the details saved in their downloaded
+  JSON through the shared `createCopilotDetails` controller and the
+  `copilot.detail` command. The reader is confined to `userData/copilot`
+  (`isCopilotPath`); a missing, malformed or out-of-folder file returns `null`
+  and the entry simply has no detail toggle. Never replace it with a generic
+  file-read IPC. The controller caches the answer per entry; the browser passes
+  `enabled` so its reads wait until the dialog is open, while the tab and task
+  card read on mount.
 
 ### PRTS traffic
 
@@ -620,6 +692,15 @@ levels in one formatter:
 - Always use the most specific payload field available (`first`, `subtask`,
   `taskchain`) instead of emitting `unknown`.
 - Add a formatter test for both an expected noisy event and a real failure.
+- Copilot failures arrive as `SubTaskError` with `what`
+  (`CopilotFileReadError`, `CopilotStageNotSupported`,
+  `UserAdditionalOperInvalid`, `OperboxDataParseFailed`) or as
+  `BattleFormationTask` with `why: "OperatorMissing"` and
+  `details.opers`. Map them to errors that name the file, stage, operator and
+  reason. `TaskChainError` itself carries only `taskchain` (plus
+  `details.error` for a caught exception), so when it has no reason append the
+  chapter-map/difficulty hint. `CopilotListLoadTaskFileSuccess` uses
+  `details.file_name`, `stage_name` and `id`, not `filename`.
 
 ## Packaging
 
