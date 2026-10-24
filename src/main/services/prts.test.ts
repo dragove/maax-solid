@@ -81,6 +81,28 @@ describe("prts client", () => {
     );
   });
 
+  it("posts an uncached rating request with a JSON body", async () => {
+    let seen: { method?: string; body?: string; contentType?: string } = {};
+    await withFetch(
+      (_url, init) => {
+        const headers = new Headers(init?.headers);
+        seen = {
+          ...(init?.method === undefined ? {} : { method: init.method }),
+          ...(typeof init?.body === "string" ? { body: init.body } : {}),
+          ...(headers.get("content-type") === null ? {} : { contentType: headers.get("content-type")! }),
+        };
+        return jsonResponse({ status_code: 200 });
+      },
+      async () => {
+        const client = new PrtsClient({ minGapMs: 0 });
+        await client.postJson("/copilot/rating", { id: 123, rating: "Like" });
+      },
+    );
+    expect(seen.method).toBe("POST");
+    expect(seen.contentType).toBe("application/json");
+    expect(JSON.parse(seen.body ?? "{}")).toEqual({ id: 123, rating: "Like" });
+  });
+
   it("reports 304 without downloading the body again", async () => {
     await withFetch(
       (_url, init) => {

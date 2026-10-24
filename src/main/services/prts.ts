@@ -68,6 +68,17 @@ export class PrtsClient {
     return response.body;
   }
 
+  /**
+   * Uncached POST for the one write the app performs: liking a completed
+   * assignment. It shares the queue and gap with every other request.
+   */
+  async postJson(path: string, body: unknown): Promise<unknown> {
+    const response = await this.enqueue(() =>
+      this.fetchOnce(path, undefined, { method: "POST", body: JSON.stringify(body) }),
+    );
+    return response.body;
+  }
+
   /** Conditional GET: returns the cached body on 304 instead of re-downloading it. */
   async getJsonConditional(
     path: string,
@@ -104,11 +115,18 @@ export class PrtsClient {
     return run;
   }
 
-  private async fetchOnce(path: string, etag: string | undefined): Promise<PrtsResponse> {
+  private async fetchOnce(
+    path: string,
+    etag: string | undefined,
+    init?: { readonly method: string; readonly body: string },
+  ): Promise<PrtsResponse> {
     const response = await fetch(`${prtsBaseUrl()}${path}`, {
+      method: init?.method ?? "GET",
+      ...(init?.body === undefined ? {} : { body: init.body }),
       signal: AbortSignal.timeout(this.timeoutMs),
       headers: {
         accept: "application/json",
+        ...(init?.body === undefined ? {} : { "content-type": "application/json" }),
         ...(etag === undefined ? {} : { "if-none-match": etag }),
       },
     });

@@ -219,6 +219,10 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
         const { input } = decode(Schema.Struct({ input: Schema.String }), payload);
         return run((app) => app.resolveCopilot(input));
       }
+      case COMMANDS.readCopilotDetail: {
+        const { filename } = decode(Schema.Struct({ filename: Schema.NonEmptyString }), payload);
+        return run((app) => app.readCopilotDetail(filename));
+      }
       case COMMANDS.searchCopilot: {
         const params = decode(CopilotSearchInputSchema, payload);
         return run((app) => app.searchCopilot(params));
@@ -236,8 +240,11 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
         return run((app) => app.setCopilotItems(items));
       }
       case COMMANDS.startCopilot: {
-        const { deviceId } = decode(Schema.Struct({ deviceId: Schema.NonEmptyString }), payload);
-        return run((app) => app.startCopilot(deviceId));
+        const { deviceId, itemId } = decode(
+          Schema.Struct({ deviceId: Schema.NonEmptyString, itemId: Schema.optional(Schema.NonEmptyString) }),
+          payload,
+        );
+        return run((app) => app.startCopilot(deviceId, itemId));
       }
       case COMMANDS.searchOperators: {
         const { query } = decode(Schema.Struct({ query: Schema.String }), payload);

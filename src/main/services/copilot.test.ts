@@ -1,5 +1,17 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildCopilotQuery, itemsFromContent, mapCopilotSearch, parseCopilotInput } from "./copilot";
+import {
+  buildCopilotQuery,
+  detailFromContent,
+  isCopilotPath,
+  itemsFromContent,
+  mapCopilotSearch,
+  parseCopilotInput,
+  readCopilotDetail,
+  repairCopilotFile,
+} from "./copilot";
 
 describe("copilot references", () => {
   it("reads bare ids", () => {
@@ -57,6 +69,12 @@ describe("copilot items", () => {
     expect(items[0]!.isRaid).toBe(true);
   });
 
+  it("marks a tough stage as a raid entry even without a difficulty mask", () => {
+    const items = itemsFromContent({ stage_name: "tough_12-16", doc: { title: "12-18 磨难" } }, 1, "/tmp/a.json");
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ isRaid: true, stage: "tough_12-16", kind: "normal" });
+  });
+
   it("falls back to the stage code when there is no title", () => {
     expect(itemsFromContent({ stage_name: "1-7" }, 1, "/tmp/a.json")[0]!.title).toBe("1-7");
   });
@@ -73,6 +91,141 @@ describe("copilot items", () => {
 
   it("keeps ordinary files typed as normal", () => {
     expect(itemsFromContent({ ...content, difficulty: 1 }, 1, "/tmp/a.json")[0]!.kind).toBe("normal");
+  });
+});
+
+describe("local assignment details", () => {
+  it("extracts the doc block and operator plan", () => {
+    expect(
+      detailFromContent({
+        doc: { details: "摆完挂机" },
+        minimum_required: "v6.0.0",
+        opers: [{ name: "银灰", role: "近卫", skill: 2, requirements: { elite: 2, level: 60 } }, { name: "" }],
+        groups: [
+          {
+            name: "地刺",
+            opers: [{ name: "狮蝎", skill: 1, requirements: { elite: 1, level: 70, skill_level: 10, module: 1 } }],
+          },
+        ],
+      }),
+    ).toEqual({
+      details: "摆完挂机",
+      minimumRequired: "v6.0.0",
+      operators: [{ name: "银灰", role: "近卫", skill: 2, elite: 2, level: 60 }],
+      groups: [
+        {
+          name: "地刺",
+          operators: [{ name: "狮蝎", role: "", skill: 1, elite: 1, level: 70, module: 1 }],
+        },
+      ],
+    });
+  });
+
+  it("only reads files inside the copilot folder", async () => {
+    const root = await mkdtemp(join(tmpdir(), "maax-copilot-"));
+    const copilotDir = join(root, "copilot");
+    await mkdir(copilotDir);
+    const inside = join(copilotDir, "prts-1.json");
+    const outside = join(root, "secret.json");
+    await writeFile(inside, JSON.stringify({ doc: { details: "说明" }, opers: [{ name: "桃金娘", skill: 1 }] }));
+    await writeFile(outside, JSON.stringify({ doc: { details: "不该被读到" } }));
+    try {
+      expect(isCopilotPath(inside, copilotDir)).toBe(true);
+      expect(isCopilotPath(outside, copilotDir)).toBe(false);
+      expect(isCopilotPath(join(copilotDir, "..", "secret.json"), copilotDir)).toBe(false);
+      await expect(readCopilotDetail(inside, copilotDir)).resolves.toEqual({
+        details: "说明",
+        minimumRequired: "",
+        operators: [{ name: "桃金娘", role: "", skill: 1 }],
+        groups: [],
+      });
+      await expect(readCopilotDetail(outside, copilotDir)).resolves.toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("yields null for a missing or malformed file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "maax-copilot-"));
+    const file = join(root, "prts-2.json");
+    try {
+      await expect(readCopilotDetail(file, root)).resolves.toBeNull();
+      await writeFile(file, "not json");
+      await expect(readCopilotDetail(file, root)).resolves.toBeNull();
+      await writeFile(file, JSON.stringify({ doc: {} }));
+      await expect(readCopilotDetail(file, root)).resolves.toEqual({
+        details: "",
+        minimumRequired: "",
+        operators: [],
+        groups: [],
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("copilot file repair", () => {
+  const broken = {
+    stage_name: "main_17-12",
+    opers: [{ name: "狮蝎", skill: 1, requirements: { elite: 1, level: 70, skill_level: 10, module: 1 } }],
+    groups: [
+      {
+        name: "地刺",
+        opers: [{ name: "狮蝎", skill: 1, requirements: { elite: 1, level: 70, skill_level: 10, module: 1 } }],
+      },
+    ],
+  };
+
+  it("raises an elite level that contradicts skill/module requirements", async () => {
+    const root = await mkdtemp(join(tmpdir(), "maax-repair-"));
+    const file = join(root, "prts-92568.json");
+    await writeFile(file, JSON.stringify(broken));
+    try {
+      const repair = await repairCopilotFile(file, new Set(["狮蝎"]));
+      expect(repair?.fixes).toHaveLength(2);
+      expect(repair?.fixes[0]).toContain("狮蝎");
+      expect(repair?.fixes[0]).toContain("精英一 → 精英二");
+      expect(repair?.fixes[1]).toContain("地刺 / 狮蝎");
+
+      const saved = JSON.parse(await readFile(file, "utf8")) as typeof broken;
+      expect(saved.opers[0]!.requirements.elite).toBe(2);
+      expect(saved.groups[0]!.opers[0]!.requirements.elite).toBe(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves an operator unknown to the active core alone", async () => {
+    const root = await mkdtemp(join(tmpdir(), "maax-repair-"));
+    const file = join(root, "unknown.json");
+    const content = {
+      stage_name: "main_17-12",
+      opers: [{ name: "未来干员", skill: 1, requirements: { elite: 1, skill_level: 10 } }],
+    };
+    await writeFile(file, JSON.stringify(content));
+    try {
+      expect(await repairCopilotFile(file, new Set(["狮蝎"]))).toBeNull();
+      const saved = JSON.parse(await readFile(file, "utf8")) as typeof content;
+      expect(saved.opers[0]!.requirements.elite).toBe(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves a consistent assignment untouched", async () => {
+    const root = await mkdtemp(join(tmpdir(), "maax-repair-"));
+    const file = join(root, "valid.json");
+    const content = {
+      stage_name: "main_17-12",
+      opers: [{ name: "狮蝎", skill: 1, requirements: { elite: 2, skill_level: 10, module: 1 } }],
+    };
+    await writeFile(file, JSON.stringify(content));
+    try {
+      expect(await repairCopilotFile(file, new Set(["狮蝎"]))).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -111,6 +264,12 @@ describe("copilot search mapping", () => {
       { name: "银灰", role: "近卫", skill: 2, requirements: { elite: 2, level: 60, module: 3, potentiality: 1 } },
       { name: "桃金娘", skill: 1 },
       { name: "" },
+    ],
+    groups: [
+      {
+        name: "地刺",
+        opers: [{ name: "狮蝎", skill: 1, requirements: { elite: 1, level: 70, skill_level: 10, module: 1 } }],
+      },
     ],
   };
   const raw = {
@@ -161,6 +320,12 @@ describe("copilot search mapping", () => {
       potential: 1,
     });
     expect(result.items[0]!.operators[1]).toEqual({ name: "桃金娘", role: "", skill: 1 });
+    expect(result.items[0]!.groups).toEqual([
+      {
+        name: "地刺",
+        operators: [{ name: "狮蝎", role: "", skill: 1, elite: 1, level: 70, module: 1 }],
+      },
+    ]);
     expect(result.items[1]).toMatchObject({ title: "", stage: "", operators: [] });
   });
 

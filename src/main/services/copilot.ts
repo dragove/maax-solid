@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
+  CopilotDetail,
+  CopilotGroup,
   CopilotItem,
   CopilotOperator,
   CopilotResolveResult,
@@ -9,7 +11,8 @@ import type {
   CopilotSearchResult,
 } from "../../shared/schemas";
 import { copilotKindFromContent } from "../../shared/copilot-kind";
-import type { PrtsClient } from "./prts";
+import { isToughStage } from "../../shared/copilot-mode";
+import { writeFileAtomic, type PrtsClient } from "./prts";
 
 /**
  * PRTS copilot API (prts.maa.plus, the mirror MAA itself talks to).
@@ -72,6 +75,12 @@ export const itemsFromContent = (
   // branch even if a malformed document still has the bitmask.
   if (kind !== "normal") {
     return [{ id: randomUUID(), copilotId, filename, stage, title, isRaid: false, kind }];
+  }
+  // A `tough_` stage is the 磨难 map itself, and the site usually omits the
+  // difficulty mask on those uploads. Running such a file as normal would send
+  // the core to the standard stage, so the stage id decides here.
+  if (isToughStage(stage)) {
+    return [{ id: randomUUID(), copilotId, filename, stage, title, isRaid: true, kind }];
   }
   const modes: boolean[] = [];
   if ((difficulty & DIFFICULTY_NORMAL) !== 0) modes.push(false);
@@ -198,8 +207,8 @@ const asString = (value: unknown): string => (typeof value === "string" ? value 
 
 const optionalNumber = (value: unknown): number | undefined => (typeof value === "number" ? value : undefined);
 
-const mapOperators = (content: Record<string, unknown>): ReadonlyArray<CopilotOperator> => {
-  const opers = Array.isArray(content.opers) ? content.opers : [];
+const mapOperatorEntries = (value: unknown): ReadonlyArray<CopilotOperator> => {
+  const opers = Array.isArray(value) ? value : [];
   return opers.flatMap((item) => {
     const oper = asRecord(item);
     const name = asString(oper.name);
@@ -221,6 +230,119 @@ const mapOperators = (content: Record<string, unknown>): ReadonlyArray<CopilotOp
       },
     ];
   });
+};
+
+const mapOperators = (content: Record<string, unknown>): ReadonlyArray<CopilotOperator> =>
+  mapOperatorEntries(content.opers);
+
+/** Groups are interchangeable alternatives; the core validates every member. */
+const mapGroups = (content: Record<string, unknown>): ReadonlyArray<CopilotGroup> => {
+  const groups = Array.isArray(content.groups) ? content.groups : [];
+  return groups.flatMap((item) => {
+    const group = asRecord(item);
+    const name = asString(group.name);
+    const operators = mapOperatorEntries(group.opers);
+    if (name === "" && operators.length === 0) return [];
+    return [{ name, operators }];
+  });
+};
+
+/** Everything the local assignment file offers for a detail view. */
+export const detailFromContent = (raw: unknown): CopilotDetail => {
+  const content = asRecord(raw);
+  const doc = asRecord(content.doc);
+  return {
+    details: asString(doc.details),
+    minimumRequired: asString(content.minimum_required),
+    operators: mapOperators(content),
+    groups: mapGroups(content),
+  };
+};
+
+/**
+ * Batch entries store the path of the file they downloaded. Reading one is an
+ * IPC-reachable action, so it must never escape the app's own copilot folder.
+ */
+export const isCopilotPath = (filename: string, copilotDir: string): boolean => {
+  const path = relative(resolve(copilotDir), resolve(filename));
+  return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+};
+
+/**
+ * Read the saved JSON behind one batch entry. A missing, malformed or
+ * out-of-folder file yields `null`: the browser then offers no detail panel for
+ * that entry instead of showing an empty one.
+ */
+export const readCopilotDetail = async (filename: string, copilotDir: string): Promise<CopilotDetail | null> => {
+  if (!isCopilotPath(filename, copilotDir)) return null;
+  try {
+    return detailFromContent(JSON.parse(await readFile(filename, "utf8")));
+  } catch {
+    return null;
+  }
+};
+
+const eliteLabel = (value: number): string => ["零", "一", "二", "三"][value] ?? String(value);
+
+export interface CopilotFileRepair {
+  /** Human-readable corrections, one per operator. */
+  readonly fixes: ReadonlyArray<string>;
+}
+
+/**
+ * Repair the one inconsistency MaaCore refuses to parse in downloaded
+ * assignments: an operator requirement that declares a lower elite level than
+ * its own skill level or module implies.
+ *
+ * MaaCore's `parse_oper_usage` returns `nullopt` for such an operator, which
+ * surfaces only as the generic "CopilotFileReadError". The PRTS editor lets
+ * authors save the contradiction, and the local JSON is a downloaded cache, so
+ * raising the declared elite level to the required minimum is safe and keeps
+ * the assignment runnable. Only operators the active core knows are touched;
+ * MaaCore skips this check for unknown names.
+ */
+export const repairCopilotFile = async (
+  filename: string,
+  known: ReadonlySet<string> | undefined,
+): Promise<CopilotFileRepair | null> => {
+  const parsed = JSON.parse(await readFile(filename, "utf8")) as Record<string, unknown>;
+  const fixes: string[] = [];
+
+  const repairOper = (value: unknown, group: string): void => {
+    const oper = asRecord(value);
+    const name = asString(oper.name);
+    if (name === "") return;
+    if (known !== undefined && !known.has(name)) return;
+    const requirements = asRecord(oper.requirements);
+    if (Object.keys(requirements).length === 0) return;
+    const elite = optionalNumber(requirements.elite);
+    if (elite === undefined) return;
+
+    // Mirrors CopilotConfig::parse_oper_usage: skill index, skill level and
+    // module all impose an elite minimum; a declared elite below it fails load.
+    let required = Math.max(0, (optionalNumber(oper.skill) ?? 0) - 1);
+    const skillLevel = optionalNumber(requirements.skill_level);
+    if (skillLevel !== undefined && skillLevel > 7) required = Math.max(2, required);
+    else if (skillLevel !== undefined && skillLevel > 4) required = Math.max(1, required);
+    const module = optionalNumber(requirements.module);
+    if (module !== undefined && module > 0) required = Math.max(2, required);
+    if (required <= elite) return;
+
+    requirements.elite = required;
+    fixes.push(`${group === "" ? "" : `${group} / `}${name}：精英${eliteLabel(elite)} → 精英${eliteLabel(required)}`);
+  };
+
+  const values = (value: unknown): ReadonlyArray<unknown> => (Array.isArray(value) ? value : []);
+  for (const value of values(parsed.opers)) repairOper(value, "");
+  for (const value of values(parsed.groups)) {
+    const group = asRecord(value);
+    const groupName = asString(group.name);
+    for (const oper of values(group.opers)) repairOper(oper, groupName);
+  }
+
+  if (fixes.length === 0) return null;
+  await writeFileAtomic(filename, `${JSON.stringify(parsed, null, 2)}\n`);
+  return { fixes };
 };
 
 /** Turn one `copilot/query` response into renderable rows. */
@@ -250,6 +372,7 @@ export const mapCopilotSearch = (raw: unknown, stageCodes: ReadonlyMap<string, s
       stageCode: stageCodes.get(stage) ?? "",
       difficulty: asNumber(content.difficulty),
       operators: mapOperators(content),
+      groups: mapGroups(content),
       uploader: asString(record.uploader),
       uploaderId: asString(record.uploader_id) || String(asNumber(record.uploader_id) || ""),
       views: asNumber(record.views),

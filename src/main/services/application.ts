@@ -9,7 +9,10 @@ import type {
   AppSettingsPatch,
   Bootstrap,
   CoreInfo,
+  CopilotDetail,
   CopilotFile,
+  CopilotItem,
+  CopilotKind,
   CopilotLevel,
   CopilotOptions,
   CopilotResolveResult,
@@ -50,6 +53,7 @@ import {
   createTask,
   firstMissingField,
 } from "../../shared/tasks";
+import { copilotSucceededItems, type CopilotRunOutcome } from "../../shared/copilot-progress";
 import { scheduleDue } from "../../shared/schedule";
 import { setCloseToTray } from "../app-behavior";
 import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
@@ -142,7 +146,7 @@ interface StageCache {
   readonly catalog: StageCatalog;
 }
 import { CoreHostClient } from "../core-host-client";
-import type { CopilotSearchParams } from "./copilot";
+import { repairCopilotFile, type CopilotSearchParams } from "./copilot";
 import { CoreRegistry } from "./core-registry";
 import { CoreInstaller } from "./core-installer";
 import { maaxError, type MaaxError } from "../errors";
@@ -177,10 +181,20 @@ interface RuntimeDevice {
   lastError?: string;
 }
 
+interface CopilotRunMeta {
+  readonly items: ReadonlyArray<CopilotItem>;
+  readonly kind: CopilotKind;
+  /** Config ids in task order; maps a completed task back to its assignment. */
+  readonly taskIds: ReadonlyArray<string>;
+  lastLoaded: number;
+}
+
 interface RunState {
   snapshot: RunSnapshot;
   readonly taskConfigIds: Map<number, string>;
   readonly hostKey: string;
+  /** Progress of a copilot tab run; absent for plans and other task families. */
+  copilot?: CopilotRunMeta;
   /** Terminal snapshots are written to history once. */
   recorded?: boolean;
 }
@@ -218,12 +232,13 @@ export interface ApplicationApi {
   readonly importCopilotFile: Effect.Effect<CopilotFile | null, MaaxError>;
   readonly pickVideoFile: Effect.Effect<string | null, MaaxError>;
   readonly resolveCopilot: (input: string) => Effect.Effect<CopilotResolveResult, MaaxError>;
+  readonly readCopilotDetail: (filename: string) => Effect.Effect<CopilotDetail | null>;
   readonly searchCopilot: (params: CopilotSearchParams) => Effect.Effect<CopilotSearchResult, MaaxError>;
   readonly copilotLevels: (query: string) => Effect.Effect<ReadonlyArray<CopilotLevel>, MaaxError>;
   readonly copilotOperators: (query: string) => Effect.Effect<ReadonlyArray<OperatorEntry>, MaaxError>;
   readonly updateCopilotOptions: (patch: Partial<CopilotOptions>) => Effect.Effect<CopilotSetup, MaaxError>;
   readonly setCopilotItems: (items: CopilotSetup["items"]) => Effect.Effect<CopilotSetup, MaaxError>;
-  readonly startCopilot: (deviceId: string) => Effect.Effect<RunSnapshot, MaaxError>;
+  readonly startCopilot: (deviceId: string, itemId?: string) => Effect.Effect<RunSnapshot, MaaxError>;
   readonly startRun: (deviceId: string, planId: string) => Effect.Effect<RunSnapshot, MaaxError>;
   readonly stopRun: (deviceId: string) => Effect.Effect<RunSnapshot, MaaxError>;
   readonly runHistory: Effect.Effect<RunHistory>;
@@ -340,6 +355,31 @@ export const ApplicationLive: Layer.Layer<
           catch: (cause) => maaxError("无法读取干员数据", cause),
         });
       });
+
+    /**
+     * Names the active core knows, used only to decide whether a downloaded
+     * assignment needs the elite-requirement repair: MaaCore skips its check for
+     * operators missing from the core's own battle data.
+     */
+    const knownCopilotOperators = Effect.gen(function* () {
+      const currentSettings = yield* settings.get;
+      const ready = (yield* registry.list).filter((core) => core.status === "ready");
+      const active = currentSettings.activeCoreId
+        ? ready.find((core) => core.id === currentSettings.activeCoreId)
+        : ready[0];
+      if (!active) return undefined;
+      const data = yield* Effect.tryPromise({
+        try: () => operatorCatalogue.load(join(active.root, "resource")),
+        catch: (cause) => maaxError("无法读取干员数据", cause),
+      }).pipe(Effect.orElseSucceed(() => undefined));
+      if (data === undefined) return undefined;
+      const names = new Set<string>();
+      for (const entry of data.entries) {
+        names.add(entry.name);
+        if (entry.nameEn !== "") names.add(entry.nameEn);
+      }
+      return names;
+    });
 
     const hosts = new Map<string, HostEntry>();
     const runtime = new Map<string, RuntimeDevice>();
@@ -466,6 +506,7 @@ export const ApplicationLive: Layer.Layer<
     const finishRun = (deviceId: string, status: RunSnapshot["status"], message?: string): void => {
       const run = runs.get(deviceId);
       if (!run) return;
+      run.copilot = undefined;
       const next = finishSnapshot(run.snapshot, status, Date.now(), message);
       if (next === run.snapshot) return;
       run.snapshot = next;
@@ -591,6 +632,56 @@ export const ApplicationLive: Layer.Layer<
       reconnectTimers.set(deviceId, timer);
     };
 
+    // Liking is best-effort and must not repeat for the two entries that share
+    // one PRTS assignment (normal + raid use the same copilotId).
+    const ratedCopilotIds = new Set<number>();
+    const rateCopilot = (copilotId: number): void => {
+      if (!Number.isSafeInteger(copilotId) || copilotId <= 0 || ratedCopilotIds.has(copilotId)) return;
+      ratedCopilotIds.add(copilotId);
+      // Callback boundary: the queued PRTS request runs after the native
+      // callback returns and failures are only logged.
+      // oxlint-disable-next-line effecttsgo/run-effect-inside-effect
+      void Effect.runPromise(prts.like(copilotId)).catch((error: unknown) => {
+        console.warn("自动点赞失败", error);
+      });
+    };
+
+    /**
+     * Retire the assignments a terminal copilot callback proves completed.
+     *
+     * A normal batch is one task, so a completed task retires every enabled
+     * entry and a chain error retires only the files loaded before the failing
+     * one. SSS and paradox use one task per file, so each completed task retires
+     * exactly the file it carried and the queue keeps the metadata until it ends.
+     */
+    const applyCopilotOutcome = (run: RunState, outcome: CopilotRunOutcome, taskId: number): void => {
+      const meta = run.copilot;
+      if (!meta) return;
+      const configId = run.taskConfigIds.get(taskId);
+      const taskIndex = configId === undefined ? -1 : meta.taskIds.indexOf(configId);
+      const succeeded = copilotSucceededItems(meta.items, meta.kind, outcome, meta.lastLoaded, taskIndex);
+      if (succeeded.length > 0) {
+        const ids = new Set(succeeded.map((item) => item.id));
+        // oxlint-disable-next-line effecttsgo/run-effect-inside-effect
+        void Effect.runPromise(
+          copilotSetup.patchItems((items) =>
+            items.map((item) => (ids.has(item.id) ? { ...item, enabled: false } : item)),
+          ),
+        )
+          .then((setup) => {
+            emitCopilot(setup);
+          })
+          .catch((error: unknown) => {
+            console.warn("自动屏蔽已完成作业失败", error);
+          });
+        for (const item of succeeded) rateCopilot(item.copilotId);
+      }
+      // A normal batch has one task; sequential kinds wait for the next task
+      // completion and are cleared when the queue closes.
+      if (meta.kind !== "normal" && outcome === "completed") return;
+      run.copilot = undefined;
+    };
+
     const handleCallback = (item: EngineCallback): void => {
       const deviceId = item.sessionId;
       let payload: Record<string, unknown> = {};
@@ -666,6 +757,12 @@ export const ApplicationLive: Layer.Layer<
 
       const run = runs.get(deviceId);
       if (!run) return;
+      // The plugin loads the next file only after the previous battle finished,
+      // so its id tells us which files a later chain error may safely retire.
+      if (run.copilot?.kind === "normal" && item.msg === 20003 && what === "CopilotListLoadTaskFileSuccess") {
+        const loaded = Number(details.id);
+        if (Number.isInteger(loaded) && loaded >= 0) run.copilot.lastLoaded = loaded;
+      }
       const action = runCallbackAction(item.msg, payload);
       if (!action) return;
 
@@ -678,17 +775,21 @@ export const ApplicationLive: Layer.Layer<
           emitEngine();
           break;
         case "task-completed":
+          applyCopilotOutcome(run, "completed", action.taskId);
           run.snapshot = completeTask(run.snapshot, action.taskId, Date.now());
           emitRun(run);
           break;
         case "task-failed":
+          applyCopilotOutcome(run, "failed", action.taskId);
           run.snapshot = failTask(run.snapshot, action.taskId, action.message, Date.now());
           emitRun(run);
           break;
         case "run-stopped":
+          run.copilot = undefined;
           finishRun(deviceId, "stopped");
           break;
         case "queue-finished": {
+          run.copilot = undefined;
           const failed = run.snapshot.tasks.some((task) => task.status === "failed");
           finishRun(deviceId, failed ? "failed" : "completed");
           notifyRunFinished(deviceId, failed);
@@ -708,6 +809,9 @@ export const ApplicationLive: Layer.Layer<
         abortConnectWaiter(deviceId, reason);
         const run = runs.get(deviceId);
         if (run && (run.snapshot.status === "running" || run.snapshot.status === "preparing")) {
+          // Files loaded before the crash are still proven completed for a
+          // normal batch; sequential tasks were retired one by one already.
+          applyCopilotOutcome(run, "failed", 0);
           finishRun(deviceId, "failed", reason);
         }
         runtime.delete(deviceId);
@@ -1038,6 +1142,7 @@ export const ApplicationLive: Layer.Layer<
           catch: (cause) => maaxError("停止任务失败", cause),
         });
         const now = Date.now();
+        run.copilot = undefined;
         run.snapshot = {
           ...run.snapshot,
           status: "stopped",
@@ -1057,7 +1162,12 @@ export const ApplicationLive: Layer.Layer<
       });
 
     /** Append a batch of tasks to the device's session and start it. */
-    const launchTasks = (deviceId: string, tasks: ReadonlyArray<TaskConfig>, planId?: string) =>
+    const launchTasks = (
+      deviceId: string,
+      tasks: ReadonlyArray<TaskConfig>,
+      planId?: string,
+      copilot?: { readonly items: ReadonlyArray<CopilotItem>; readonly kind: CopilotKind },
+    ) =>
       Effect.gen(function* () {
         const { state, host } = yield* getConnectedDevice(deviceId);
         const sessionId = state.sessionId!;
@@ -1077,7 +1187,21 @@ export const ApplicationLive: Layer.Layer<
             status: "pending",
           })),
         };
-        const run: RunState = { snapshot, taskConfigIds: new Map(), hostKey: host.key };
+        const run: RunState = {
+          snapshot,
+          taskConfigIds: new Map(),
+          hostKey: host.key,
+          ...(copilot === undefined
+            ? {}
+            : {
+                copilot: {
+                  items: copilot.items,
+                  kind: copilot.kind,
+                  taskIds: tasks.map((task) => task.id),
+                  lastLoaded: -1,
+                },
+              }),
+        };
         runs.set(deviceId, run);
         emitRun(run);
 
@@ -1168,25 +1292,75 @@ export const ApplicationLive: Layer.Layer<
      * Copilot runs on demand: one assignment batch, no plan, no queue. A
      * completed or stopped run leaves the device connected and idle.
      */
-    const startCopilot = (deviceId: string) =>
+    const startCopilot = (deviceId: string, itemId?: string) =>
       Effect.gen(function* () {
         yield* ensureDeviceIdle(deviceId);
         const setup = yield* copilotSetup.get;
         if (setup.items.length === 0) return yield* maaxError("请先添加作业");
-        const kinds = new Set(setup.items.map((item) => item.kind ?? "normal"));
-        if (kinds.size > 1) {
-          return yield* maaxError(
-            "同一批作业不能混合普通关卡、保全派驻和悖论模拟",
-            "它们从不同的游戏界面开始，请清空列表后分别运行",
-          );
+
+        // An item override is a one-off: keep the saved batch untouched and run
+        // just that file in single-file mode. It is also allowed out of a mixed
+        // batch, because only the selected normal assignment is used.
+        let runSetup = setup;
+        let manual = false;
+        if (itemId !== undefined) {
+          const target = setup.items.find((item) => item.id === itemId);
+          if (!target) return yield* maaxError("这份作业已不在列表中", "请刷新列表后重试");
+          if ((target.kind ?? "normal") !== "normal") {
+            return yield* maaxError("单作业模式只支持普通关卡作业", "保全派驻和悖论模拟请使用各自的入口");
+          }
+          // An explicit single run overrides the batch switch; it is the one
+          // way to re-run a retired assignment without re-enabling it first.
+          runSetup = { items: [{ ...target, enabled: true }], options: setup.options };
+          manual = true;
+        } else {
+          const enabledItems = setup.items.filter((item) => item.enabled !== false);
+          if (enabledItems.length === 0) {
+            return yield* maaxError("没有启用的作业", "打开作业右侧的开关后再开始");
+          }
+          const kinds = new Set(enabledItems.map((item) => item.kind ?? "normal"));
+          if (kinds.size > 1) {
+            return yield* maaxError(
+              "同一批作业不能混合普通关卡、保全派驻和悖论模拟",
+              "它们从不同的游戏界面开始，请清空列表后分别运行",
+            );
+          }
+          runSetup = { items: enabledItems, options: setup.options };
         }
-        const tasks = createCopilotRunTasks(setup);
+        // PRTS assignments are user content: MaaCore rejects the whole file
+        // when one operator's elite requirement contradicts its own skill or
+        // module. Normalise that known inconsistency before launch so the
+        // failure cannot surface as the opaque "CopilotFileReadError".
+        const known = yield* knownCopilotOperators;
+        const repairs: string[] = [];
+        for (const item of runSetup.items) {
+          const repair = yield* Effect.tryPromise({
+            try: () => repairCopilotFile(item.filename, known),
+            catch: (cause) =>
+              maaxError(
+                `无法读取作业文件「${item.title || item.stage || item.filename}」`,
+                cause instanceof Error ? cause.message : String(cause),
+              ),
+          });
+          if (repair !== null) repairs.push(...repair.fixes);
+        }
+        if (repairs.length > 0) {
+          bus.emit({
+            _tag: "toast",
+            kind: "warning",
+            title: "已修正作业要求",
+            message: repairs.join("；"),
+          });
+        }
+
+        const kind = runSetup.items[0]?.kind ?? "normal";
+        const tasks = createCopilotRunTasks(runSetup, undefined, manual);
         if (tasks.length === 0) return yield* maaxError("没有可运行的作业");
         for (const task of tasks) {
           const missing = firstMissingField(task);
           if (missing) return yield* maaxError(`任务「${task.name || task.type}」缺少必备设置`, missing.zh);
         }
-        return yield* launchTasks(deviceId, tasks);
+        return yield* launchTasks(deviceId, tasks, undefined, { items: runSetup.items, kind });
       });
 
     const stopRun = (deviceId: string) =>
@@ -2081,6 +2255,7 @@ export const ApplicationLive: Layer.Layer<
       importCopilotFile,
       pickVideoFile,
       resolveCopilot: prts.resolve,
+      readCopilotDetail: prts.detail,
       searchCopilot: prts.search,
       copilotLevels: prts.levels,
       copilotOperators,

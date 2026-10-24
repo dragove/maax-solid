@@ -1,8 +1,8 @@
 import { Context, Effect, Layer } from "effect";
 import { copilotKindFromStageId } from "../../shared/copilot-kind";
-import type { CopilotLevel, CopilotResolveResult, CopilotSearchResult } from "../../shared/schemas";
+import type { CopilotDetail, CopilotLevel, CopilotResolveResult, CopilotSearchResult } from "../../shared/schemas";
 import { maaxError, type MaaxError } from "../errors";
-import { resolveCopilot, searchCopilot, type CopilotSearchParams } from "./copilot";
+import { readCopilotDetail, resolveCopilot, searchCopilot, type CopilotSearchParams } from "./copilot";
 import { findLevel, levelCachePath, LevelCatalogue } from "./level-catalog";
 import { AppPaths } from "./paths";
 import { PrtsClient } from "./prts";
@@ -16,6 +16,10 @@ export interface PrtsLibraryApi {
   readonly search: (params: CopilotSearchParams) => Effect.Effect<CopilotSearchResult, MaaxError>;
   readonly levels: (query: string) => Effect.Effect<ReadonlyArray<CopilotLevel>, MaaxError>;
   readonly resolve: (input: string) => Effect.Effect<CopilotResolveResult, MaaxError>;
+  /** Read the downloaded JSON of a batch entry; `null` when it is gone or unreadable. */
+  readonly detail: (filename: string) => Effect.Effect<CopilotDetail | null>;
+  /** Like a PRTS assignment; a local file (id 0) is a no-op. */
+  readonly like: (copilotId: number) => Effect.Effect<void, MaaxError>;
 }
 
 export class PrtsLibrary extends Context.Service<PrtsLibrary, PrtsLibraryApi>()("maax/PrtsLibrary") {}
@@ -57,6 +61,19 @@ export const PrtsLibraryLive: Layer.Layer<PrtsLibrary, never, AppPaths> = Layer.
         return matches;
       });
 
+    // The path comes from saved batch entries, so the folder check lives in the
+    // reader itself; a missing file is a normal "no detail" answer, not an error.
+    const detail = (filename: string) => Effect.promise(() => readCopilotDetail(filename, paths.copilotDir));
+
+    const like = (copilotId: number) =>
+      Effect.gen(function* () {
+        if (!Number.isSafeInteger(copilotId) || copilotId <= 0) return;
+        yield* Effect.tryPromise({
+          try: () => client.postJson("/copilot/rating", { id: copilotId, rating: "Like" }),
+          catch: (cause) => maaxError("点赞失败", cause),
+        });
+      });
+
     const resolve = (input: string) =>
       Effect.gen(function* () {
         const result = yield* Effect.tryPromise({
@@ -79,6 +96,6 @@ export const PrtsLibraryLive: Layer.Layer<PrtsLibrary, never, AppPaths> = Layer.
         };
       });
 
-    return { search, levels, resolve } satisfies PrtsLibraryApi;
+    return { search, levels, resolve, detail, like } satisfies PrtsLibraryApi;
   }),
 );

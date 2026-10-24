@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Effect, Layer, Ref, Semaphore } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import {
   CopilotSetupSchema,
@@ -20,6 +20,10 @@ export interface CopilotSetupApi {
   readonly get: Effect.Effect<CopilotSetup>;
   readonly updateOptions: (patch: Partial<CopilotOptions>) => Effect.Effect<CopilotSetup, MaaxError>;
   readonly setItems: (items: CopilotSetup["items"]) => Effect.Effect<CopilotSetup, MaaxError>;
+  /** Atomically rewrite the batch; used by the run-progress auto-retire. */
+  readonly patchItems: (
+    update: (items: CopilotSetup["items"]) => CopilotSetup["items"],
+  ) => Effect.Effect<CopilotSetup, MaaxError>;
   readonly reset: Effect.Effect<CopilotSetup>;
 }
 
@@ -41,6 +45,9 @@ export const CopilotSetupLive: Layer.Layer<CopilotSetupStore, never, AppPaths | 
       items: [...loaded.items],
       options: { ...DEFAULT_COPILOT_SETUP.options, ...loaded.options },
     });
+    // Every mutation shares one permit: an auto-retire can race a user toggle.
+    const lock = yield* Semaphore.make(1);
+    const exclusive = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => lock.withPermits(1)(effect);
 
     const persist = (value: CopilotSetup) =>
       writeJson(paths.copilotSetupFile, value).pipe(Effect.asVoid, Effect.provideService(FileSystem, fs));
@@ -53,27 +60,40 @@ export const CopilotSetupLive: Layer.Layer<CopilotSetupStore, never, AppPaths | 
       });
 
     const updateOptions = (patch: Partial<CopilotOptions>) =>
-      Effect.gen(function* () {
-        const current = yield* Ref.get(ref);
-        const options = { ...current.options, ...patch };
-        if (!Number.isFinite(options.loopTimes) || options.loopTimes < 1) options.loopTimes = 1;
-        if (!Number.isFinite(options.formationIndex) || options.formationIndex < 0) options.formationIndex = 0;
-        if (![0, 1, 2, 3].includes(options.supportUnitUsage)) options.supportUnitUsage = 0;
-        return yield* write({ ...current, options });
-      });
+      exclusive(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(ref);
+          const options = { ...current.options, ...patch };
+          if (!Number.isFinite(options.loopTimes) || options.loopTimes < 1) options.loopTimes = 1;
+          if (!Number.isFinite(options.formationIndex) || options.formationIndex < 0) options.formationIndex = 0;
+          if (![0, 1, 2, 3].includes(options.supportUnitUsage)) options.supportUnitUsage = 0;
+          return yield* write({ ...current, options });
+        }),
+      );
 
     const setItems = (items: CopilotSetup["items"]) =>
-      Effect.gen(function* () {
-        const current = yield* Ref.get(ref);
-        return yield* write({ ...current, items: [...items] });
-      });
+      exclusive(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(ref);
+          return yield* write({ ...current, items: [...items] });
+        }),
+      );
 
-    const reset = write({ items: [], options: { ...DEFAULT_COPILOT_SETUP.options } });
+    const patchItems = (update: (items: CopilotSetup["items"]) => CopilotSetup["items"]) =>
+      exclusive(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(ref);
+          return yield* write({ ...current, items: [...update(current.items)] });
+        }),
+      );
+
+    const reset = exclusive(write({ items: [], options: { ...DEFAULT_COPILOT_SETUP.options } }));
 
     return {
       get: Ref.get(ref),
       updateOptions,
       setItems,
+      patchItems,
       reset,
     } satisfies CopilotSetupApi;
   }),
