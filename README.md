@@ -113,6 +113,16 @@ MaaCore 会安装进程级信号处理器，且 koffi 回调会阻塞其消息�
 主进程。详细决策见 [docs/architecture.md](docs/architecture.md)，路线图见
 [docs/roadmap.md](docs/roadmap.md)。
 
+## 致谢
+
+感谢这些项目与社区的工作：
+
+- [MaaX](https://github.com/MaaAssistantArknights/MaaX)：原版 Electron + Vue3 桌面客户端，
+  本项目的功能与交互参考。
+- [MAA-Meow](https://github.com/Aliothmoon/MAA-Meow)：MAA 的 Android 客户端。
+- [MaaCore / MaaAssistantArknights](https://github.com/MaaAssistantArknights/MaaAssistantArknights)：
+  MaaCore 与游戏资源，本项目自动化的核心。
+
 ## 许可
 
 Maax 以 **AGPL-3.0-or-later** 发布。MaaCore / MaaAssistantArknights 是独立的

@@ -25,11 +25,16 @@ MaaAssistantArknights / MaaCore
   it separately; it is executed in an isolated helper process and is licensed
   under the GNU Affero General Public License.
 
-MaaX (MeoAsstElectronUI)
+MaaX (formerly MeoAsstElectronUI)
   License: AGPL-3.0-or-later
-  Source: https://github.com/MaaAssistantArknights/MeoAsstElectronUI
+  Source: https://github.com/MaaAssistantArknights/MaaX
   MaaX is the discontinued project whose feature set and interaction model
   inspired this reimplementation. No MaaX source code is included.
+
+MAA-Meow
+  License: AGPL-3.0
+  Source: https://github.com/Aliothmoon/MAA-Meow
+  An Android client for MaaAssistantArknights.
 
 Electron
   Copyright (C) Electron contributors, OpenJS Foundation

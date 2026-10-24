@@ -3023,6 +3023,44 @@ select.input {
   color: var(--faint);
 }
 
+.credits-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.credits-list li + li {
+  border-top: 1px solid var(--stroke);
+}
+
+.credits-list a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+}
+
+.credits-list a:hover {
+  text-decoration: none;
+}
+
+.credits-list a:hover .credits-name {
+  text-decoration: underline;
+}
+
+.credits-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.credits-note {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 /* --------------------------------------------------------------------------
    Resource update strip inside a core row
    -------------------------------------------------------------------------- */

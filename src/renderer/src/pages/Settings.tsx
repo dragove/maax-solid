@@ -555,6 +555,42 @@ export const Settings: Component<SettingsProps> = (props) => {
           <section class="settings-card">
             <header class="settings-card-head">
               <span class="settings-icon">
+                <Icon name="users" />
+              </span>
+              <div>
+                <h2>{t(props.locale, "settings.credits")}</h2>
+                <p>{t(props.locale, "settings.creditsText")}</p>
+              </div>
+            </header>
+            <ul class="credits-list">
+              <li>
+                <a href="https://github.com/MaaAssistantArknights/MaaX" target="_blank" rel="noreferrer">
+                  <span class="credits-name">MaaX</span>
+                  <span class="credits-note">{t(props.locale, "settings.creditsMaaX")}</span>
+                </a>
+              </li>
+              <li>
+                <a href="https://github.com/Aliothmoon/MAA-Meow" target="_blank" rel="noreferrer">
+                  <span class="credits-name">MAA-Meow</span>
+                  <span class="credits-note">{t(props.locale, "settings.creditsMaaMeow")}</span>
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com/MaaAssistantArknights/MaaAssistantArknights"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span class="credits-name">MaaCore</span>
+                  <span class="credits-note">{t(props.locale, "settings.creditsMaaCore")}</span>
+                </a>
+              </li>
+            </ul>
+          </section>
+
+          <section class="settings-card">
+            <header class="settings-card-head">
+              <span class="settings-icon">
                 <Icon name="book-open" />
               </span>
               <div>

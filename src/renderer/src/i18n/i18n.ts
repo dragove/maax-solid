@@ -397,6 +397,11 @@ const zh = {
 
   "settings.about": "关于",
   "settings.aboutText": "MAAX 是一个面向 MaaAssistantArknights 的现代桌面客户端，使用 Solid 与 Effect 构建。",
+  "settings.credits": "致谢",
+  "settings.creditsText": "感谢这些项目与社区的工作。",
+  "settings.creditsMaaX": "原版桌面客户端",
+  "settings.creditsMaaMeow": "Android 客户端",
+  "settings.creditsMaaCore": "MaaAssistantArknights 核心与游戏资源",
   "settings.appVersion": "应用版本",
   "settings.electronVersion": "Electron",
   "settings.nodeVersion": "Node",
@@ -883,6 +888,11 @@ const en: Record<MessageKey, string> = {
 
   "settings.about": "About",
   "settings.aboutText": "MAAX is a modern desktop client for MaaAssistantArknights built with Solid and Effect.",
+  "settings.credits": "Acknowledgements",
+  "settings.creditsText": "Thanks to these projects and communities.",
+  "settings.creditsMaaX": "The original desktop client",
+  "settings.creditsMaaMeow": "Android client",
+  "settings.creditsMaaCore": "MaaAssistantArknights core and game resources",
   "settings.appVersion": "App version",
   "settings.electronVersion": "Electron",
   "settings.nodeVersion": "Node",
