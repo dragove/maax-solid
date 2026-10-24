@@ -45,6 +45,9 @@ const record = (value: unknown): Record<string, unknown> =>
 
 const list = (value: unknown): ReadonlyArray<unknown> => (Array.isArray(value) ? value : []);
 
+/** Strip a Windows or POSIX directory from a MaaCore file name. */
+const baseName = (value: string): string => value.split(/[\\/]/u).pop() ?? value;
+
 /** Payloads are untrusted JSON, so a star count must stay repeatable. */
 const stars = (value: number | undefined): number => Math.min(Math.max(Math.trunc(value ?? 0), 0), 6);
 
@@ -109,6 +112,19 @@ const recruitResult = (details: Record<string, unknown>, locale: Locale): LogLin
   };
 };
 
+const operReason = (reason: string, locale: Locale): string => {
+  switch (reason) {
+    case "Missing":
+      return t(locale, "log.copilotOperMissing");
+    case "Unchecked":
+      return t(locale, "log.copilotOperUnchecked");
+    case "Unavailable":
+      return t(locale, "log.copilotOperUnavailable");
+    default:
+      return "";
+  }
+};
+
 const detailSummary = (what: string, details: Record<string, unknown>, locale: Locale): LogLine => {
   switch (what) {
     case "StageDrops":
@@ -133,8 +149,41 @@ const detailSummary = (what: string, details: Record<string, unknown>, locale: L
     }
     case "StageInfo":
       return info(`关卡 ${str(details.name) || str(details.stage) || ""}`.trim());
-    case "CopilotListLoadTaskFileSuccess":
-      return info(`作业已加载 · ${str(details.filename)}`);
+    case "CopilotListLoadTaskFileSuccess": {
+      // `file_name` is what MaaCore sends; `filename` is kept for older builds.
+      const file = str(details.file_name) || str(details.filename);
+      const stage = str(details.stage_name);
+      const index = num(details.id);
+      return info(
+        [
+          t(locale, "log.copilotLoaded"),
+          file === "" ? "" : baseName(file),
+          stage,
+          index === undefined ? "" : `#${index + 1}`,
+        ]
+          .filter((part) => part !== "")
+          .join(" · "),
+      );
+    }
+    case "UnsupportedLevel": {
+      const stage = str(details.level);
+      return {
+        level: "error",
+        message: `${t(locale, "log.unsupportedLevel")}${stage === "" ? "" : ` · ${stage}`}`,
+      };
+    }
+    case "BattleFormationOperUnavailable": {
+      const name = str(details.oper_name);
+      const requirement = str(details.requirement_type);
+      return {
+        level: "warn",
+        message: `${t(locale, "log.formationOperUnavailable")}${name === "" ? "" : ` · ${name}`}${
+          requirement === "" ? "" : ` (${requirement})`
+        }`,
+      };
+    }
+    case "BattleFormationParseFailed":
+      return { level: "error", message: t(locale, "log.formationParseFailed") };
     case "BattleStart":
       return info("进入战斗");
     case "BattleFinished":
@@ -180,7 +229,10 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
       };
     }
     case 3:
-      return { level: "success", message: `${t(locale, "log.allDone")} · ${chain}` };
+      // MaaCore emits AllTasksCompleted whenever the queue empties, including
+      // after a failed chain. Keep this a neutral marker; the per-chain rows and
+      // the run snapshot carry success or failure.
+      return { level: "info", message: `${t(locale, "log.allDone")} · ${chain}` };
     case 4:
       return {
         level: "debug",
@@ -188,11 +240,20 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
       };
     case 5:
       return { level: "debug", message: t(locale, "log.instanceDestroyed") };
-    case 10000:
+    case 10000: {
+      // MaaCore's TaskChainError carries only the chain (plus an exception code
+      // when it caught one). The actionable cause usually arrived earlier as a
+      // SubTaskError; when even this payload is empty, name what to check
+      // instead of leaving the row at "Task chain error · Copilot".
+      const reasons = [why, str(details.task), str(details.error)].filter(
+        (value, index, all) => value !== "" && all.indexOf(value) === index,
+      );
+      const hint = chain === "Copilot" && reasons.length === 0 ? ` · ${t(locale, "log.copilotChainError")}` : "";
       return {
         level: "error",
-        message: `${t(locale, "log.taskError")} · ${chain}${why ? ` · ${why}` : str(details.task) ? ` · ${str(details.task)}` : ""}`,
+        message: `${t(locale, "log.taskError")} · ${chain}${reasons.length === 0 ? "" : ` · ${reasons.join(" · ")}`}${hint}`,
       };
+    }
     case 10001:
       return { level: "info", message: `${t(locale, "log.taskStart")} · ${chain}` };
     case 10002:
@@ -205,6 +266,55 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
       const subtask = str(payload.subtask);
       const first = list(payload.first).filter((value): value is string => typeof value === "string");
       const label = first[0] || str(details.task) || subtask || chain;
+      // Structured copilot failures all arrive as one SubTaskError family;
+      // without these branches they collapse into a generic subtask line and
+      // the reason never reaches the log.
+      if (what === "CopilotFileReadError") {
+        return { level: "error", message: `${chain} · ${t(locale, "log.copilotFileReadError")}` };
+      }
+      if (what === "CopilotStageNotSupported") {
+        const stage = str(details.stage_name);
+        return {
+          level: "error",
+          message: `${chain} · ${t(locale, "log.copilotStageUnsupported")}${stage === "" ? "" : ` · ${stage}`}`,
+        };
+      }
+      if (what === "UserAdditionalOperInvalid") {
+        const name = str(details.name);
+        return {
+          level: "error",
+          message: `${chain} · ${t(locale, "log.copilotUserAdditionalInvalid")}${name === "" ? "" : ` · ${name}`}`,
+        };
+      }
+      if (what === "OperboxDataParseFailed") {
+        return { level: "error", message: `${chain} · ${t(locale, "log.copilotOperboxParseFailed")}` };
+      }
+      if (subtask === "BattleFormationTask" && why === "OperatorMissing") {
+        const groups = record(details.opers);
+        const lines: string[] = [];
+        for (const [group, value] of Object.entries(groups)) {
+          const opers = list(value).flatMap((item) => {
+            const oper = record(item);
+            const name = str(oper.name);
+            if (name === "") return [];
+            const reason = operReason(str(oper.reason), locale);
+            return [{ name, text: reason === "" ? name : `${name} (${reason})` }];
+          });
+          if (opers.length === 0) continue;
+          // A one-operator group is usually named after that operator; keep the
+          // reason without repeating the name. Otherwise show the group mapping.
+          lines.push(
+            opers.length === 1 && opers[0]!.name === group
+              ? opers[0]!.text
+              : `${group} ⇒ ${opers.map((oper) => oper.text).join(" / ")}`,
+          );
+        }
+        return {
+          level: "error",
+          message: `${chain} · ${t(locale, "log.copilotMissingOperators")}`,
+          ...(lines.length === 0 ? {} : { detail: lines.join("\n") }),
+        };
+      }
       if (subtask === "AutoRecruitTask") {
         return {
           level: "error",
