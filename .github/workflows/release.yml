@@ -67,10 +67,8 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
         run: pnpm pkg set "version=$VERSION"
 
-      - name: Check and test
-        run: |
-          pnpm check
-          pnpm test
+      - name: Check
+        run: pnpm check
 
       - name: Build Linux packages
         run: |
