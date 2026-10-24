@@ -58,7 +58,7 @@ I/O and the renderer is not loaded with `?bootTrace=1`.
   and every app read then goes through that mount. Both costs are part of the
   AppImage result.
 - The AppImage target uses electron-builder's static-runtime toolset
-  (`toolsets.appimage: 1.0.3`) with zstd. In a same-session comparison, the
+  (`toolsets.appimage` in `electron-builder.yml`) with zstd. In a same-session comparison, the
   previous FUSE2/gzip image took about 2.34 s to the first AppShell frame and
   the static/zstd image about 1.07 s. Toolset and compression choice dominates
   AppImage startup; measure it with the artifact on the same filesystem.

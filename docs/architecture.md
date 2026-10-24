@@ -7,19 +7,19 @@ built around one rule: **the UI and the native core never share a process**.
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│ Renderer (sandboxed, contextIsolation, no Node)              │
-│ Solid 2 · CSS Modules-ish global stylesheet · Kobalte toasts │
+│ Renderer (sandboxed, contextIsolation, no Node)             │
+│ Solid 2 · one global stylesheet · dialogs, toasts, controls │
 └───────────────▲─────────────────────────────────────────────┘
                 │ typed IPC (Effect Schema, one command channel + one event channel)
 ┌───────────────┴─────────────────────────────────────────────┐
 │ Main process (Electron)                                     │
-│ Effect ManagedRuntime · settings/workspace · core registry   │
-│ download manager · device sessions · run orchestration       │
+│ Effect ManagedRuntime · settings/workspace · core registry  │
+│ download manager · device sessions · run orchestration      │
 └───────────────▲─────────────────────────────────────────────┘
                 │ MessagePort protocol (requests + batched callbacks)
 ┌───────────────┴─────────────────────────────────────────────┐
-│ MaaCore utility process (Node 24.22, one per core version)   │
-│ koffi → libMaaCore.so · AsstHandle lifecycle · screenshots   │
+│ MaaCore utility process (one per core version)              │
+│ koffi → libMaaCore.so · AsstHandle lifecycle · screenshots  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -83,7 +83,7 @@ tree. An update is therefore an **overlay**, never a replacement:
    The three newest backups are kept, and a rollback restores the exact previous
    bytes (added files are deleted again).
 4. Nothing is written while a device holds a session: the main process refuses
-   and the UI disables the actions (B1). Any host for that core is stopped
+   and the UI disables the actions. Any host for that core is stopped
    before the overlay is applied, because MaaCore keeps resource state in the
    process.
 
@@ -287,9 +287,10 @@ Traditional Chinese, plus rarity, profession and the game's own sort order. The
 catalogue drops `TRAP` summons, matches Chinese or English names, and is cached
 per core path with the file mtime, so a core update refreshes it automatically.
 PRTS filters on the **Chinese** name, which is what the picker sends.
-- Styling is a hand-written CSS design system (tokens, panels, task cards,
-  log stream, Fluent-2 motion tokens). There is no Tailwind and no Solid-1 UI
-  dependency.
+- Styling is one hand-written global stylesheet (`styles.css`): design
+  tokens, panels, task cards, the log stream and Fluent-2 motion tokens. There
+  is no Tailwind and no UI component library — dialogs, toasts, segmented
+  controls, collapsibles, flyouts and tooltips are local components.
 
 ## Security
 
@@ -307,8 +308,8 @@ PRTS filters on the **Chinese** name, which is what the picker sends.
 - Linux x86_64/aarch64 is the tested platform. The core host assumes
   `libMaaCore.so`; Windows/macOS need their own library filename and archive
   format handling.
-- Core download currently uses `tar` for `.tar.gz`; Windows `.zip` needs a zip
-  reader (`yauzl` or equivalent) in a later pass.
+- Core download currently uses `tar` for `.tar.gz`; Windows `.zip` archives
+  need the existing `yauzl` reader wired into the core installer.
 - The app updater is not wired yet; core/resource updates are independent of
   the app version.
 - Scheduled runs only fire while MAAX is open; close-to-tray keeps it alive but

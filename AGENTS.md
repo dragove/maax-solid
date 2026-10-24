@@ -17,8 +17,8 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
 
 ## 技术栈与约束
 
-- Electron 44 + 宿主 Node.js 26；Electron 内置 Node.js 24.22，宿主 Node 26 的 API 不能直接在 Electron 内使用，需要原生 addon 或 sidecar。
-- Solid 2 RC + `@solidjs/web`；样式不使用 Tailwind，使用原生 CSS Modules 与 attribute 构建。
+- Electron 44 + 宿主 Node.js 26；Electron 内置的 Node.js 版本较旧，宿主 Node 26 的 API 不能直接在 Electron 内使用，需要原生 addon 或 sidecar。
+- Solid 2 RC + `@solidjs/web`；样式不使用 Tailwind 或 UI 组件库：单一全局 `styles.css` + CSS 自定义属性 token + data 属性选择器，弹窗、Toast、分段控件等均为本地组件。
 - Effect 4 + Effect Schema，TypeScript 7 + `@effect/tsgo`，Vite 8 + electron-vite，Oxlint / Oxfmt，pnpm 12，electron-builder。精确版本见 `package.json` / `pnpm-lock.yaml`。
 - Wayland 下 Electron 44 默认使用 native Wayland；不要给启动脚本或主进程添加强制 X11 / `--ozone-platform` 参数。
 
@@ -57,7 +57,7 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
 
 - 类型检查由 Oxlint 的 `typeAware` / `typeCheck` 完成；**没有 `tsc` / `typecheck` 脚本**。Oxlint 与 Oxfmt 是唯一 lint / format 工具。
 - 完成前运行 `pnpm check`、`pnpm test` 与 `pnpm build`。涉及运行时行为时实际启动 Electron 验证；涉及打包时运行 `pnpm package` 并启动产物。
-- 视觉或启动流程有变化时更新 `docs/` 截图，检查深色/浅色主题。
+- 视觉或启动流程有变化时检查深色/浅色主题；`docs/` 的预览图只在整体界面明显改版时重新生成（先压缩再提交），日常小改动不要替换截图，避免仓库体积膨胀。
 - 仓库文档、skill 与 `AGENTS.md` 不写入本机绝对路径、用户名、设备地址或下载位置；使用仓库相对路径与 `app.getPath("userData")` 这类通用位置。
 - 维持现有安全边界：sandbox / contextIsolation、最小 preload 白名单、IPC Schema 校验，不新增绕过这些边界的通道。
 

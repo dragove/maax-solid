@@ -16,6 +16,8 @@ Maax 是一个面向 **MaaAssistantArknights / MaaCore** 的现代桌面客户�
 
 ![关卡推荐与自动代理倍率](docs/preview-stage-picker.jpg)
 
+> **截图说明**：这些预览图是随仓库提交的固定快照，只有整体界面明显改版时才重新生成。日常小改动请在本地启动应用确认，不要替换这些图片，避免仓库体积膨胀。
+
 ## 当前能力
 
 - 本地导入 MaaCore；官方稳定版下载（原生确认框、分阶段安装、可回滚的多版本
@@ -41,17 +43,19 @@ Maax 是一个面向 **MaaAssistantArknights / MaaCore** 的现代桌面客户�
 
 ## 技术栈
 
-| 范围    | 版本                                                              |
-| ------- | ----------------------------------------------------------------- |
-| Runtime | Electron `44.9.0` · Node.js `24.22.0`（Electron 内置）            |
-| UI      | Solid `2.0.0-rc.15` · `@solidjs/web` · 原生 CSS · Kobalte 2 alpha |
-| Effect  | effect `4.0.5` + Effect Schema + `@effect/platform-node`          |
-| Build   | Vite 8 · electron-vite 6 · electron-builder 26 · pnpm 12          |
-| Quality | TypeScript 7 · `@effect/tsgo` · Oxlint / Oxfmt                    |
+| 范围    | 组成                                             |
+| ------- | ------------------------------------------------ |
+| Runtime | Electron · 内置 Node.js · koffi                  |
+| UI      | Solid · `@solidjs/web` · 原生 CSS，无 UI 组件库  |
+| Effect  | effect · Effect Schema · `@effect/platform-node` |
+| Build   | Vite · electron-vite · electron-builder · pnpm   |
+| Quality | TypeScript · `@effect/tsgo` · Oxlint / Oxfmt     |
+
+精确版本以 `package.json` / `pnpm-lock.yaml` 为准，这里只记录技术选型。
 
 ## 开发
 
-需要 Node.js 26 与 pnpm 12（Electron 内置 Node 24.22，不要混用宿主 Node 26 的 API）。
+需要 Node.js 26 与 pnpm 12；Electron 内置的 Node.js 与宿主版本不同，不要在 Electron 内使用宿主 Node 26 才有的 API。
 
 ```bash
 pnpm install
@@ -70,6 +74,7 @@ MAAX_DEV_CORE=/path/to/MAA-vX.Y.Z-linux-x86_64 pnpm dev
 | 命令                 | 说明                                           |
 | -------------------- | ---------------------------------------------- |
 | `pnpm dev`           | Electron + Vite HMR                            |
+| `pnpm test`          | Vitest 单元测试                                |
 | `pnpm lint`          | Effect 规则、type-aware 检查与 TypeScript 诊断 |
 | `pnpm format`        | Oxfmt                                          |
 | `pnpm check`         | lint + format check                            |

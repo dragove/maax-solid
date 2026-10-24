@@ -726,6 +726,23 @@ after the app settles, and keep tracing opt-in so normal startup performs no
 trace file I/O. Linux packaging choices can dominate startup: benchmark AppImage
 toolset/compression changes with the artifact on the same filesystem.
 
+## Documentation and preview images
+
+- `docs/preview-*.jpg` are committed snapshots referenced by the README.
+  Regenerate them only for a substantial redesign of the workbench, and
+  compress or re-encode before committing: an extra image per small UI fix
+  bloats the repository for no reader benefit. Verify a small change by running
+  the app instead.
+- Keep technology claims in sync in one change. The README stack table,
+  `docs/architecture.md` (process diagram, Renderer section) and `NOTICE` name
+  dependencies; removing a library from `package.json` leaves stale claims such
+  as "Kobalte toasts" until those files are edited too. Do not pin exact
+  versions in prose: the table lists ecosystems only, and `package.json` /
+  `pnpm-lock.yaml` remain the source of truth, so a dependency bump never needs
+  a documentation edit.
+- `docs/**` is ignored by Oxfmt, so tables and ASCII diagrams there are
+  hand-aligned; check line widths after editing the process diagram.
+
 ## Verification matrix
 
 | Change               | Minimum check                                                                                                                                 |
@@ -733,7 +750,7 @@ toolset/compression changes with the artifact on the same filesystem.
 | Reactive control     | update twice; verify focus, visual selection, and persisted value                                                                             |
 | Motion               | sample `getAnimations()` across frames: collapse reverses mid-flight, page switch runs a `content` view transition, reduced motion skips both |
 | Reactive warning     | `pnpm dev` console (or the CDP loop above) stays free of `STRICT_READ_*` / `PENDING_ASYNC_*` while exercising the screen                      |
-| Stylesheet / classes | class audit both ways: no TSX class without a rule, no rule without a class; screenshot affected screens in both themes                       |
+| Stylesheet / classes | class audit both ways: no TSX class without a rule, no rule without a class; check both themes locally                                        |
 | Modal                | open it from a focused launcher: focus lands inside, Esc and backdrop close                                                                   |
 | Dynamic list         | add/remove/reorder; confirm no unexpected remount                                                                                             |
 | Snapshot list        | replace a scan/batch/history list: only new rows enter, untouched rows keep their DOM so entrance animations do not replay                    |
