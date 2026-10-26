@@ -6,6 +6,7 @@ import {
   type CopilotOptions,
   type CopilotSetup,
 } from "../../shared/schemas";
+import { mergeCopilotItems } from "../../shared/copilot-mode";
 import type { MaaxError } from "../errors";
 import { AppPaths } from "./paths";
 import { readJson, writeJson } from "./json-store";
@@ -42,7 +43,9 @@ export const CopilotSetupLive: Layer.Layer<CopilotSetupStore, never, AppPaths | 
       Effect.orElseSucceed(() => DEFAULT_COPILOT_SETUP),
     );
     const ref = yield* Ref.make<CopilotSetup>({
-      items: [...loaded.items],
+      // A saved batch may still carry the retired isRaid/enabled pair, and an
+      // old normal+raid entry pair is one row with both difficulties now.
+      items: [...mergeCopilotItems([], loaded.items)],
       options: { ...DEFAULT_COPILOT_SETUP.options, ...loaded.options },
     });
     // Every mutation shares one permit: an auto-retire can race a user toggle.

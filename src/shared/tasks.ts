@@ -1,4 +1,4 @@
-import { isToughStage } from "./copilot-mode";
+import { copilotItemActive, copilotItemEntries, readCopilotBatch } from "./copilot-mode";
 import type { AppSettings, CopilotSetup, TaskConfig, TaskType } from "./schemas";
 
 /**
@@ -1080,9 +1080,14 @@ export const TASK_PALETTE_ORDER: ReadonlyArray<TaskType> = [
   "CloseDown",
 ];
 
-/** A copilot task can carry a batch of assignments instead of one file. */
+/**
+ * A copilot task can carry a batch of assignments instead of one file.
+ *
+ * Rows with neither difficulty checked are skipped, so a list made only of
+ * skipped rows needs a local file just like an empty one.
+ */
 export const hasCopilotList = (params: Record<string, unknown>): boolean =>
-  Array.isArray(params.copilot_list) && params.copilot_list.length > 0;
+  copilotItemEntries(readCopilotBatch(params.copilot_list)).length > 0;
 
 export function getTaskDefaults(type: TaskType): Record<string, unknown> {
   switch (type) {
@@ -1331,20 +1336,19 @@ export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Rec
       if (Number(task.params.formation_index) > 0) params.formation_index = Number(task.params.formation_index);
 
       const manual = task.params.manual_start === true;
-      const batch = Array.isArray(task.params.copilot_list) ? task.params.copilot_list : [];
-      const entries = batch.flatMap((item) => {
-        const entry = item as { filename?: unknown; isRaid?: unknown; stage?: unknown; enabled?: unknown };
-        if (entry.enabled === false) return [];
-        if (typeof entry.filename !== "string" || entry.filename.trim() === "") return [];
-        // A `tough_` stage stored before difficulty inference landed still has
-        // isRaid false; the stage id keeps that saved batch on the 磨难 map.
-        const isRaid = entry.isRaid === true || (typeof entry.stage === "string" && isToughStage(entry.stage));
-        // The core reports progress by this index, so it must be the position in
-        // the whole list; normal and raid runs of one file share the file.
-        return [{ id: 0, filename: entry.filename, is_raid: isRaid }];
-      });
-      if (entries.length > 0 && (!manual || entries.length !== 1)) {
-        return { ...params, copilot_list: entries.map((entry, index) => ({ ...entry, id: index })) };
+      // Each checked difficulty is its own MaaCore entry; a row with neither
+      // difficulty checked is skipped. The core reports progress by this index,
+      // so it must be the position in the expanded list.
+      const entries = copilotItemEntries(readCopilotBatch(task.params.copilot_list));
+      if (entries.length > 0 && !manual) {
+        return {
+          ...params,
+          copilot_list: entries.map((entry, index) => ({
+            id: index,
+            filename: entry.item.filename,
+            is_raid: entry.mode === "raid",
+          })),
+        };
       }
       // Legacy single file or manual start: send the stored parameters and drop
       // the batch. Manual start deliberately carries one filename instead of
@@ -1354,7 +1358,8 @@ export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Rec
       delete single.copilot_list;
       delete single.manual_start;
       delete single.is_raid;
-      if (manual && entries.length === 1) single.filename = entries[0]!.filename;
+      const manualEntry = entries[0];
+      if (manual && manualEntry !== undefined) single.filename = manualEntry.item.filename;
       if (Number(task.params.formation_index) <= 0) delete single.formation_index;
       single.loop_times = params.loop_times;
       return single;
@@ -1414,7 +1419,7 @@ export function createCopilotTask(setup: CopilotSetup, id = crypto.randomUUID(),
     enabled: true,
     name: "",
     params: {
-      copilot_list: setup.items.filter((item) => item.enabled !== false),
+      copilot_list: setup.items.filter(copilotItemActive),
       filename: "",
       formation: setup.options.formation,
       add_trust: setup.options.addTrust,
@@ -1443,7 +1448,7 @@ export function createCopilotRunTasks(
   id = crypto.randomUUID(),
   manual = false,
 ): ReadonlyArray<TaskConfig> {
-  const items = setup.items.filter((item) => item.enabled !== false);
+  const items = setup.items.filter(copilotItemActive);
   if (items.length === 0) return [];
   const kinds = new Set(items.map((item) => item.kind ?? "normal"));
   if (kinds.size > 1) return [];

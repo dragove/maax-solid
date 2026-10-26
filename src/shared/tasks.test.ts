@@ -69,6 +69,23 @@ describe("required task fields", () => {
       },
     };
     expect(firstMissingField(batched)).toBeUndefined();
+    const skipped = {
+      ...task,
+      params: {
+        ...task.params,
+        copilot_list: [
+          {
+            id: "a",
+            copilotId: 7,
+            filename: "/tmp/prts-7.json",
+            stage: "1-7",
+            title: "t",
+            modes: { normal: false, raid: false },
+          },
+        ],
+      },
+    };
+    expect(firstMissingField(skipped)?.zh).toBe("本地作业文件");
   });
 
   it("flags a custom task without task names", () => {
@@ -97,8 +114,14 @@ describe("task catalogue", () => {
     expect(TASK_PALETTE_ORDER).not.toContain("Copilot");
     const task = createCopilotTask({
       items: [
-        { id: "a", copilotId: 7, filename: "/tmp/prts-7.json", stage: "1-7", title: "t", isRaid: false },
-        { id: "b", copilotId: 7, filename: "/tmp/prts-7.json", stage: "1-7", title: "t", isRaid: true },
+        {
+          id: "a",
+          copilotId: 7,
+          filename: "/tmp/prts-7.json",
+          stage: "1-7",
+          title: "t",
+          modes: { normal: true, raid: true },
+        },
       ],
       options: { ...DEFAULT_COPILOT_OPTIONS, loopTimes: 3, formationIndex: 2, useSanityPotion: true },
     });
@@ -144,14 +167,14 @@ describe("task catalogue", () => {
     expect(params).not.toHaveProperty("is_raid");
   });
 
-  it("keeps multi mode when a manual start somehow has several entries", () => {
+  it("sends one file even when a manual start carries several rows", () => {
     const item = (id: string): CopilotItem => ({
       id,
       copilotId: 1,
       filename: `/tmp/${id}.json`,
       stage: "main_17-07",
       title: id,
-      isRaid: false,
+      modes: { normal: true, raid: false },
       kind: "normal",
     });
     const task = createCopilotTask(
@@ -163,7 +186,8 @@ describe("task catalogue", () => {
       true,
     );
     const params = buildMaaTaskParams(task, settings);
-    expect(params.copilot_list).toHaveLength(2);
+    expect(params).toMatchObject({ filename: "/tmp/a.json" });
+    expect(params).not.toHaveProperty("copilot_list");
     expect(params).not.toHaveProperty("manual_start");
   });
 
@@ -182,7 +206,7 @@ describe("copilot task dispatch", () => {
     filename,
     stage: "1-7",
     title: "t",
-    isRaid: false,
+    modes: { normal: true, raid: false },
     kind,
   });
   const setup = (items: ReadonlyArray<CopilotItem>, loopTimes = 1) => ({
@@ -210,19 +234,34 @@ describe("copilot task dispatch", () => {
     expect(tasks[0]).toMatchObject({ type: "ParadoxCopilot", params: { filename: "/tmp/a.json" } });
   });
 
-  it("runs only switched-on assignments", () => {
-    const disabled: CopilotItem = { ...item("normal", "/tmp/a.json", "a"), enabled: false };
-    const enabled: CopilotItem = { ...item("normal", "/tmp/b.json", "b"), enabled: true };
-    const tasks = createCopilotRunTasks(setup([disabled, enabled]));
+  it("runs only rows with a checked difficulty", () => {
+    const skipped: CopilotItem = { ...item("normal", "/tmp/a.json", "a"), modes: { normal: false, raid: false } };
+    const checked: CopilotItem = { ...item("normal", "/tmp/b.json", "b"), modes: { normal: true, raid: false } };
+    const tasks = createCopilotRunTasks(setup([skipped, checked]));
     expect(tasks).toHaveLength(1);
     expect(tasks[0]!.params.copilot_list as ReadonlyArray<{ id: string }>).toEqual([
       expect.objectContaining({ id: "b" }),
     ]);
 
-    const task = createCopilotTask(setup([disabled, enabled]));
+    const task = createCopilotTask(setup([skipped, checked]));
     expect(buildMaaTaskParams(task, settings).copilot_list).toEqual([
       { id: 0, filename: "/tmp/b.json", is_raid: false },
     ]);
+  });
+
+  it("runs both difficulties of one row in order", () => {
+    const both: CopilotItem = { ...item("normal", "/tmp/a.json"), modes: { normal: true, raid: true } };
+    const task = createCopilotTask(setup([both]));
+    expect(buildMaaTaskParams(task, settings).copilot_list).toEqual([
+      { id: 0, filename: "/tmp/a.json", is_raid: false },
+      { id: 1, filename: "/tmp/a.json", is_raid: true },
+    ]);
+  });
+
+  it("still honours the retired switch of a saved batch", () => {
+    const disabled: CopilotItem = { ...item("normal", "/tmp/a.json", "a"), modes: undefined, enabled: false };
+    const enabled: CopilotItem = { ...item("normal", "/tmp/b.json", "b"), modes: undefined, enabled: true };
+    expect(createCopilotRunTasks(setup([disabled, enabled]))[0]!.params.copilot_list).toHaveLength(1);
   });
 
   it("drops switched-off files from a sequential batch too", () => {
@@ -233,9 +272,9 @@ describe("copilot task dispatch", () => {
     expect(tasks[0]!.params.filename).toBe("/tmp/b.json");
   });
 
-  it("returns nothing when every assignment is switched off", () => {
-    const disabled: CopilotItem = { ...item("normal", "/tmp/a.json"), enabled: false };
-    expect(createCopilotRunTasks(setup([disabled]))).toEqual([]);
+  it("returns nothing when every assignment is skipped", () => {
+    const skipped: CopilotItem = { ...item("normal", "/tmp/a.json"), modes: { normal: false, raid: false } };
+    expect(createCopilotRunTasks(setup([skipped]))).toEqual([]);
   });
 
   it("refuses a batch that mixes task families", () => {

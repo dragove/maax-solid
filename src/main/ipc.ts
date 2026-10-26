@@ -44,6 +44,16 @@ const CopilotSearchInputSchema = Schema.Struct({
   limit: Schema.optional(Schema.Finite),
   language: Schema.optional(Schema.Literals(["zh", "en"])),
 });
+const CopilotSetSearchInputSchema = Schema.Struct({
+  keyword: Schema.optional(Schema.String),
+  creatorId: Schema.optional(Schema.String),
+  page: Schema.optional(Schema.Finite),
+  limit: Schema.optional(Schema.Finite),
+});
+/** One set can list up to 1000 assignments; asking for more is a bug. */
+const CopilotSetItemsInputSchema = Schema.Struct({
+  ids: Schema.Array(Schema.Finite).check(Schema.isMaxLength(1000)),
+});
 const RollbackInputSchema = Schema.Struct({
   coreId: Schema.NonEmptyString,
   backupId: Schema.NonEmptyString,
@@ -226,6 +236,14 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
       case COMMANDS.searchCopilot: {
         const params = decode(CopilotSearchInputSchema, payload);
         return run((app) => app.searchCopilot(params));
+      }
+      case COMMANDS.searchCopilotSets: {
+        const params = decode(CopilotSetSearchInputSchema, payload);
+        return run((app) => app.copilotSetSearch(params));
+      }
+      case COMMANDS.copilotSetItems: {
+        const { ids } = decode(CopilotSetItemsInputSchema, payload);
+        return run((app) => app.copilotSetItems(ids));
       }
       case COMMANDS.searchCopilotLevels: {
         const { query } = decode(Schema.Struct({ query: Schema.String }), payload);

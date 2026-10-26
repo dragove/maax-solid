@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 import { AppSettingsSchema, CopilotSetupSchema, DEFAULT_COPILOT_OPTIONS, DEFAULT_SETTINGS } from "./schemas";
 
 describe("copilot setup schema", () => {
-  const item = { id: "a", copilotId: 1, filename: "/tmp/a.json", stage: "1-7", title: "t", isRaid: false };
+  const item = { id: "a", copilotId: 1, filename: "/tmp/a.json", stage: "1-7", title: "t" };
 
   it("reads an assignment saved before the per-item switch existed", () => {
     const decoded = Schema.decodeSync(CopilotSetupSchema)({
-      items: [item],
+      items: [{ ...item, isRaid: false }],
       options: DEFAULT_COPILOT_OPTIONS,
     });
-    expect(decoded.items[0]?.enabled).toBeUndefined();
+    expect(decoded.items[0]?.modes).toBeUndefined();
   });
 
   it("keeps an explicitly switched-off assignment off", () => {
@@ -19,6 +19,14 @@ describe("copilot setup schema", () => {
       options: DEFAULT_COPILOT_OPTIONS,
     });
     expect(decoded.items[0]?.enabled).toBe(false);
+  });
+
+  it("decodes the per-row difficulty checkboxes", () => {
+    const decoded = Schema.decodeSync(CopilotSetupSchema)({
+      items: [{ ...item, modes: { normal: true, raid: true } }],
+      options: DEFAULT_COPILOT_OPTIONS,
+    });
+    expect(decoded.items[0]?.modes).toEqual({ normal: true, raid: true });
   });
 });
 

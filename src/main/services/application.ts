@@ -18,7 +18,9 @@ import type {
   CopilotResolveResult,
   CopilotSetup,
   OperatorEntry,
+  CopilotSearchItem,
   CopilotSearchResult,
+  CopilotSetSearchResult,
   CoreReleaseCheck,
   DeviceDraft,
   DeviceProfile,
@@ -53,7 +55,14 @@ import {
   createTask,
   firstMissingField,
 } from "../../shared/tasks";
-import { copilotSucceededItems, type CopilotRunOutcome } from "../../shared/copilot-progress";
+import { copilotSucceededEntries, type CopilotRunOutcome } from "../../shared/copilot-progress";
+import {
+  copilotItemActive,
+  normalizeCopilotItem,
+  unscheduleCopilotMode,
+  withSingleMode,
+  type CopilotMode,
+} from "../../shared/copilot-mode";
 import { scheduleDue } from "../../shared/schedule";
 import { setCloseToTray } from "../app-behavior";
 import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
@@ -146,7 +155,7 @@ interface StageCache {
   readonly catalog: StageCatalog;
 }
 import { CoreHostClient } from "../core-host-client";
-import { repairCopilotFile, type CopilotSearchParams } from "./copilot";
+import { repairCopilotFile, type CopilotSearchParams, type CopilotSetSearchParams } from "./copilot";
 import { CoreRegistry } from "./core-registry";
 import { CoreInstaller } from "./core-installer";
 import { maaxError, type MaaxError } from "../errors";
@@ -234,6 +243,8 @@ export interface ApplicationApi {
   readonly resolveCopilot: (input: string) => Effect.Effect<CopilotResolveResult, MaaxError>;
   readonly readCopilotDetail: (filename: string) => Effect.Effect<CopilotDetail | null>;
   readonly searchCopilot: (params: CopilotSearchParams) => Effect.Effect<CopilotSearchResult, MaaxError>;
+  readonly copilotSetSearch: (params: CopilotSetSearchParams) => Effect.Effect<CopilotSetSearchResult, MaaxError>;
+  readonly copilotSetItems: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<CopilotSearchItem>, MaaxError>;
   readonly copilotLevels: (query: string) => Effect.Effect<ReadonlyArray<CopilotLevel>, MaaxError>;
   readonly copilotOperators: (query: string) => Effect.Effect<ReadonlyArray<OperatorEntry>, MaaxError>;
   readonly updateCopilotOptions: (patch: Partial<CopilotOptions>) => Effect.Effect<CopilotSetup, MaaxError>;
@@ -659,22 +670,32 @@ export const ApplicationLive: Layer.Layer<
       if (!meta) return;
       const configId = run.taskConfigIds.get(taskId);
       const taskIndex = configId === undefined ? -1 : meta.taskIds.indexOf(configId);
-      const succeeded = copilotSucceededItems(meta.items, meta.kind, outcome, meta.lastLoaded, taskIndex);
+      const succeeded = copilotSucceededEntries(meta.items, meta.kind, outcome, meta.lastLoaded, taskIndex);
       if (succeeded.length > 0) {
-        const ids = new Set(succeeded.map((item) => item.id));
+        // One row may carry both difficulties; each completed entry unchecks
+        // exactly its own bit, so a normal clear keeps the pending raid run.
+        const completed = new Map<string, CopilotMode[]>();
+        for (const entry of succeeded) {
+          const modes = completed.get(entry.item.id) ?? [];
+          modes.push(entry.mode);
+          completed.set(entry.item.id, modes);
+        }
         // oxlint-disable-next-line effecttsgo/run-effect-inside-effect
         void Effect.runPromise(
           copilotSetup.patchItems((items) =>
-            items.map((item) => (ids.has(item.id) ? { ...item, enabled: false } : item)),
+            items.map((item) => {
+              const modes = completed.get(item.id);
+              return modes === undefined ? item : modes.reduce(unscheduleCopilotMode, item);
+            }),
           ),
         )
           .then((setup) => {
             emitCopilot(setup);
           })
           .catch((error: unknown) => {
-            console.warn("自动屏蔽已完成作业失败", error);
+            console.warn("自动取消已完成作业的难度失败", error);
           });
-        for (const item of succeeded) rateCopilot(item.copilotId);
+        for (const entry of succeeded) rateCopilot(entry.item.copilotId);
       }
       // A normal batch has one task; sequential kinds wait for the next task
       // completion and are cleared when the queue closes.
@@ -1309,23 +1330,23 @@ export const ApplicationLive: Layer.Layer<
           if ((target.kind ?? "normal") !== "normal") {
             return yield* maaxError("单作业模式只支持普通关卡作业", "保全派驻和悖论模拟请使用各自的入口");
           }
-          // An explicit single run overrides the batch switch; it is the one
-          // way to re-run a retired assignment without re-enabling it first.
-          runSetup = { items: [{ ...target, enabled: true }], options: setup.options };
+          // An explicit single run ignores the difficulty checkboxes; it is the
+          // one way to re-run a retired assignment without checking it first.
+          runSetup = { items: [withSingleMode(target)], options: setup.options };
           manual = true;
         } else {
-          const enabledItems = setup.items.filter((item) => item.enabled !== false);
-          if (enabledItems.length === 0) {
-            return yield* maaxError("没有启用的作业", "打开作业右侧的开关后再开始");
+          const checkedItems = setup.items.filter(copilotItemActive);
+          if (checkedItems.length === 0) {
+            return yield* maaxError("没有选中的作业", "在作业列表里勾选普通或突袭难度后再开始");
           }
-          const kinds = new Set(enabledItems.map((item) => item.kind ?? "normal"));
+          const kinds = new Set(checkedItems.map((item) => item.kind ?? "normal"));
           if (kinds.size > 1) {
             return yield* maaxError(
               "同一批作业不能混合普通关卡、保全派驻和悖论模拟",
               "它们从不同的游戏界面开始，请清空列表后分别运行",
             );
           }
-          runSetup = { items: enabledItems, options: setup.options };
+          runSetup = { items: checkedItems.map(normalizeCopilotItem), options: setup.options };
         }
         // PRTS assignments are user content: MaaCore rejects the whole file
         // when one operator's elite requirement contradicts its own skill or
@@ -2257,6 +2278,8 @@ export const ApplicationLive: Layer.Layer<
       resolveCopilot: prts.resolve,
       readCopilotDetail: prts.detail,
       searchCopilot: prts.search,
+      copilotSetSearch: prts.setSearch,
+      copilotSetItems: prts.setItems,
       copilotLevels: prts.levels,
       copilotOperators,
       updateCopilotOptions: (patch) =>

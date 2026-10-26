@@ -229,12 +229,19 @@ folder is generated locally and is not uploaded anywhere.
   connected session, without a plan. Runs created that way carry no `planId`.
   The queue palette therefore does not offer `Copilot`; the other copilot-based
   tasks (SSS, Paradox) remain queue entries because they are repeatable.
-- A copilot task runs a **batch**: `params.copilot_list` becomes
-  `copilot_list: [{ id: <position>, filename, is_raid }]` for MaaCore, which
-  executes the entries in order and reports progress by that position. Normal
-  and raid runs of one file are two entries sharing a filename — the PRTS
-  `difficulty` bitmask (1 normal, 2 raid, 3 both) decides how many entries
-  `copilot.resolve` creates.
+- A copilot task runs a **batch**: `params.copilot_list` keeps one saved row
+  per downloaded file, and `buildMaaTaskParams` expands each row into one
+  MaaCore entry per checked difficulty,
+  `copilot_list: [{ id: <position>, filename, is_raid }]`. The core executes
+  the entries in order and reports progress by that position, so the saved rows
+  and the expanded list are mapped back through `copilotItemEntries`.
+- The two difficulty boxes are independent: 普通 and 突袭/磨难/险地 may both be
+  checked (the file runs twice), neither means the row is skipped, and a
+  cleared difficulty is unchecked automatically while the other stays queued.
+  H stages (H17-4) have no 突袭 variant and only offer 普通; a `tough_` map only
+  offers the hard bit. The PRTS `difficulty` bitmask (1 normal, 2 raid, 3 both)
+  seeds the selection when `copilot.resolve` downloads a file, and the stage
+  family can only narrow it.
 - A batch uses MaaCore's multi-assignment mode, which starts on the **target
   chapter's stage map**. The tab keeps that prerequisite visible and owns a log
   stream; from the home screen or another chapter the core only swipes
@@ -265,6 +272,12 @@ A detail view never fetches anything: `copilot/query` already returns the whole
 document, including operator requirements. Measured for a full browse → add
 session: two requests on open (catalogue + one query), zero for details,
 suggestions and repeat searches, one per added assignment.
+
+Sets have their own tab. `POST /set/query` returns each set's ordered
+`copilot_ids`; expanding one asks `copilot.set-items`, which fetches the
+summaries through `copilot/query?copilot_ids=…` in chunks of 50 and restores
+the set's own order. Adding a whole set reuses `copilot.resolve`, so every
+member is downloaded under the same rate limit as a single assignment.
 
 Search parameters, as the site actually implements them:
 

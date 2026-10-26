@@ -1,8 +1,23 @@
 import { Context, Effect, Layer } from "effect";
 import { copilotKindFromStageId } from "../../shared/copilot-kind";
-import type { CopilotDetail, CopilotLevel, CopilotResolveResult, CopilotSearchResult } from "../../shared/schemas";
+import type {
+  CopilotDetail,
+  CopilotLevel,
+  CopilotResolveResult,
+  CopilotSearchItem,
+  CopilotSearchResult,
+  CopilotSetSearchResult,
+} from "../../shared/schemas";
 import { maaxError, type MaaxError } from "../errors";
-import { readCopilotDetail, resolveCopilot, searchCopilot, type CopilotSearchParams } from "./copilot";
+import {
+  readCopilotDetail,
+  resolveCopilot,
+  searchCopilot,
+  searchCopilotByIds,
+  searchCopilotSets,
+  type CopilotSearchParams,
+  type CopilotSetSearchParams,
+} from "./copilot";
 import { findLevel, levelCachePath, LevelCatalogue } from "./level-catalog";
 import { AppPaths } from "./paths";
 import { PrtsClient } from "./prts";
@@ -14,6 +29,10 @@ import { PrtsClient } from "./prts";
  */
 export interface PrtsLibraryApi {
   readonly search: (params: CopilotSearchParams) => Effect.Effect<CopilotSearchResult, MaaxError>;
+  /** Copilot sets ("作业集"): a curated list of assignment ids. */
+  readonly setSearch: (params: CopilotSetSearchParams) => Effect.Effect<CopilotSetSearchResult, MaaxError>;
+  /** Assignment summaries behind the ids one set lists, in the set's order. */
+  readonly setItems: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<CopilotSearchItem>, MaaxError>;
   readonly levels: (query: string) => Effect.Effect<ReadonlyArray<CopilotLevel>, MaaxError>;
   readonly resolve: (input: string) => Effect.Effect<CopilotResolveResult, MaaxError>;
   /** Read the downloaded JSON of a batch entry; `null` when it is gone or unreadable. */
@@ -74,6 +93,26 @@ export const PrtsLibraryLive: Layer.Layer<PrtsLibrary, never, AppPaths> = Layer.
         });
       });
 
+    const setSearch = (params: CopilotSetSearchParams) =>
+      Effect.tryPromise({
+        try: () => searchCopilotSets(client, params),
+        catch: (cause) => maaxError("作业集搜索失败", cause),
+      });
+
+    // A set only stores ids; expanding it fetches the summaries behind them.
+    const setItems = (ids: ReadonlyArray<number>) =>
+      Effect.gen(function* () {
+        const entries = yield* Effect.tryPromise({
+          try: () => catalogue.load(),
+          catch: (cause) => maaxError("无法获取 PRTS 关卡数据", cause),
+        });
+        const codes = new Map(entries.map((entry) => [entry.stageId, entry.code]));
+        return yield* Effect.tryPromise({
+          try: () => searchCopilotByIds(client, ids, codes),
+          catch: (cause) => maaxError("读取作业集内容失败", cause),
+        });
+      });
+
     const resolve = (input: string) =>
       Effect.gen(function* () {
         const result = yield* Effect.tryPromise({
@@ -96,6 +135,6 @@ export const PrtsLibraryLive: Layer.Layer<PrtsLibrary, never, AppPaths> = Layer.
         };
       });
 
-    return { search, levels, resolve, detail, like } satisfies PrtsLibraryApi;
+    return { search, levels, resolve, detail, like, setSearch, setItems } satisfies PrtsLibraryApi;
   }),
 );

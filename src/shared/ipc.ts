@@ -8,7 +8,9 @@ import type {
   CopilotResolveResult,
   CopilotItem,
   CopilotOptions,
+  CopilotSearchItem,
   CopilotSearchResult,
+  CopilotSetSearchResult,
   CopilotSetup,
   CoreInfo,
   OperatorEntry,
@@ -77,6 +79,8 @@ export const COMMANDS = {
   resolveCopilot: "copilot.resolve",
   readCopilotDetail: "copilot.detail",
   searchCopilot: "copilot.search",
+  searchCopilotSets: "copilot.sets",
+  copilotSetItems: "copilot.set-items",
   searchCopilotLevels: "copilot.levels",
   searchOperators: "copilot.operators",
   updateCopilotOptions: "copilot.options",
@@ -141,6 +145,13 @@ export interface CommandPayloads {
     limit?: number;
     language?: "zh" | "en";
   };
+  "copilot.sets": {
+    keyword?: string;
+    creatorId?: string;
+    page?: number;
+    limit?: number;
+  };
+  "copilot.set-items": { ids: ReadonlyArray<number> };
   "copilot.levels": { query: string };
   "copilot.operators": { query: string };
   "copilot.options": Partial<CopilotOptions>;
@@ -193,6 +204,8 @@ export interface CommandResults {
   "copilot.resolve": CopilotResolveResult;
   "copilot.detail": CopilotDetail | null;
   "copilot.search": CopilotSearchResult;
+  "copilot.sets": CopilotSetSearchResult;
+  "copilot.set-items": ReadonlyArray<CopilotSearchItem>;
   "copilot.levels": ReadonlyArray<CopilotLevel>;
   "copilot.operators": ReadonlyArray<OperatorEntry>;
   "copilot.options": CopilotSetup;

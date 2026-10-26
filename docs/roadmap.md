@@ -34,12 +34,16 @@
       VideoRecognition. Roguelike covers theme, mode, squad, opening reset and
       investment options; Reclamation covers both themes and the crafting mode;
       SingleStep maps stage/start/action; VideoRecognition takes a recording path.
-- [x] Copilot workspace: add assignments by PRTS id, `prts://s/<id>` set link
-      or by browsing, run them as a batch, and expand a dual-difficulty file into
-      normal and raid runs.
-- [x] Copilot browsing: search PRTS by keyword, stage, operator, author and
-      sort order from inside the app, with a disk-cached stage catalogue and the
-      core's own operator list.
+- [x] Copilot workspace: add assignments by PRTS id, `prts://s/<id>` set
+      link or by browsing, and run them as a batch. Each row checks 普通 and
+      突袭/磨难/险地 independently (both run, neither skips); H stages only offer
+      普通. A cleared difficulty unchecks itself and single-assignment runs ignore
+      the checkboxes.
+- [x] Copilot browsing: assignments and sets tabs. Search PRTS by keyword,
+      stage, operator, author and sort order; browse curated sets with author
+      filtering, expand a set to its assignments and add all of them at once.
+      The stage catalogue is disk-cached and operator suggestions come from the
+      core's own list.
 - [x] Tools: recruitment calculator, operator box, depot. Recruitment reads
       the active core's tables; OperBox/Depot results stream from the core's
       `SubTaskExtraInfo` callbacks and are kept per device.

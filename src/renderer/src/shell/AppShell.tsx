@@ -17,7 +17,14 @@ import type {
   ToolKind,
 } from "../../../shared/schemas";
 import { COMMANDS, type CommandName, type CommandPayloads, type CommandResults } from "../../../shared/ipc";
-import { isCopilotItem, selectCopilotMode, type CopilotMode } from "../../../shared/copilot-mode";
+import {
+  copilotItemModes,
+  mergeCopilotItems,
+  normalizeCopilotItem,
+  readCopilotBatch,
+  selectCopilotMode,
+  type CopilotMode,
+} from "../../../shared/copilot-mode";
 import { formatResourceStamp } from "../../../shared/resource-version";
 import { TASK_DEFINITIONS, createTask } from "../../../shared/tasks";
 import { AddDeviceDialog } from "../components/AddDeviceDialog";
@@ -173,10 +180,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
     const id = browserTaskId();
     return id === null ? undefined : selectedPlan()?.tasks.find((task) => task.id === id);
   });
-  const browserCopilotItems = createMemo<ReadonlyArray<CopilotItem>>(() => {
-    const raw = browserTask()?.params.copilot_list;
-    return Array.isArray(raw) ? raw.filter(isCopilotItem) : [];
-  });
+  const browserCopilotItems = createMemo<ReadonlyArray<CopilotItem>>(() =>
+    readCopilotBatch(browserTask()?.params.copilot_list),
+  );
 
   // A run owns the active core until it ends; only then may the core change.
   // The device status covers a window reload, where no run snapshot survives.
@@ -949,9 +955,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
     const plan = selectedPlan();
     const task = plan?.tasks.find((item) => item.id === taskId);
     if (!task) return false;
-    const existing = Array.isArray(task.params.copilot_list) ? task.params.copilot_list : [];
+    const existing = readCopilotBatch(task.params.copilot_list);
     const incoming = mode === undefined ? result.items : selectCopilotMode(result.items, mode);
-    updateTaskParam(taskId, "copilot_list", [...existing, ...incoming]);
+    updateTaskParam(taskId, "copilot_list", mergeCopilotItems(existing, incoming));
     notify({
       kind: "success",
       title: tr(result.kind === "set" ? "copilot.setAdded" : "copilot.added"),
@@ -980,14 +986,15 @@ export const AppShell: Component<AppShellProps> = (props) => {
     const result = await send(COMMANDS.resolveCopilot, { input }, { busy: false });
     if (!result) return false;
     const incoming = mode === undefined ? result.items : selectCopilotMode(result.items, mode);
-    const kinds = new Set([...data().copilot.items, ...incoming].map((item) => item.kind ?? "normal"));
+    const merged = mergeCopilotItems(data().copilot.items, incoming);
+    const kinds = new Set(merged.map((item) => item.kind ?? "normal"));
     if (kinds.size > 1) {
       // Mixing kinds would silently send SSS/Paradox files through the normal
       // task, and their entry screens differ. Refuse at add time.
       fail(new Error(tr("copilot.mixedKinds")));
       return false;
     }
-    await setCopilotItems([...data().copilot.items, ...incoming]);
+    await setCopilotItems(merged);
     notify({
       kind: "success",
       title: tr(result.kind === "set" ? "copilot.setAdded" : "copilot.added"),
@@ -996,8 +1003,39 @@ export const AppShell: Component<AppShellProps> = (props) => {
     return true;
   };
 
-  const addBrowsedCopilotGlobal = async (id: number, mode: CopilotMode): Promise<boolean> =>
-    resolveCopilotGlobal(String(id), mode);
+  /** Check one difficulty of a batch row; unchecking the last one drops the row. */
+  const withCopilotMode = (
+    items: ReadonlyArray<CopilotItem>,
+    id: number,
+    mode: CopilotMode,
+    checked: boolean,
+  ): ReadonlyArray<CopilotItem> => {
+    const row = items.find((entry) => entry.copilotId === id && (entry.kind ?? "normal") === "normal");
+    if (row === undefined) return items;
+    const normalized = normalizeCopilotItem(row);
+    const before = copilotItemModes(normalized);
+    const modes = mode === "normal" ? { ...before, normal: checked } : { ...before, raid: checked };
+    if (!modes.normal && !modes.raid) return items.filter((entry) => entry.id !== row.id);
+    return items.map((entry) => (entry.id === row.id ? { ...normalized, modes } : entry));
+  };
+
+  const toggleBrowsedCopilotMode = async (id: number, mode: CopilotMode, enabled: boolean): Promise<boolean> => {
+    const items = data().copilot.items;
+    const row = items.find((entry) => entry.copilotId === id && (entry.kind ?? "normal") === "normal");
+    if (!enabled) {
+      if (row !== undefined) await setCopilotItems(withCopilotMode(items, id, mode, false));
+      return true;
+    }
+    if (row !== undefined) {
+      if (copilotItemModes(row)[mode]) return true;
+      await setCopilotItems(withCopilotMode(items, id, mode, true));
+      return true;
+    }
+    return await resolveCopilotGlobal(String(id), mode);
+  };
+
+  const addBrowsedCopilotSetGlobal = async (setId: number): Promise<boolean> =>
+    resolveCopilotGlobal(`prts://s/${setId}`);
 
   const removeCopilotItem = (item: CopilotItem): void => {
     void setCopilotItems(data().copilot.items.filter((entry) => entry.id !== item.id));
@@ -1031,10 +1069,29 @@ export const AppShell: Component<AppShellProps> = (props) => {
     }
   };
 
-  const addBrowsedCopilot = async (id: number, mode: CopilotMode): Promise<boolean> => {
+  const toggleBrowsedCopilotModeFor = async (id: number, mode: CopilotMode, enabled: boolean): Promise<boolean> => {
     const taskId = browserTaskId();
     if (taskId === null) return false;
+    const task = selectedPlan()?.tasks.find((entry) => entry.id === taskId);
+    if (!task) return false;
+    const items = readCopilotBatch(task.params.copilot_list);
+    const row = items.find((entry) => entry.copilotId === id && (entry.kind ?? "normal") === "normal");
+    if (!enabled) {
+      if (row !== undefined) updateTaskParam(taskId, "copilot_list", withCopilotMode(items, id, mode, false));
+      return true;
+    }
+    if (row !== undefined) {
+      if (copilotItemModes(row)[mode]) return true;
+      updateTaskParam(taskId, "copilot_list", withCopilotMode(items, id, mode, true));
+      return true;
+    }
     return await resolveCopilotFor(taskId, String(id), mode);
+  };
+
+  const addBrowsedCopilotSet = async (setId: number): Promise<boolean> => {
+    const taskId = browserTaskId();
+    if (taskId === null) return false;
+    return await resolveCopilotFor(taskId, `prts://s/${setId}`);
   };
 
   const pickTaskFile = async (taskId: string, key: string): Promise<void> => {
@@ -1059,7 +1116,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
     // silently replacing the legacy single-file parameter.
     updateTaskParam(taskId, "copilot_list", [
       ...batch,
-      { id: crypto.randomUUID(), copilotId: 0, filename: file.filename, stage: "", title: file.name, isRaid: false },
+      {
+        id: crypto.randomUUID(),
+        copilotId: 0,
+        filename: file.filename,
+        stage: "",
+        title: file.name,
+        modes: { normal: true, raid: false },
+      },
     ]);
   };
 
@@ -1336,7 +1400,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
         locale={locale()}
         added={browserCopilotItems()}
         onClose={() => setBrowserTaskId(null)}
-        onAdd={addBrowsedCopilot}
+        onToggleMode={toggleBrowsedCopilotModeFor}
+        onAddSet={addBrowsedCopilotSet}
         onRemoveItem={removeBrowsedCopilot}
       />
 
@@ -1345,7 +1410,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
         locale={locale()}
         added={data().copilot.items}
         onClose={() => setCopilotBrowseOpen(false)}
-        onAdd={addBrowsedCopilotGlobal}
+        onToggleMode={toggleBrowsedCopilotMode}
+        onAddSet={addBrowsedCopilotSetGlobal}
         onRemoveItem={removeCopilotItem}
       />
 
