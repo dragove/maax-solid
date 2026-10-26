@@ -26,7 +26,7 @@ import {
   type CopilotMode,
 } from "../../../shared/copilot-mode";
 import { formatResourceStamp } from "../../../shared/resource-version";
-import { TASK_DEFINITIONS, createTask } from "../../../shared/tasks";
+import { TASK_DEFINITIONS, createTask, withTaskParam } from "../../../shared/tasks";
 import { AddDeviceDialog } from "../components/AddDeviceDialog";
 import { CopilotBrowser } from "../components/CopilotBrowser";
 import { Icon } from "../components/ui/Icon";
@@ -858,7 +858,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     updatePlan((plan) => ({
       ...plan,
       tasks: plan.tasks.map((task) =>
-        task.id === taskId ? { ...task, params: { ...task.params, [key]: value } } : task,
+        task.id === taskId ? { ...task, params: withTaskParam(task.type, task.params, key, value) } : task,
       ),
     }));
   };

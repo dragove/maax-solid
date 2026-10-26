@@ -294,6 +294,27 @@ export const OperatorEntrySchema = Schema.Struct({
 });
 export type OperatorEntry = Schema.Schema.Type<typeof OperatorEntrySchema>;
 
+/**
+ * One operator offered by the Roguelike starting-operator picker: the catalogue
+ * entry plus whether MAA recommends it for the current theme's opening.
+ */
+export const RoguelikeOperatorSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  nameEn: Schema.String,
+  rarity: Schema.Int,
+  profession: Schema.String,
+  recommended: Schema.Boolean,
+});
+export type RoguelikeOperator = Schema.Schema.Type<typeof RoguelikeOperatorSchema>;
+
+/** A downscaled avatar from the active core's `resource/template/avatar`. */
+export const OperatorAvatarSchema = Schema.Struct({
+  id: Schema.String,
+  dataUrl: Schema.String,
+});
+export type OperatorAvatar = Schema.Schema.Type<typeof OperatorAvatarSchema>;
+
 export const CopilotLevelSchema = Schema.Struct({
   stageId: Schema.NonEmptyString,
   code: Schema.String,

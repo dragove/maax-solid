@@ -13,7 +13,9 @@ import type {
   CopilotSetSearchResult,
   CopilotSetup,
   CoreInfo,
+  OperatorAvatar,
   OperatorEntry,
+  RoguelikeOperator,
   CoreReleaseCheck,
   DeviceDraft,
   DeviceView,
@@ -83,6 +85,8 @@ export const COMMANDS = {
   copilotSetItems: "copilot.set-items",
   searchCopilotLevels: "copilot.levels",
   searchOperators: "copilot.operators",
+  roguelikeOperators: "roguelike.operators",
+  operatorAvatars: "operator.avatars",
   updateCopilotOptions: "copilot.options",
   setCopilotItems: "copilot.items",
   startCopilot: "copilot.start",
@@ -154,6 +158,8 @@ export interface CommandPayloads {
   "copilot.set-items": { ids: ReadonlyArray<number> };
   "copilot.levels": { query: string };
   "copilot.operators": { query: string };
+  "roguelike.operators": { theme: string };
+  "operator.avatars": { ids: ReadonlyArray<string> };
   "copilot.options": Partial<CopilotOptions>;
   "copilot.items": { items: ReadonlyArray<CopilotItem> };
   "copilot.start": { deviceId: string; itemId?: string };
@@ -208,6 +214,8 @@ export interface CommandResults {
   "copilot.set-items": ReadonlyArray<CopilotSearchItem>;
   "copilot.levels": ReadonlyArray<CopilotLevel>;
   "copilot.operators": ReadonlyArray<OperatorEntry>;
+  "roguelike.operators": ReadonlyArray<RoguelikeOperator>;
+  "operator.avatars": ReadonlyArray<OperatorAvatar>;
   "copilot.options": CopilotSetup;
   "copilot.items": CopilotSetup;
   "copilot.start": RunSnapshot;

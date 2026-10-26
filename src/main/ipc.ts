@@ -268,6 +268,14 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
         const { query } = decode(Schema.Struct({ query: Schema.String }), payload);
         return run((app) => app.copilotOperators(query));
       }
+      case COMMANDS.roguelikeOperators: {
+        const { theme } = decode(Schema.Struct({ theme: Schema.String }), payload);
+        return run((app) => app.roguelikeOperators(theme));
+      }
+      case COMMANDS.operatorAvatars: {
+        const { ids } = decode(Schema.Struct({ ids: Schema.Array(Schema.String) }), payload);
+        return run((app) => app.operatorAvatars(ids));
+      }
       case COMMANDS.startRun: {
         const { deviceId, planId } = decode(RunInputSchema, payload);
         return run((app) => app.startRun(deviceId, planId));

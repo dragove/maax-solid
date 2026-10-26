@@ -102,6 +102,16 @@ const zh = {
   "tasks.noTasksHint": "从下方添加一个任务开始。",
   "tasks.addTask": "添加任务",
   "tasks.chooseFile": "选择文件",
+
+  "tasks.operPick": "点击选择",
+  "tasks.operSearch": "搜索干员名或英文名",
+  "tasks.operRecommended": "推荐开局干员",
+  "tasks.operRecommendedTag": "推荐",
+  "tasks.operAll": "全部干员",
+  "tasks.operCustom": "使用自定义名称",
+  "tasks.operNoMatch": "没有匹配的干员",
+  "tasks.operSupport": "助战",
+
   "copilot.list": "作业列表",
   "copilot.add": "添加",
   "copilot.addPlaceholder": "作业编号 / prts://编号 / prts://s/集编号",
@@ -597,6 +607,16 @@ const en: Record<MessageKey, string> = {
   "tasks.noTasksHint": "Add a task below to get started.",
   "tasks.addTask": "Add task",
   "tasks.chooseFile": "Choose file",
+
+  "tasks.operPick": "Click to choose",
+  "tasks.operSearch": "Search by Chinese or English name",
+  "tasks.operRecommended": "Recommended starters",
+  "tasks.operRecommendedTag": "Recommended",
+  "tasks.operAll": "All operators",
+  "tasks.operCustom": "Use a custom name",
+  "tasks.operNoMatch": "No matching operator",
+  "tasks.operSupport": "Support",
+
   "copilot.list": "Assignments",
   "copilot.add": "Add",
   "copilot.addPlaceholder": "Assignment id / prts://<id> / prts://s/<set-id>",

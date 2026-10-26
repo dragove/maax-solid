@@ -14,9 +14,10 @@ import {
   readCopilotBatch,
 } from "../../../shared/copilot-mode";
 import type { FieldOption, TaskField } from "../../../shared/tasks";
-import { TASK_DEFINITIONS } from "../../../shared/tasks";
+import { TASK_DEFINITIONS, fieldOptions } from "../../../shared/tasks";
 import { pick, t } from "../i18n/i18n";
 import { CopilotDetailBody, createCopilotDetails } from "./CopilotDetail";
+import { StartingOperPicker } from "./OperPicker";
 import { StagePicker } from "./StagePicker";
 import { Button } from "./ui/Button";
 import { Collapse } from "./ui/Collapse";
@@ -42,9 +43,15 @@ interface TaskCardProps {
   readonly onDrop: (event: DragEvent) => void;
 }
 
-const fieldOptionLabel = (type: TaskType, key: string, value: unknown, locale: Locale): string => {
+const fieldOptionLabel = (
+  type: TaskType,
+  key: string,
+  value: unknown,
+  params: Record<string, unknown>,
+  locale: Locale,
+): string => {
   const field = TASK_DEFINITIONS[type].fields.find((item) => item.key === key);
-  const option = field?.options?.find((item) => String(item.value) === String(value));
+  const option = field ? fieldOptions(field, params).find((item) => String(item.value) === String(value)) : undefined;
   return option ? pick(locale, option.label) : "";
 };
 
@@ -76,13 +83,13 @@ const summaryFor = (task: TaskConfig, locale: Locale): string => {
     case "Award":
       return locale === "en-US" ? "Daily collection" : "日常领取";
     case "Roguelike": {
-      const theme = fieldOptionLabel("Roguelike", "theme", params.theme, locale);
-      const mode = fieldOptionLabel("Roguelike", "mode", params.mode, locale);
+      const theme = fieldOptionLabel("Roguelike", "theme", params.theme, params, locale);
+      const mode = fieldOptionLabel("Roguelike", "mode", params.mode, params, locale);
       return [theme, mode].filter((part) => part !== "").join(" · ") || "—";
     }
     case "Reclamation": {
-      const theme = fieldOptionLabel("Reclamation", "theme", params.theme, locale);
-      const mode = fieldOptionLabel("Reclamation", "mode", params.mode, locale);
+      const theme = fieldOptionLabel("Reclamation", "theme", params.theme, params, locale);
+      const mode = fieldOptionLabel("Reclamation", "mode", params.mode, params, locale);
       return [theme, mode].filter((part) => part !== "").join(" · ") || "—";
     }
     case "StartUp":
@@ -121,7 +128,7 @@ const summaryFor = (task: TaskConfig, locale: Locale): string => {
       return names || "—";
     }
     case "SingleStep": {
-      const step = fieldOptionLabel("SingleStep", "subtask", params.subtask, locale);
+      const step = fieldOptionLabel("SingleStep", "subtask", params.subtask, params, locale);
       const detail = params.subtask === "stage" ? params.stage : params.name;
       return typeof detail === "string" && detail.trim() !== "" ? `${step} · ${detail}` : step || "—";
     }
@@ -146,6 +153,7 @@ const fileNameOf = (value: unknown): string => {
 
 const FieldControl: Component<{
   field: TaskField;
+  params: Record<string, unknown>;
   locale: Locale;
   stages: ReadonlyArray<StageCatalogEntry>;
   value: unknown;
@@ -209,7 +217,7 @@ const FieldControl: Component<{
         </label>
       );
     case "select": {
-      const options = () => props.field.options ?? [];
+      const options = () => fieldOptions(props.field, props.params);
       const current = () =>
         typeof props.value === "string" || typeof props.value === "number" ? props.value : (options()[0]?.value ?? "");
       return (
@@ -237,7 +245,7 @@ const FieldControl: Component<{
     case "multi-select": {
       const selected = (): Array<string | number> =>
         Array.isArray(props.value) ? (props.value as Array<string | number>) : [];
-      const options = () => props.field.options ?? [];
+      const options = () => fieldOptions(props.field, props.params);
       return (
         <div class="field field--wide" title={description()}>
           <span class="field-label">{label()}</span>
@@ -266,6 +274,16 @@ const FieldControl: Component<{
         </div>
       );
     }
+    case "opers":
+      return (
+        <StartingOperPicker
+          field={props.field}
+          params={props.params}
+          locale={props.locale}
+          value={props.value}
+          onChange={props.onChange}
+        />
+      );
     case "file": {
       const name = () => fileNameOf(props.value);
       return (
@@ -542,6 +560,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
                 {(field) => (
                   <FieldControl
                     field={field}
+                    params={props.task.params}
                     locale={props.locale}
                     stages={props.stages}
                     value={props.task.params[field.key]}
@@ -563,6 +582,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
                       {(field) => (
                         <FieldControl
                           field={field}
+                          params={props.task.params}
                           locale={props.locale}
                           stages={props.stages}
                           value={props.task.params[field.key]}

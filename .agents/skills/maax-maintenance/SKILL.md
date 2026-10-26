@@ -525,6 +525,41 @@ write JSON with a bare `writeFile` in place.
   `TASK_DEFINITIONS`, `getTaskDefaults`, `buildMaaTaskParams`,
   `TASK_PALETTE_ORDER` and `TaskCard`'s `summaryFor`. The exhaustive
   switches fail the type check if one is missed — do not cast around them.
+- Theme-dependent fields own their choices: `TaskField.options` may be a
+  function of the params, so the Roguelike theme decides the mode list, the
+  difficulty range and the opening rewards. `fieldOptions(field, params)` is
+  the only resolver — reading `field.options` directly leaves a dynamic select
+  empty. `withTaskParam` (renderer edit) and `buildRoguelikeParams` (payload)
+  clamp the same rules: a mode kept from another theme, a level above the
+  theme's ceiling, or an opening-reset switch outside mode 4 makes MaaCore
+  reject the whole parameter set.
+- The Roguelike payload is built per theme and mode, never by spreading the
+  stored params. Some keys are mandatory in one mode (`blackflow_start_animals`
+  and `blackflow_start_rewards` in 30003, `find_playTime_target` in 20001) and
+  rejected in another (`start_with_elite_two` outside mode 4, an empty
+  `start_foldartal_list`). Blackflow fields are stored UI-side
+  (`blackflow_animal_1/2`, reward ids, priority order, `*_fast_flight`) and
+  become the core's array, bitmask and fixed mechanic loadout; the blue rewards
+  only count while a feathered serpent is required.
+- `kind: "opers"` is the starting-operator list: three fixed positions,
+  filled top-down (a position stays disabled until the previous one has a name),
+  mapped to the ordered `core_char_list`. Clearing a position clears the later
+  ones — the core cannot skip a recruit slot. A plan written before the list
+  existed shows its `core_char` in the first position; writing the list drops
+  the legacy `core_char`/`use_support` so the form never sends an operator it
+  does not display.
+- `StartingOperPicker` (`components/OperPicker.tsx`) expands a row into an
+  inline search panel instead of an overlay: the task card clips its overflow,
+  so a flyout would be cut off. `roguelike.operators` returns the whole
+  catalogue marked with the theme's recommendations
+  (`<core>/resource/roguelike/<theme>/recruitment.json`, `priority[].opers[]`
+  entries flagged `is_start`) and ordered recommended-first; the panel renders
+  the first 60 matches, so typing must narrow the list. A query that matches no
+  catalogue name still offers "use this name": the core accepts any Chinese name.
+  Avatars come from `<core>/resource/template/avatar/<id>.png` through
+  `operator.avatars`, downscaled to 40 px in main with `nativeImage` and cached;
+  only part of the catalogue (and no hand-typed name) has one, so the component
+  must keep an initial-letter badge as the fallback.
 - The stage picker's list is built in the main process: a hard-coded permanent
   list plus the live windows of `StageActivityV2.json` from `api.maa.plus`,
   cached per `client:locale` for ten minutes. A failed fetch still returns the

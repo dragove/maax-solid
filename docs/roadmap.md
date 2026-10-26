@@ -31,9 +31,12 @@
       and cleared, never queued. SSS Copilot, Paradox Copilot, Depot, OperBox and
       Custom stay available as queue tasks.
 - [x] Remaining task types: Roguelike, Reclamation, SingleStep,
-      VideoRecognition. Roguelike covers theme, mode, squad, opening reset and
-      investment options; Reclamation covers both themes and the crafting mode;
-      SingleStep maps stage/start/action; VideoRecognition takes a recording path.
+      VideoRecognition. Roguelike covers all six themes (including 黑流树海),
+      their mode lists, the starting-operator order with per-slot support,
+      opening reset, foldartals, seeds, Playtime nodes, Blackflow start-run
+      rewards and both mechanic fast-flight switches; Reclamation covers both
+      themes and the crafting mode; SingleStep maps stage/start/action;
+      VideoRecognition takes a recording path.
 - [x] Copilot workspace: add assignments by PRTS id, `prts://s/<id>` set
       link or by browsing, and run them as a batch. Each row checks 普通 and
       突袭/磨难/险地 independently (both run, neither skips); H stages only offer

@@ -3211,6 +3211,233 @@ select.input {
   color: var(--faint);
 }
 
+/* Positional starting-operator rows: three fixed recruit slots that fill
+   top-down. Each row expands into an inline search panel — an overlay would be
+   clipped by the task card — so the list never fights the card's own scroll. */
+.opers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.opers-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.opers-slot {
+  flex: 0 0 auto;
+  width: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.opers-token {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  text-align: left;
+  background: var(--inset);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-control);
+  transition:
+    border-color 120ms var(--ease),
+    background 120ms var(--ease);
+}
+
+.opers-token:hover:not(:disabled) {
+  border-color: var(--stroke-strong);
+}
+
+.opers-token--open {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.opers-token:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.opers-avatar,
+.opers-badge {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+}
+
+.opers-avatar {
+  object-fit: cover;
+}
+
+.opers-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+/* No name yet: a dashed square reads as "empty slot" without extra markup. */
+.opers-badge:empty {
+  background: transparent;
+  border: 1px dashed var(--stroke-strong);
+}
+
+.opers-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opers-token--empty .opers-name {
+  color: var(--faint);
+}
+
+.opers-caret {
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+
+.opers-support {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Reserved footprint of the clear button: an empty row has no clear button, and
+   without this the token would grow by exactly that much. */
+.opers-remove {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+}
+
+.opers-menu {
+  margin-left: 18px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-flyout);
+  transform-origin: top;
+  animation: flyout-in 120ms var(--ease-out);
+}
+
+.opers-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.opers-search-icon {
+  position: absolute;
+  left: 8px;
+  font-size: 13px;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.oper-search-input {
+  padding-left: 27px;
+}
+
+.opers-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 220px;
+  margin-top: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.opers-group {
+  margin: 6px 6px 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+
+.opers-group:first-child {
+  margin-top: 0;
+}
+
+.opers-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  text-align: left;
+  border-radius: var(--radius-control);
+}
+
+.opers-option:hover,
+.opers-option--active {
+  background: var(--surface-alt);
+}
+
+.opers-option-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opers-option-meta {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.opers-option-tag {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-radius: 999px;
+}
+
+.opers-option--custom {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--stroke);
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+}
+
+.opers-empty {
+  margin: 8px 6px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
 /* --------------------------------------------------------------------------
    Copilot batch editor
    -------------------------------------------------------------------------- */
