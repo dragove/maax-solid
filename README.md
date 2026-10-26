@@ -49,7 +49,7 @@ Maax 是一个面向 **MaaAssistantArknights / MaaCore** 的现代桌面客户�
 | UI      | Solid · `@solidjs/web` · 原生 CSS，无 UI 组件库  |
 | Effect  | effect · Effect Schema · `@effect/platform-node` |
 | Build   | Vite · electron-vite · electron-builder · pnpm   |
-| Quality | TypeScript · `@effect/tsgo` · Oxlint / Oxfmt     |
+| Quality | tsrs · `@effect/tsgo` · Oxlint / Oxfmt           |
 
 精确版本以 `package.json` / `pnpm-lock.yaml` 为准，这里只记录技术选型。
 
@@ -76,6 +76,7 @@ MAAX_DEV_CORE=/path/to/MAA-vX.Y.Z-linux-x86_64 pnpm dev
 | `pnpm dev`           | Electron + Vite HMR                            |
 | `pnpm test`          | Vitest 单元测试                                |
 | `pnpm lint`          | Effect 规则、type-aware 检查与 TypeScript 诊断 |
+| `pnpm typecheck`     | tsrs 纯类型检查（node / web 两个 project）     |
 | `pnpm format`        | Oxfmt                                          |
 | `pnpm check`         | lint + format check                            |
 | `pnpm build`         | lint 后构建到 `out/`                           |

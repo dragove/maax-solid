@@ -13,13 +13,13 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
   - [src/renderer/src/effect/solid-effect.ts](src/renderer/src/effect/solid-effect.ts) — Solid 2 × Effect 适配
   - [src/shared/schemas.ts](src/shared/schemas.ts) — Effect Schema 运行时契约
   - [src/main/runtime.ts](src/main/runtime.ts) — 主进程 Effect IPC 逻辑
-- 依赖变更后由 `prepare` 执行 `effect-tsgo patch --oxlint`；升级 TypeScript / Oxlint / oxlint-tsgolint 前先确认 `@effect/tsgo` 的兼容版本。
+- 依赖变更后由 `prepare` 执行 `effect-tsgo patch --no-typescript --oxlint --tsrs`；升级 tsrs / Oxlint / oxlint-tsgolint 前先确认 `@effect/tsgo` 的兼容版本（当前 0.57.0 只支持 tsrs `0.18.0-ts7.1.0-dev.20260929`）。
 
 ## 技术栈与约束
 
 - Electron 44 + 宿主 Node.js 26；Electron 内置的 Node.js 版本较旧，宿主 Node 26 的 API 不能直接在 Electron 内使用，需要原生 addon 或 sidecar。
 - Solid 2 RC + `@solidjs/web`；样式不使用 Tailwind 或 UI 组件库：单一全局 `styles.css` + CSS 自定义属性 token + data 属性选择器，弹窗、Toast、分段控件等均为本地组件。
-- Effect 4 + Effect Schema，TypeScript 7 + `@effect/tsgo`，Vite 8 + electron-vite，Oxlint / Oxfmt，pnpm 12，electron-builder。精确版本见 `package.json` / `pnpm-lock.yaml`。
+- Effect 4 + Effect Schema，tsrs（TypeScript 7 的 Rust 移植）+ `@effect/tsgo`，Vite 8 + electron-vite，Oxlint / Oxfmt，pnpm 12，electron-builder。精确版本见 `package.json` / `pnpm-lock.yaml`。
 - Wayland 下 Electron 44 默认使用 native Wayland；不要给启动脚本或主进程添加强制 X11 / `--ozone-platform` 参数。
 
 ## 高频回归红线
@@ -63,7 +63,7 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
 
 ## 质量与完成
 
-- 类型检查由 Oxlint 的 `typeAware` / `typeCheck` 完成；**没有 `tsc` / `typecheck` 脚本**。Oxlint 与 Oxfmt 是唯一 lint / format 工具。
+- 类型检查由 Oxlint 的 `typeAware` / `typeCheck` 完成，纯类型检查用 `pnpm typecheck`（tsrs 按 project 分别 `--noEmit`）；**没有 `tsc` 脚本，仓库内不安装 `typescript`**，编辑器/工具链都不再依赖它。Oxlint 与 Oxfmt 是唯一 lint / format 工具。
 - 完成前运行 `pnpm check`、`pnpm test` 与 `pnpm build`。涉及运行时行为时实际启动 Electron 验证；涉及打包时运行 `pnpm package` 并启动产物。
 - 视觉或启动流程有变化时检查深色/浅色主题；`docs/` 的预览图只在整体界面明显改版时重新生成（先压缩再提交），日常小改动不要替换截图，避免仓库体积膨胀。
 - 仓库文档、skill 与 `AGENTS.md` 不写入本机绝对路径、用户名、设备地址或下载位置；使用仓库相对路径与 `app.getPath("userData")` 这类通用位置。

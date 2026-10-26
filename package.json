@@ -7,7 +7,7 @@
   "author": "Maax",
   "main": "./out/main/index.js",
   "scripts": {
-    "prepare": "effect-tsgo patch --oxlint",
+    "prepare": "effect-tsgo patch --no-typescript --oxlint --tsrs",
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "test": "vitest run",
@@ -16,6 +16,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "check": "pnpm run lint && pnpm run format:check",
+    "typecheck": "tsrs -p tsconfig.node.json --noEmit && tsrs -p tsconfig.web.json --noEmit",
     "build": "pnpm run lint && electron-vite build",
     "package": "pnpm run build && electron-builder --dir",
     "dist": "pnpm run build && electron-builder",
@@ -26,7 +27,7 @@
   },
   "devDependencies": {
     "@effect/platform-node": "4.0.6",
-    "@effect/tsgo": "0.56.0",
+    "@effect/tsgo": "0.57.0",
     "@effect/vitest": "4.0.6",
     "@solidjs/vite-plugin": "3.0.0-next.51",
     "@solidjs/web": "2.0.0-rc.17",
@@ -43,7 +44,7 @@
     "oxlint-tsgolint": "7.0.2004",
     "semver": "7.8.5",
     "solid-js": "2.0.0-rc.17",
-    "typescript": "7.1.0-beta",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "vite": "8.3.4",
     "vitest": "5.0.5",
     "yauzl": "3.4.0"
