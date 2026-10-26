@@ -1,0 +1,35 @@
+package.json
+  s_39b451b02654ec::t_58fb0a7058906c 10
+  s_39b451b02654ec::t_c8e9fd00823f3e 19
+  s_39b451b02654ec::t_9ac4d00a0ccc76 47
+  s_39b451b02654ec::t_8bc2029f4883da 30
+pnpm-workspace.yaml
+  s_39b451b02654ec::t_2753464929890f 5-12
+  s_39b451b02654ec::t_8bc2029f4883da 4
+README.md
+  s_39b451b02654ec::t_58d52b26988b78 52,79
+electron.vite.config.ts
+  s_39b451b02654ec::t_46439ab75214ab 24
+AGENTS.md
+  s_39b451b02654ec::t_75aa2ae706c10d 16,22,66
+src/renderer/src/env.d.ts
+  s_39b451b02654ec::t_c4a08823a1b9b6 17
+pnpm-lock.yaml
+  s_39b451b02654ec::t_9b8de1e9700eb8 177-178,227-229,346-347,351-352,356-357,361-362,366-367,371-372,376-377,381-382,1090-1123,2300-2304,2660,2663,2666,2669,2672,2675,2678,2681,2683-2689,3204-3218,4503-4510
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "16e55b4eb5b1f19a84b9a7c582154e4b6cfb522d",
+  "prompts": {},
+  "sessions": {
+    "s_39b451b02654ec": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a1760b-aaa3-773f-af2d-e9957f296c38",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
