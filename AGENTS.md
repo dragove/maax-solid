@@ -1,6 +1,6 @@
 # AGENTS.md — Maax
 
-Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 RC + Effect 4**。
+Maax 是一个 Electron 桌面应用，核心组合为 **Electron 45 + Solid 2 RC + Effect 4**。
 
 **默认工作原则：Effect-first。** 业务逻辑、异步流程、错误处理、跨进程边界与资源生命周期优先使用 Effect；高性能热路径与即时值保持普通 TypeScript / Solid，不为了形式统一而增加 Effect 开销。
 
@@ -13,14 +13,16 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 44 + Solid 2 R
   - [src/renderer/src/effect/solid-effect.ts](src/renderer/src/effect/solid-effect.ts) — Solid 2 × Effect 适配
   - [src/shared/schemas.ts](src/shared/schemas.ts) — Effect Schema 运行时契约
   - [src/main/runtime.ts](src/main/runtime.ts) — 主进程 Effect IPC 逻辑
-- 依赖变更后由 `prepare` 执行 `effect-tsgo patch --no-typescript --oxlint --tsrs`；升级 tsrs / Oxlint / oxlint-tsgolint 前先确认 `@effect/tsgo` 的兼容版本（当前 0.57.0 只支持 tsrs `0.18.0-ts7.1.0-dev.20260929`）。
+- 依赖变更后由 `prepare` 执行 `effect-tsgo patch --no-typescript --oxlint --tsrs`；升级 tsrs / Oxlint / oxlint-tsgolint 前先确认 `@effect/tsgo` 的兼容版本（当前 0.59.0 支持 tsrs `0.20.0-ts7.1.0-beta`；新 tsrs 版本需先有对应的 `@effect/tsgo` 才可升级）。
+
+- pnpm 12 默认对依赖设 24 小时 `minimumReleaseAge` 保护期。升级到刚发布的版本（tsrs / `@effect/tsgo` / Solid 的 rc 之类）时，把**精确版本**逐个加进 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude`（该字段只接受精确版本，不接受范围或通配符）；临时绕过用 `pnpm install --config.minimumReleaseAge=0`，不要为此改全局策略。
 
 ## 技术栈与约束
 
-- Electron 44 + 宿主 Node.js 26；Electron 内置的 Node.js 版本较旧，宿主 Node 26 的 API 不能直接在 Electron 内使用，需要原生 addon 或 sidecar。
+- Electron 45 + 宿主 Node.js 26；Electron 内置的 Node.js 版本较旧，宿主 Node 26 的 API 不能直接在 Electron 内使用，需要原生 addon 或 sidecar。
 - Solid 2 RC + `@solidjs/web`；样式不使用 Tailwind 或 UI 组件库：单一全局 `styles.css` + CSS 自定义属性 token + data 属性选择器，弹窗、Toast、分段控件等均为本地组件。
 - Effect 4 + Effect Schema，tsrs（TypeScript 7 的 Rust 移植）+ `@effect/tsgo`，Vite 8 + electron-vite，Oxlint / Oxfmt，pnpm 12，electron-builder。精确版本见 `package.json` / `pnpm-lock.yaml`。
-- Wayland 下 Electron 44 默认使用 native Wayland；不要给启动脚本或主进程添加强制 X11 / `--ozone-platform` 参数。
+- Wayland 下 Electron 45 默认使用 native Wayland；不要给启动脚本或主进程添加强制 X11 / `--ozone-platform` 参数。
 
 ## 高频回归红线
 

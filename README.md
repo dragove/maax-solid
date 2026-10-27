@@ -1,7 +1,7 @@
 # Maax
 
 Maax 是一个面向 **MaaAssistantArknights / MaaCore** 的现代桌面客户端，使用
-**Electron 44 + Solid 2 RC + Effect 4** 构建。它重新实现了已停止维护的 MaaX
+**Electron 45 + Solid 2 RC + Effect 4** 构建。它重新实现了已停止维护的 MaaX
 的设备上下文、任务队列与核心管理体验，并把内核隔离、多版本回退和类型化错误
 作为一等设计。
 
