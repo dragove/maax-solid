@@ -91,7 +91,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   connectionConfig: "General",
   confirmBeforeDownload: true,
   notifyOnComplete: true,
-  closeToTray: false,
+  closeToTray: true,
   developerMode: false,
 };
 

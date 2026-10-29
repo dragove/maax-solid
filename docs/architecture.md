@@ -189,7 +189,8 @@ queued twice.
 
 ## Tray, notifications and diagnostics
 
-Closing the window hides it to the system tray when the preference is enabled;
+Closing the window hides it to the system tray (the default; the Settings
+preference can turn it off);
 the close handler is skipped during application shutdown and the tray menu can
 reopen or quit. A tray host is optional on Linux: if it cannot be created the
 window closes normally instead of becoming unreachable. Run-completion
