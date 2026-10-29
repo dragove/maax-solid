@@ -29,6 +29,7 @@ import { formatResourceStamp } from "../../../shared/resource-version";
 import { TASK_DEFINITIONS, createTask, withTaskParam } from "../../../shared/tasks";
 import { AddDeviceDialog } from "../components/AddDeviceDialog";
 import { CopilotBrowser } from "../components/CopilotBrowser";
+import { WindowControls } from "../components/WindowControls";
 import { Icon } from "../components/ui/Icon";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { notify } from "../components/ui/Toaster";
@@ -1233,6 +1234,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
             <button type="button" class="icon-button" onClick={() => void toggleTheme()} title={tr("settings.theme")}>
               <Icon name={resolvedTheme() === "dark" ? "sun" : "moon"} />
             </button>
+            <Show when={window.maax.windowFrame.enabled}>
+              <WindowControls locale={locale} />
+            </Show>
           </div>
         </header>
 

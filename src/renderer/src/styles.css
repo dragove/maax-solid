@@ -362,6 +362,7 @@ svg {
   display: flex;
   align-items: center;
   gap: 9px;
+  -webkit-app-region: drag;
   height: 52px;
   flex: 0 0 52px;
   padding: 0 14px;
@@ -512,6 +513,9 @@ svg {
   padding: 0 10px 0 16px;
   background: var(--bg-chrome);
   border-bottom: 1px solid var(--stroke);
+  /* Custom frame: the top strip is the drag region; interactive children opt out. */
+  -webkit-app-region: drag;
+  user-select: none;
 }
 
 .topbar-crumb {
@@ -527,7 +531,9 @@ svg {
 .topbar-actions {
   display: flex;
   align-items: center;
+  align-self: stretch;
   gap: 4px;
+  -webkit-app-region: no-drag;
 }
 
 .device-pill {
@@ -605,6 +611,45 @@ svg {
 .icon-button:hover:not(:disabled) {
   color: var(--text);
   background: var(--surface-alt);
+}
+
+/* VSCode-style window buttons for the custom frame: they bleed to the right
+   edge of the window, span the full title-bar height, and the close button
+   uses the OS-danger hover. */
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  /* 100% of the stretched actions row: the full title-bar height minus its
+     1px separator, so the hover fill stops at the border instead of over it. */
+  height: 100%;
+  margin-left: 4px;
+  margin-right: -10px;
+  -webkit-app-region: no-drag;
+}
+
+.window-controls-button {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 100%;
+  padding: 0;
+  color: var(--muted);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  transition:
+    color 120ms var(--ease),
+    background 120ms var(--ease);
+}
+
+.window-controls-button:hover {
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
+.window-controls-close:hover {
+  color: var(--surface);
+  background: var(--danger);
 }
 
 .content {

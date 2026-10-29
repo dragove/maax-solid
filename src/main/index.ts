@@ -122,6 +122,9 @@ async function createWindow(): Promise<void> {
     minHeight: 640,
     show: false,
     title: "Maax",
+    // VSCode-style custom frame on Windows/Linux: the renderer draws its own
+    // title bar (drag region + window controls). macOS keeps native traffic lights.
+    ...(process.platform === "darwin" ? {} : { frame: false }),
     backgroundColor: "#1b1b1b",
     autoHideMenuBar: true,
     ...(process.platform === "linux" ? { icon: appIcon } : {}),

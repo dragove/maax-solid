@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { Effect, Schema } from "effect";
 import {
   AppSettingsPatchSchema,
@@ -10,7 +10,7 @@ import {
   TaskPlanSchema,
   ToolKindSchema,
 } from "../shared/schemas";
-import { COMMANDS, IPC_CHANNELS } from "../shared/ipc";
+import { COMMANDS, IPC_CHANNELS, WINDOW_ACTIONS } from "../shared/ipc";
 import { bootTrace } from "./boot-trace";
 import { EventBus } from "./events";
 import { describeError, type MaaxError } from "./errors";
@@ -64,6 +64,7 @@ const ToolInputSchema = Schema.Struct({
   deviceId: Schema.NonEmptyString,
   kind: ToolKindSchema,
 });
+const WindowActionSchema = Schema.Literals(Object.values(WINDOW_ACTIONS));
 
 const decode = <A>(schema: Schema.ConstraintDecoder<A>, input: unknown): A => Schema.decodeUnknownSync(schema)(input);
 
@@ -312,6 +313,37 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
           error: { tag: "UnknownCommand", message: `Unknown command: ${command}` },
         };
     }
+  });
+
+  // Custom title bar (non-macOS): fire-and-forget frame actions plus the
+  // maximize-state push, so the restore glyph follows window-manager changes.
+  const isWindowAction = Schema.is(WindowActionSchema);
+  ipcMain.on(IPC_CHANNELS.window, (_event, action: unknown) => {
+    const window = getMainWindow();
+    if (!window || !isWindowAction(action)) return;
+    switch (action) {
+      case WINDOW_ACTIONS.minimize:
+        window.minimize();
+        break;
+      case WINDOW_ACTIONS.toggleMaximize:
+        if (window.isMaximized()) window.unmaximize();
+        else window.maximize();
+        break;
+      case WINDOW_ACTIONS.close:
+        window.close();
+        break;
+    }
+  });
+  ipcMain.handle(IPC_CHANNELS.window, (_event, action: unknown): boolean => {
+    if (!isWindowAction(action) || action !== WINDOW_ACTIONS.isMaximized) return false;
+    return getMainWindow()?.isMaximized() ?? false;
+  });
+  app.on("browser-window-created", (_event, created) => {
+    const pushState = (): void => {
+      if (!created.isDestroyed()) created.webContents.send(IPC_CHANNELS.windowState, created.isMaximized());
+    };
+    created.on("maximize", pushState);
+    created.on("unmaximize", pushState);
   });
 
   void runtime

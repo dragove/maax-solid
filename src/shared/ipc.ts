@@ -43,7 +43,20 @@ import type {
 export const IPC_CHANNELS = {
   command: "maax:command",
   event: "maax:event",
+  /** Fire-and-forget window-frame actions (custom title bar, non-macOS). */
+  window: "maax:window",
+  /** Main → renderer: pushed whenever the window maximized state flips. */
+  windowState: "maax:window-state",
 } as const;
+
+export const WINDOW_ACTIONS = {
+  minimize: "minimize",
+  toggleMaximize: "toggle-maximize",
+  close: "close",
+  isMaximized: "is-maximized",
+} as const;
+
+export type WindowAction = (typeof WINDOW_ACTIONS)[keyof typeof WINDOW_ACTIONS];
 
 export const COMMANDS = {
   bootstrap: "app.bootstrap",
@@ -233,4 +246,13 @@ export interface CommandResults {
 export interface MaaxBridge {
   invoke(command: string, payload: unknown): Promise<unknown>;
   subscribe(listener: (event: unknown) => void): () => void;
+  /** VSCode-style custom frame controls; `enabled` mirrors a non-darwin host. */
+  windowFrame: {
+    readonly enabled: boolean;
+    minimize(): void;
+    toggleMaximize(): void;
+    close(): void;
+    isMaximized(): Promise<boolean>;
+    onMaximizedChange(listener: (maximized: boolean) => void): () => void;
+  };
 }
