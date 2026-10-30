@@ -17,6 +17,7 @@ import type {
   OperatorEntry,
   RoguelikeOperator,
   CoreReleaseCheck,
+  DeviceDiscovery,
   DeviceDraft,
   DeviceView,
   LogEntry,
@@ -75,6 +76,7 @@ export const COMMANDS = {
   updateResource: "resources.update",
   rollbackResource: "resources.rollback",
   stageCatalog: "stages.catalog",
+  discoverDevices: "devices.discover",
   addDevice: "devices.add",
   updateDevice: "devices.update",
   removeDevice: "devices.remove",
@@ -133,6 +135,7 @@ export interface CommandPayloads {
   "resources.update": { coreId: string };
   "resources.rollback": { coreId: string; backupId: string };
   "stages.catalog": undefined;
+  "devices.discover": { adbPath?: string };
   "devices.add": DeviceDraft;
   "devices.update": { id: string; patch: Partial<DeviceDraft> };
   "devices.remove": { id: string };
@@ -204,6 +207,7 @@ export interface CommandResults {
   "resources.update": ResourceApplyResult;
   "resources.rollback": ResourceApplyResult;
   "stages.catalog": StageCatalog;
+  "devices.discover": DeviceDiscovery;
   "devices.add": DeviceView;
   "devices.update": DeviceView;
   "devices.remove": ReadonlyArray<DeviceView>;

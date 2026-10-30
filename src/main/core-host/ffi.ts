@@ -1,5 +1,6 @@
 import koffi from "koffi";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { coreLibraryPath } from "../platform";
 
 const NULL_SIZE = 0xffff_ffff_ffff_ffffn;
 
@@ -45,8 +46,26 @@ function pngSize(bytes: Uint8Array): PngSize {
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
 
+const normalizeDirectory = (value: string): string => value.replace(/[\\/]+$/u, "").toLowerCase();
+
+/**
+ * MaaCore.dll resolves its sibling DLLs (opencv, onnxruntime, MaaUtils, the
+ * control units) through the Windows loader. Koffi's `LoadLibraryW` call uses
+ * the standard search order, which includes PATH but not the loaded module's
+ * directory, so put the core root first before loading. On Linux the dynamic
+ * loader uses RPATH/$ORIGIN and needs no help.
+ */
+const prepareNativeLibrarySearch = (root: string): void => {
+  if (process.platform !== "win32") return;
+  const path = process.env.PATH ?? "";
+  const entries = path.split(";").filter((entry) => entry !== "");
+  if (entries.some((entry) => normalizeDirectory(entry) === normalizeDirectory(resolve(root)))) return;
+  process.env.PATH = [resolve(root), path].filter((entry) => entry !== "").join(";");
+};
+
 export function loadMaaCore(root: string): MaaCoreLibrary {
-  const libPath = join(root, "libMaaCore.so");
+  const libPath = coreLibraryPath(root);
+  prepareNativeLibrarySearch(root);
   const lib = koffi.load(libPath);
 
   const asstSetUserDir = lib.func("uint8 AsstSetUserDir(const char *path)");

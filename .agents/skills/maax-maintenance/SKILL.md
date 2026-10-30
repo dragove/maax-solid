@@ -423,6 +423,33 @@ Use a utility process/worker, one host per core version or resource set.
   timing separately, keep both and label them, rather than replacing one with
   the other.
 
+### Windows host
+
+- Windows releases use `MaaCore.dll` plus sibling native DLLs (`MaaUtils`,
+  `opencv_world4_maa`, `onnxruntime_maa`, the control units). The core host puts
+  the core directory first on `PATH` before `koffi.load`, otherwise the first
+  `LoadLibraryW` can resolve a stale copy from another emulator/install.
+- The release suffix is `win-x64` / `win-arm64` and the archive is `.zip`; use
+  `src/main/platform.ts` (`coreLibraryName`, `coreArchiveKind`) instead of
+  branching on the library name in every caller.
+- ADB is usually not on `PATH`. Resolve it from the Android SDK, MuMu
+  (`nx_main/adb.exe`, `nx_device/<version>/shell/adb.exe`), LDPlayer, Nox and
+  BlueStacks before falling back to `adb`. MuMu 12/5 exposes the same device as
+  `127.0.0.1:16384` (and `:7555` on MuMu 6), `emulator-5554`; dedupe discovery
+  by Android id and prefer the TCP endpoint.
+- `downloadFile` uses Node `http`/`https` streams on purpose. Electron's
+  bundled undici asserts (`Parser.finish`: `assert(this.paused)`) when a large
+  `fetch` body ends while paused for backpressure; do not replace it with a
+  `fetch` + async-iterator loop for the multi-hundred-MB core archives.
+- The taskbar follows the Start Menu shortcut whose `System.AppUserModel.ID`
+  matches the window's AUMID; when one exists, its icon and display name win
+  over the window icon. Set `app.setAppUserModelId("app.maax.desktop")` only in
+  a packaged build: a dev run that claims the production AUMID makes Windows
+  create an `Electron.lnk` for the stock `electron.exe`, and the installed app
+  then shows the Electron icon in the taskbar. Also pass `icon` to
+  `BrowserWindow` on Windows; otherwise a frameless window can fall back to
+  Electron's logo even though the exe and tray icons are correct.
+
 ### Host lifetime and recovery
 
 - A host is keyed by core + resource server and shared by its devices; membership

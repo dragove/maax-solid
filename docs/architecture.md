@@ -19,7 +19,7 @@ built around one rule: **the UI and the native core never share a process**.
                 │ MessagePort protocol (requests + batched callbacks)
 ┌───────────────┴─────────────────────────────────────────────┐
 │ MaaCore utility process (one per core version)              │
-│ koffi → libMaaCore.so · AsstHandle lifecycle · screenshots  │
+│ koffi → MaaCore native library · AsstHandle · screenshots   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -34,7 +34,7 @@ a callback and lose the window on a core crash.
 One utility process per installed core version/resource additionally gives us:
 
 - side-by-side core versions without SONAME / `RTLD_GLOBAL` collisions;
-- clean upgrade and rollback (the loaded `.so` is never replaced in place);
+- clean upgrade and rollback (the loaded native library is never replaced in place);
 - a supervisor that can reject pending requests and surface a typed error when
   the helper exits.
 
@@ -59,8 +59,14 @@ does not know how it is implemented.
   download from the official release API before anything is written.
 - Installation is staged in `userData/cores/.install-*` and then renamed into
   place, so an interrupted download never produces a half-usable core.
-- `libMaaCore.so` and `resource/` must stay together: MaaCore uses `$ORIGIN`
-  RUNPATH and a full resource tree is required (all roguelike themes).
+- The native library and `resource/` must stay together: on Linux MaaCore
+  resolves its dependencies through `$ORIGIN` RUNPATH; on Windows the host puts
+  the core directory first on `PATH` so `MaaCore.dll` can find the sibling
+  `opencv_world4_maa.dll`, `onnxruntime_maa.dll` and `MaaUtils.dll`. A full
+  resource tree is required on both (all roguelike themes).
+- Windows releases ship a `.zip`; the installer uses the same `yauzl` reader as
+  resource updates. Linux keeps `.tar.gz`. `platformSuffixFor` maps
+  `win32/x64` to `win-x64` and `win32/arm64` to `win-arm64`.
 - The user data directory passed to `AsstSetUserDir` is writable and separate
   from the (usually read-only) core directory.
 
@@ -102,8 +108,8 @@ gates only the core buttons (`coreBusy`), never the run controls. The new
 version becomes active immediately unless a device still holds a session or a
 run is active; in those cases the current core stays and the user switches later
 in Settings. A manual switch is refused while a run is preparing or running.
-Windows and macOS archives still need their own host variants, so
-`platformSuffixFor` only lists Linux.
+Windows uses the same installer path with the `win-x64` archive; macOS still
+needs its own library suffix and archive format.
 
 The component manager can also **repair** a managed core by downloading the
 matching release again and swapping the directory through a staging copy; the
@@ -319,11 +325,10 @@ PRTS filters on the **Chinese** name, which is what the picker sends.
 
 ## Known limits / next steps
 
-- Linux x86_64/aarch64 is the tested platform. The core host assumes
-  `libMaaCore.so`; Windows/macOS need their own library filename and archive
-  format handling.
-- Core download currently uses `tar` for `.tar.gz`; Windows `.zip` archives
-  need the existing `yauzl` reader wired into the core installer.
+- Windows x64 (MuMu 12/5) and Linux x86_64/aarch64 are tested. macOS still
+  needs a `libMaaCore.dylib` host, `.dmg` runtime layout and release suffix.
+- Windows packages are not part of the automatic release workflow yet; build
+  them locally with `pnpm dist`.
 - The app updater is not wired yet; core/resource updates are independent of
   the app version.
 - Scheduled runs only fire while MAAX is open; close-to-tray keeps it alive but

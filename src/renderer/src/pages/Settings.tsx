@@ -48,7 +48,7 @@ interface SettingsProps {
 const clientTypes: ReadonlyArray<ClientType> = ["Official", "Bilibili", "txwy", "YoStarEN", "YoStarJP", "YoStarKR"];
 
 const touchModes: ReadonlyArray<TouchMode> = ["maatouch", "minitouch", "adb"];
-const connectionProfiles = ["General", "MuMuEmulator12", "LDPlayer", "Nox", "XYAZ", "WSA", "Androws"];
+const connectionProfiles = ["General", "MuMuEmulator12", "LDPlayer", "Nox", "BlueStacks", "XYAZ", "WSA", "Androws"];
 
 const coreStatusLabel = (core: CoreInfo, locale: Locale): string => {
   if (core.status === "ready") return t(locale, "settings.coreReady");

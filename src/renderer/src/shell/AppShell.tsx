@@ -519,6 +519,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
     }
   };
 
+  const discoverDevices = (adbPath: string) => send(COMMANDS.discoverDevices, { adbPath }, { busy: false });
+
   const addDevice = async (draft: DeviceDraft): Promise<void> => {
     const device = await send(COMMANDS.addDevice, draft);
     if (!device) return;
@@ -1424,6 +1426,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         locale={locale()}
         settings={data().settings}
         onClose={() => setAddDeviceOpen(false)}
+        onDiscover={discoverDevices}
         onSubmit={(draft) => void addDevice(draft)}
       />
     </div>

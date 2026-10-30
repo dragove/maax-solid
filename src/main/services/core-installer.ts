@@ -6,6 +6,8 @@ import { spawn } from "node:child_process";
 import type { CoreInfo, CoreReleaseCheck } from "../../shared/schemas";
 import { maaxError, type MaaxError } from "../errors";
 import { EventBus } from "../events";
+import { coreArchiveKind, coreLibraryName, coreLibraryPath, coreResourceConfigPath } from "../platform";
+import { extractZip } from "../zip";
 import { CoreRegistry } from "./core-registry";
 import { CoreReleaseSchema, isNewerCoreVersion, pickCoreAsset, platformSuffixFor, publishedAtOf } from "./core-release";
 import { downloadFile } from "./download";
@@ -31,6 +33,25 @@ const extractTarGz = (archive: string, destination: string): Promise<void> =>
     });
   });
 
+/**
+ * Extract a downloaded core archive. Windows releases are zip files and have
+ * no `tar` dependency; Linux keeps the smaller `.tar.gz` path. `extractZip`
+ * already removes the destination on failure, so the caller can still use the
+ * staging directory contract of `findExtractedRoot`.
+ */
+const extractCoreArchive = async (archive: string, destination: string): Promise<void> => {
+  const kind = coreArchiveKind(archive);
+  if (kind === "zip") {
+    await extractZip(archive, destination);
+    return;
+  }
+  if (kind === "tar.gz") {
+    await extractTarGz(archive, destination);
+    return;
+  }
+  throw new Error(`不支持的 MaaCore 压缩包格式：${archive}`);
+};
+
 const findExtractedRoot = async (directory: string): Promise<string> => {
   const entries = await readdir(directory);
   if (entries.length === 1) {
@@ -44,17 +65,32 @@ const findExtractedRoot = async (directory: string): Promise<string> => {
     const info = await stat(candidate).catch(() => undefined);
     if (info?.isDirectory() && (await hasCoreFiles(candidate))) return candidate;
   }
-  throw new Error("MaaCore archive did not contain libMaaCore.so and resource/");
+  throw new Error(`MaaCore archive did not contain ${coreLibraryName()} and resource/`);
 };
 
 const hasCoreFiles = async (directory: string): Promise<boolean> => {
   try {
-    await stat(join(directory, "libMaaCore.so"));
-    await stat(join(directory, "resource", "config.json"));
+    await stat(coreLibraryPath(directory));
+    await stat(coreResourceConfigPath(directory));
     return true;
   } catch {
     return false;
   }
+};
+
+/**
+ * Remove staging directories left behind by a failed or interrupted install.
+ * Windows keeps a downloaded archive open until its stream is disposed, so the
+ * `finally` cleanup can legitimately fail with EBUSY; without this sweep the
+ * next attempt would keep piling up multi-hundred-megabyte workspaces.
+ */
+const clearWorkspaces = async (parent: string, prefix: string): Promise<void> => {
+  const entries = await readdir(parent, { withFileTypes: true }).catch(() => []);
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
+      .map((entry) => rm(join(parent, entry.name), { recursive: true, force: true }).catch(() => undefined)),
+  );
 };
 
 export interface CoreInstallerApi {
@@ -143,7 +179,7 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
         progress("metadata", 0, 0);
         const release = yield* fetchRelease;
         const asset = pickCoreAsset(release, suffix);
-        if (!asset) return yield* maaxError(`这个版本没有 ${suffix} 的 tar.gz 包`);
+        if (!asset) return yield* maaxError(`这个版本没有 ${suffix} 的压缩包`);
 
         const window = BrowserWindow.getFocusedWindow();
         const sizeMegabytes = Math.ceil(asset.size / 1024 / 1024);
@@ -175,7 +211,8 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
         const alreadyInstalled = yield* Effect.tryPromise({
           try: async () => {
             try {
-              await stat(join(target, "libMaaCore.so"));
+              await stat(coreLibraryPath(target));
+              await stat(coreResourceConfigPath(target));
               return true;
             } catch {
               return false;
@@ -192,6 +229,10 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
           try: () => mkdir(paths.coresDir, { recursive: true }),
           catch: (cause) => maaxError("创建核心目录失败", cause),
         });
+        yield* Effect.promise(() => clearWorkspaces(paths.coresDir, ".install-"));
+        // A previous attempt may have left a partial directory at the target;
+        // `cp`/`rename` refuse to land on it, so clear it before staging.
+        yield* Effect.promise(() => rm(target, { recursive: true, force: true }).catch(() => undefined));
         const workspace = join(paths.coresDir, `.install-${safeVersion}-${process.pid}`);
         const archive = join(workspace, asset.name);
         const extracted = join(workspace, "extracted");
@@ -214,7 +255,7 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
 
           progress("extracting", asset.size, asset.size);
           yield* Effect.tryPromise({
-            try: () => extractTarGz(archive, extracted),
+            try: () => extractCoreArchive(archive, extracted),
             catch: (cause) => maaxError("解压 MaaCore 失败", cause),
           });
 
@@ -270,8 +311,9 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
             );
           }
           const asset = pickCoreAsset(release, suffix);
-          if (!asset) return yield* maaxError(`这个版本没有 ${suffix} 的 tar.gz 包`);
+          if (!asset) return yield* maaxError(`这个版本没有 ${suffix} 的压缩包`);
 
+          yield* Effect.promise(() => clearWorkspaces(paths.cacheDir, "core-repair-"));
           const workspace = join(paths.cacheDir, `core-repair-${process.pid}-${Date.now()}`);
           const archive = join(workspace, asset.name);
           const extracted = join(workspace, "extracted");
@@ -293,7 +335,7 @@ export const CoreInstallerLive: Layer.Layer<CoreInstaller, never, AppPaths | Cor
             });
             progress("extracting", asset.size, asset.size);
             yield* Effect.tryPromise({
-              try: () => extractTarGz(archive, extracted),
+              try: () => extractCoreArchive(archive, extracted),
               catch: (cause) => maaxError("解压 MaaCore 失败", cause),
             });
             const root = yield* Effect.tryPromise({

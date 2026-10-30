@@ -439,6 +439,30 @@ export const DeviceViewSchema = Schema.Struct({
 });
 export type DeviceView = Schema.Schema.Type<typeof DeviceViewSchema>;
 
+/**
+ * Emulator family detected from the ADB serial. It only drives the suggested
+ * MaaCore connection config; any ADB endpoint can still be added manually.
+ */
+export const EmulatorKindSchema = Schema.Literals(["mumu", "nox", "generic"]);
+export type EmulatorKind = Schema.Schema.Type<typeof EmulatorKindSchema>;
+
+export const DiscoveredDeviceSchema = Schema.Struct({
+  serial: Schema.NonEmptyString,
+  state: Schema.String,
+  model: Schema.optional(Schema.String),
+  name: Schema.String,
+  emulator: EmulatorKindSchema,
+  config: Schema.String,
+});
+export type DiscoveredDevice = Schema.Schema.Type<typeof DiscoveredDeviceSchema>;
+
+export const DeviceDiscoverySchema = Schema.Struct({
+  adbPath: Schema.String,
+  devices: Schema.Array(DiscoveredDeviceSchema),
+  warning: Schema.optional(Schema.String),
+});
+export type DeviceDiscovery = Schema.Schema.Type<typeof DeviceDiscoverySchema>;
+
 /* -------------------------------------------------------------------------- */
 /* Task plans                                                                 */
 /* -------------------------------------------------------------------------- */

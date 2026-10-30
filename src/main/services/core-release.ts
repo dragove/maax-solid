@@ -5,8 +5,9 @@ import semver from "semver";
  * MaaCore release metadata from `api.maa.plus` (a GitHub release mirror).
  *
  * A component update is a whole new core version: the release archive carries
- * `libMaaCore.so` **and** the complete `resource/` tree, including the models
- * and templates that the MaaResource overlay cannot update. Installing it never
+ * the native library (`MaaCore.dll` or `libMaaCore.so`) **and** the complete
+ * `resource/` tree, including the models and templates that the MaaResource
+ * overlay cannot update. Installing it never
  * touches the running core — it lands in its own directory and the registry
  * decides which version is active.
  */
@@ -32,19 +33,23 @@ export interface ReleaseAsset {
 }
 
 /**
- * Asset suffixes this build can actually host. Windows needs its own library
- * name and archive format in the core host, so it is not listed yet.
+ * Asset suffixes this build can actually host. The archive format follows the
+ * platform: Maa releases ship `.tar.gz` for Linux and `.zip` for Windows.
  */
 export const platformSuffixFor = (platform: string, arch: string): string | undefined => {
   if (platform === "linux" && arch === "x64") return "linux-x86_64";
   if (platform === "linux" && arch === "arm64") return "linux-aarch64";
+  if (platform === "win32" && arch === "x64") return "win-x64";
+  if (platform === "win32" && arch === "arm64") return "win-arm64";
   return undefined;
 };
 
 /** Pick the full core archive; incremental OTA components are not installable here. */
 export const pickCoreAsset = (release: CoreRelease, suffix: string): ReleaseAsset | undefined => {
   const asset = release.details.assets.find(
-    (item) => item.name.endsWith(`-${suffix}.tar.gz`) && !item.name.includes("Component"),
+    (item) =>
+      !item.name.includes("Component") &&
+      (item.name.endsWith(`-${suffix}.tar.gz`) || item.name.endsWith(`-${suffix}.zip`)),
   );
   return asset === undefined ? undefined : { name: asset.name, size: asset.size, url: asset.browser_download_url };
 };

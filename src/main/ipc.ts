@@ -18,6 +18,7 @@ import type { AppRuntime } from "./runtime";
 import { Application, type ApplicationApi } from "./services/application";
 
 const RootInputSchema = Schema.Struct({ root: Schema.NonEmptyString });
+const DiscoverDevicesInputSchema = Schema.Struct({ adbPath: Schema.optional(Schema.String) });
 const CoreIdInputSchema = Schema.Struct({ coreId: Schema.NonEmptyString });
 const IdInputSchema = Schema.Struct({ id: Schema.NonEmptyString });
 const RunInputSchema = Schema.Struct({
@@ -157,6 +158,10 @@ export function registerIpcHandlers(runtime: AppRuntime, getMainWindow: () => Br
       }
       case COMMANDS.stageCatalog:
         return run((app) => app.stageCatalog);
+      case COMMANDS.discoverDevices: {
+        const { adbPath } = decode(DiscoverDevicesInputSchema, payload);
+        return run((app) => app.discoverDevices(adbPath ?? ""));
+      }
       case COMMANDS.addDevice: {
         const draft = decode(DeviceDraftSchema, payload);
         return run((app) => app.addDevice(draft));

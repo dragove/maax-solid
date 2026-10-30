@@ -127,7 +127,10 @@ async function createWindow(): Promise<void> {
     ...(process.platform === "darwin" ? {} : { frame: false }),
     backgroundColor: "#1b1b1b",
     autoHideMenuBar: true,
-    ...(process.platform === "linux" ? { icon: appIcon } : {}),
+    // Set the window icon on Windows too: the frameless window must not fall
+    // back to the stock Electron logo when no AUMID shortcut supplies an icon
+    // (dev runs and the unpacked build).
+    ...(process.platform === "darwin" ? {} : { icon: appIcon }),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: true,
@@ -235,7 +238,11 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(async () => {
       bootTrace("app-ready");
-      app.setAppUserModelId("app.maax.desktop");
+      // Only the installed build owns the packaged AppUserModelID. A dev run
+      // uses the stock electron.exe; claiming the production AUMID there makes
+      // Windows pair its Start Menu "Electron" shortcut with the installed app,
+      // and the taskbar then shows that shortcut's Electron icon.
+      if (app.isPackaged) app.setAppUserModelId("app.maax.desktop");
       runtime = makeRuntime();
       bootTrace("runtime-created");
       registerIpcHandlers(runtime, () => mainWindow);

@@ -24,6 +24,7 @@ import type {
   CopilotSearchResult,
   CopilotSetSearchResult,
   CoreReleaseCheck,
+  DeviceDiscovery,
   DeviceDraft,
   DeviceProfile,
   DeviceStatus,
@@ -68,7 +69,7 @@ import {
 import { scheduleDue } from "../../shared/schedule";
 import { setCloseToTray } from "../app-behavior";
 import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
-import { probeAdbConnection } from "./adb";
+import { discoverAdbDevices, probeAdbConnection, resolveAdbPath } from "./adb";
 
 const STAGE_ACTIVITY_URL = "https://api.maa.plus/MaaAssistantArknights/api/gui/StageActivityV2.json";
 
@@ -232,6 +233,7 @@ export interface ApplicationApi {
   readonly setActiveCore: (
     id: string,
   ) => Effect.Effect<{ settings: AppSettings; cores: ReadonlyArray<CoreInfo> }, MaaxError>;
+  readonly discoverDevices: (adbPath: string) => Effect.Effect<DeviceDiscovery>;
   readonly addDevice: (draft: DeviceDraft) => Effect.Effect<DeviceView, MaaxError>;
   readonly updateDevice: (id: string, patch: Partial<DeviceDraft>) => Effect.Effect<DeviceView, MaaxError>;
   readonly removeDevice: (id: string) => Effect.Effect<ReadonlyArray<DeviceView>>;
@@ -633,18 +635,26 @@ export const ApplicationLive: Layer.Layer<
       reconnectWanted.delete(deviceId);
     };
 
-    const stopHost = (key: string): void => {
+    // A host removed from `hosts` may still be exiting; repair/move waits for
+    // both the live entries and these in-flight shutdowns (Windows DLL locks).
+    const stoppingHosts = new Map<string, Promise<void>>();
+    const stopHost = (key: string): Promise<void> => {
       const host = hosts.get(key);
-      if (!host) return;
+      if (!host) return stoppingHosts.get(key) ?? Promise.resolve();
       hosts.delete(key);
       host.devices.clear();
-      void host.client.stop().catch(() => undefined);
+      const stop = host.client.stop().catch(() => undefined);
+      stoppingHosts.set(key, stop);
+      void stop.then(() => {
+        if (stoppingHosts.get(key) === stop) stoppingHosts.delete(key);
+      });
+      return stop;
     };
 
     const releaseHostIfIdle = (key: string): void => {
       const host = hosts.get(key);
       if (!host || host.devices.size > 0) return;
-      stopHost(key);
+      void stopHost(key);
       emitEngine();
     };
 
@@ -1086,7 +1096,9 @@ export const ApplicationLive: Layer.Layer<
         setDeviceState(deviceId, { status: "connecting", lastError: undefined });
         emitDevice(deviceId);
         const core = yield* ensureActiveCore();
-        const adbPath = profile.adbPath || settingsCache?.adbPath || "adb";
+        // An empty ADB path means "auto": packaged Windows builds do not have
+        // adb on PATH, so resolve the emulator's bundled client at connect time.
+        const adbPath = yield* Effect.promise(() => resolveAdbPath(profile.adbPath || settingsCache?.adbPath || ""));
         // `adb connect` has no timeout of its own, and MaaCore cannot cancel the
         // call it starts, so prove the address is reachable before asking for it.
         const probe = yield* Effect.tryPromise({
@@ -1546,15 +1558,24 @@ export const ApplicationLive: Layer.Layer<
         if (inUse) return yield* maaxError("请先断开连接到这个核心的设备，再更新资源");
       });
 
-    const releaseCoreHosts = (coreId: string): void => {
-      let stopped = false;
-      for (const [key, host] of hosts) {
-        if (host.core.id !== coreId) continue;
-        stopHost(key);
-        stopped = true;
-      }
-      if (stopped) emitEngine();
-    };
+    /**
+     * Stop every host that holds this core and wait for the processes to exit.
+     * Windows keeps `MaaCore.dll` locked until then, so a repair/move that
+     * renames the core directory must not race the utility process shutdown.
+     */
+    const releaseCoreHosts = (coreId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const waits: Promise<void>[] = [];
+        for (const [key, promise] of stoppingHosts) {
+          if (key.startsWith(`${coreId}::`)) waits.push(promise);
+        }
+        for (const [key, host] of hosts) {
+          if (host.core.id !== coreId) continue;
+          waits.push(stopHost(key));
+        }
+        if (waits.length > 0) emitEngine();
+        yield* Effect.promise(() => Promise.all(waits));
+      });
 
     const afterResourceChange = Effect.gen(function* () {
       const cores = yield* registry.refresh;
@@ -1584,7 +1605,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const core = yield* coreForUpdate(coreId);
         yield* ensureCoreIdle(coreId);
-        releaseCoreHosts(coreId);
+        yield* releaseCoreHosts(coreId);
         const result = yield* resources
           .apply(core, emitResourceProgress)
           .pipe(Effect.tapError(failResource("资源更新失败")));
@@ -1603,7 +1624,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const core = yield* coreForUpdate(coreId);
         yield* ensureCoreIdle(coreId);
-        releaseCoreHosts(coreId);
+        yield* releaseCoreHosts(coreId);
         const result = yield* resources
           .rollback(core, backupId, emitResourceProgress)
           .pipe(Effect.tapError(failResource("资源回滚失败")));
@@ -1718,6 +1739,9 @@ export const ApplicationLive: Layer.Layer<
         bus.emit({ _tag: "cores-updated", cores });
         return { settings: next, cores };
       });
+
+    const discoverDevices = (adbPath: string): Effect.Effect<DeviceDiscovery> =>
+      Effect.promise(() => discoverAdbDevices({ adbPath }));
 
     const addDevice = (draft: DeviceDraft) =>
       Effect.gen(function* () {
@@ -2009,7 +2033,7 @@ export const ApplicationLive: Layer.Layer<
         const core = yield* registry.get(id);
         if (!core) return yield* maaxError("核心不存在");
         yield* ensureCoreIdle(id);
-        releaseCoreHosts(id);
+        yield* releaseCoreHosts(id);
         const repaired = yield* installer.repair(core).pipe(Effect.tapError(failCoreAction("核心修复失败")));
         const cores = yield* registry.list;
         bus.emit({ _tag: "cores-updated", cores });
@@ -2025,7 +2049,7 @@ export const ApplicationLive: Layer.Layer<
           return yield* maaxError("只能移动由 MaaX 下载安装的核心", "导入的核心请重新选择目录");
         }
         yield* ensureCoreIdle(id);
-        releaseCoreHosts(id);
+        yield* releaseCoreHosts(id);
 
         const window = BrowserWindow.getFocusedWindow();
         const options = {
@@ -2306,6 +2330,7 @@ export const ApplicationLive: Layer.Layer<
         yield* Effect.tryPromise({ try: () => host.client.stop(), catch: () => undefined }).pipe(Effect.ignore);
       }
       hosts.clear();
+      yield* Effect.promise(() => Promise.all(stoppingHosts.values()));
     });
 
     const api: ApplicationApi = {
@@ -2321,6 +2346,7 @@ export const ApplicationLive: Layer.Layer<
       repairCore,
       moveCore,
       setActiveCore,
+      discoverDevices,
       addDevice,
       updateDevice,
       removeDevice,

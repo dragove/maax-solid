@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { OperatorCatalogueData } from "./operator-catalog";
 import { avatarPath, isAvatarId, mergeRoguelikeOperators, parseStartingOperators } from "./roguelike-catalog";
@@ -76,6 +77,6 @@ describe("roguelike operator picker data", () => {
     expect(isAvatarId("../template/x")).toBe(false);
     expect(isAvatarId("")).toBe(false);
     expect(isAvatarId(5)).toBe(false);
-    expect(avatarPath("/res", "char_002_amiya")).toBe("/res/template/avatar/char_002_amiya.png");
+    expect(avatarPath("/res", "char_002_amiya")).toBe(join("/res", "template", "avatar", "char_002_amiya.png"));
   });
 });

@@ -70,7 +70,9 @@
 ## v2 — polish and platform breadth
 
 - [ ] Application self-update (electron-updater or a signed custom updater).
-- [ ] Windows and macOS core host variants, archive formats, emulator discovery.
+- [x] Windows core host (`MaaCore.dll` / `.zip`), ADB discovery and MuMu
+      connection profiles.
+- [ ] macOS core host variant and archive format.
 - [ ] Incremental resource updates from the MAA resource channel.
 - [ ] Theme editor, compact/terminal layouts, keyboard command palette.
 - [ ] End-to-end tests against a recorded core event fixture.

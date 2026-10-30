@@ -8,7 +8,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "postinstall": "install-electron",
-    "prepare": "effect-tsgo patch --no-typescript --oxlint --tsrs",
+    "prepare": "node scripts/prepare.mjs",
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "test": "vitest run",
