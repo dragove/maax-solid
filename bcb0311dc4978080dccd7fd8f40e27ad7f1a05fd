@@ -1,0 +1,21 @@
+docs/architecture.md
+  s_5bf3d3a32cd7c2::t_caaec020dbe788 192-193
+src/shared/schemas.ts
+  s_5bf3d3a32cd7c2::t_d8306a302448d0 94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "bcb0311dc4978080dccd7fd8f40e27ad7f1a05fd",
+  "prompts": {},
+  "sessions": {
+    "s_5bf3d3a32cd7c2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a1862d-72df-730c-9067-bfebb8a5fb75",
+        "model": "deepseek-v4.1-flash-fast"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}

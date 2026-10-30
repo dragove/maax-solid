@@ -1,0 +1,49 @@
+src/main/index.ts
+  s_b7cd0daa1b83c1::t_f9d9c28b943dae 125-127
+src/main/ipc.ts
+  s_1de2d52898e549::t_5024bb74443257 1,13,67,318-347
+  s_1de2d52898e549::t_1f49eb6947bd6b 348
+src/renderer/src/styles.css
+  s_b7cd0daa1b83c1::t_0f3601a79773cb 365,516-518,536
+  s_1de2d52898e549::t_d40c26cf5e265f 534,622-624
+  s_b7cd0daa1b83c1::t_9094e86e0cf607 617-618
+  s_b7cd0daa1b83c1::t_62321a05bf06cf 616,619-621,625-654
+src/preload/index.ts
+  s_b7cd0daa1b83c1::t_b1e17300887194 2-19,32
+src/renderer/src/components/WindowControls.tsx
+  s_1de2d52898e549::t_7e7569cd0a28d4 1,19,22
+  s_b7cd0daa1b83c1::t_2970831b297eab 18,20
+  s_b7cd0daa1b83c1::t_14e97ee67e4075 2-17,21,23-56
+src/renderer/src/components/ui/Icon.tsx
+  s_b7cd0daa1b83c1::t_f415119a48b131 28,85
+src/shared/ipc.ts
+  s_b7cd0daa1b83c1::t_22e54fadcbbc48 46-49,52-60,249-257
+src/renderer/src/i18n/i18n.ts
+  s_b7cd0daa1b83c1::t_05306d0788c593 48-51,557-560
+src/renderer/src/shell/AppShell.tsx
+  s_b7cd0daa1b83c1::t_3584c7980c71dd 32,1237-1239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "4ef19d10befcc6ceef3497dbd21202e0781ff842",
+  "prompts": {},
+  "sessions": {
+    "s_1de2d52898e549": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a185f4-6191-77b4-85e9-15f95e03fe4b",
+        "model": "deepseek-v4.1-flash-fast"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    },
+    "s_b7cd0daa1b83c1": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a185b1-dcff-779f-8696-701b951badbf",
+        "model": "deepseek-v4-flash-fast"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
