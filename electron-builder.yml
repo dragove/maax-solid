@@ -28,10 +28,12 @@ asarUnpack:
 npmRebuild: false
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 linux:
+  # Installable formats only. The release tarball is `tar | zstd` from
+  # scripts/archive-linux.mjs: electron-builder's tar targets re-archive the
+  # whole tree with single-threaded 7-Zip (-mx=9 costs ~146 s for our 272 MB
+  # tree), while zstd archives it in about a second.
   target:
     - AppImage
-    - tar.gz
-    - tar.xz
     - deb
   category: Development
   executableName: maax

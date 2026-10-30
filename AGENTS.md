@@ -60,7 +60,7 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 45 + Solid 2 R
 
 `dev` 是默认开发分支，功能改动先合入 `dev`；`master` 只接收 `dev` 的合并。
 `master` push 会运行 `.github/workflows/release.yml`：按已有 `v*` tag 自动递增 patch
-（首次使用 `package.json` 的 `0.1.0`），构建 Linux AppImage、`.tar.gz` 与 `.tar.xz`
+（首次使用 `package.json` 的 `0.1.0`），构建 Linux AppImage 与 `.tar.zst`
 并创建 GitHub Release。需要指定新版本时，在 `dev` 上直接修改 `package.json` 的
 `version`。
 

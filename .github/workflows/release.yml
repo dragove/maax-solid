@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   linux:
-    name: Linux AppImage, tar.gz and tar.xz
+    name: Linux AppImage and tar.zst
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -73,10 +73,11 @@ jobs:
       - name: Build Linux packages
         run: |
           pnpm run build
-          pnpm exec electron-builder --linux AppImage tar.gz tar.xz --publish never
+          pnpm exec electron-builder --linux AppImage --publish never
+          node scripts/archive-linux.mjs
 
       - name: Show package sizes
-        run: ls -lh dist/*.AppImage dist/*.tar.gz dist/*.tar.xz
+        run: ls -lh dist/*.AppImage dist/*.tar.zst
 
       - name: Publish GitHub release
         if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || inputs.publish)
@@ -85,7 +86,7 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
           gh release create "v$VERSION" \
-            dist/*.AppImage dist/*.tar.gz dist/*.tar.xz \
+            dist/*.AppImage dist/*.tar.zst \
             --target "$GITHUB_SHA" \
             --title "Maax $VERSION" \
             --generate-notes

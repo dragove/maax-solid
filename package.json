@@ -21,6 +21,7 @@
     "build": "pnpm run lint && electron-vite build",
     "package": "pnpm run build && electron-builder --dir",
     "dist": "pnpm run build && electron-builder",
+    "dist:release": "pnpm run build && electron-builder --linux && node scripts/archive-linux.mjs",
     "bench:startup": "node scripts/measure-startup.mjs"
   },
   "dependencies": {
@@ -31,7 +32,7 @@
     "@effect/tsgo": "0.59.0",
     "@effect/vitest": "4.0.6",
     "@solidjs/vite-plugin": "3.0.0-next.51",
-    "@solidjs/web": "^2.0.0-rc.18",
+    "@solidjs/web": "^2.0.0-rc.19",
     "@types/node": "26.6.5",
     "@types/semver": "7.8.0",
     "@types/yauzl": "3.4.0",
@@ -46,7 +47,7 @@
     "oxlint-tsgolint": "7.0.2005",
     "playwright": "1.64.1",
     "semver": "7.8.5",
-    "solid-js": "^2.0.0-rc.18",
+    "solid-js": "^2.0.0-rc.19",
     "tsrs": "0.20.0-ts7.1.0-beta",
     "vite": "8.3.5",
     "vitest": "5.0.5",

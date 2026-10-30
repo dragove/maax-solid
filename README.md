@@ -46,7 +46,7 @@ Maax 是一个面向 **MaaAssistantArknights / MaaCore** 的现代桌面客户�
 | 平台          | 状态   | 说明                                                                                  |
 | ------------- | ------ | ------------------------------------------------------------------------------------- |
 | Windows 10/11 | 支持   | 使用 `MaaCore.dll` 与 `.zip` 核心包；已在 MuMu 模拟器（NX）验证连接、截图与任务运行。 |
-| Linux x86_64  | 支持   | AppImage / tar.gz / tar.xz / deb，已验证打包后的核心宿主。                            |
+| Linux x86_64  | 支持   | AppImage / tar.zst / deb，已验证打包后的核心宿主。                                    |
 | Linux aarch64 | 支持   | 下载对应 `linux-aarch64` 核心包。                                                     |
 | macOS         | 未支持 | 仍缺少 `.dylib` 核心宿主与对应发布包。                                                |
 
@@ -91,18 +91,25 @@ tsrs 集成）；`pnpm typecheck` 仍直接运行 `@tsrs/win32-x64`。
 `pnpm dev` 打开远程调试端口 `9229`，便于在 Wayland/niri 下做本地 UI 调试；
 生产包不开启该端口。
 
-| 命令                 | 说明                                                           |
-| -------------------- | -------------------------------------------------------------- |
-| `pnpm dev`           | Electron + Vite HMR                                            |
-| `pnpm test`          | Vitest 单元测试与 Chromium 挂载回归测试                        |
-| `pnpm lint`          | Effect 规则、type-aware 检查与 TypeScript 诊断                 |
-| `pnpm typecheck`     | tsrs 纯类型检查（node / web 两个 project）                     |
-| `pnpm format`        | Oxfmt                                                          |
-| `pnpm check`         | lint + format check                                            |
-| `pnpm build`         | lint 后构建到 `out/`                                           |
-| `pnpm package`       | 生成免安装目录（`dist/linux-unpacked` / `dist/win-unpacked`）  |
-| `pnpm dist`          | 当前平台安装包（Linux：AppImage / tar.* / deb；Windows：NSIS） |
-| `pnpm bench:startup` | 对比三种启动方式的耗时与内存（见下文）                         |
+| 命令                 | 说明                                                          |
+| -------------------- | ------------------------------------------------------------- |
+| `pnpm dev`           | Electron + Vite HMR                                           |
+| `pnpm test`          | Vitest 单元测试与 Chromium 挂载回归测试                       |
+| `pnpm lint`          | Effect 规则、type-aware 检查与 TypeScript 诊断                |
+| `pnpm typecheck`     | tsrs 纯类型检查（node / web 两个 project）                    |
+| `pnpm format`        | Oxfmt                                                         |
+| `pnpm check`         | lint + format check                                           |
+| `pnpm build`         | lint 后构建到 `out/`                                          |
+| `pnpm package`       | 生成免安装目录（`dist/linux-unpacked` / `dist/win-unpacked`） |
+| `pnpm dist`          | 当前平台安装包（Linux：AppImage / deb；Windows：NSIS）        |
+| `pnpm dist:release`  | 追加 tar.zst，等同发布产物（Linux 上约 25 秒）                |
+| `pnpm bench:startup` | 对比三种启动方式的耗时与内存（见下文）                        |
+
+Linux 上 `pnpm dist` 只打 AppImage 与 deb（约 20 秒）。发布用的 tar 不再交给
+electron-builder：它的 tar 目标只用单线程 7-Zip 重新打包整棵树（`-mx=9` 约 146 秒），
+所以改由 `scripts/archive-linux.mjs` 执行 `tar | zstd -T0`，同一棵树约 1 秒（`-9`
+约 108 MB，`--level 19` 约 22 秒、97 MB）。只想验证打包产物本身时用 `pnpm package`
+（约 6 秒，免压缩）。
 
 首次运行测试前执行 `pnpm exec playwright install chromium`（Linux CI 可加 `--with-deps`）。
 挂载回归测试通过 Solid JSX 编译器在真实 Chromium 中运行，不模拟 `<dialog>` 的原生方法。
@@ -117,14 +124,13 @@ AppImage 和本地 Electron + app.asar，测量到工作台首帧的耗时与稳
 
 `dev` 是默认开发分支，功能改动先合入 `dev`；`master` 只接收 `dev` 的合并。
 `dev` 合并到 `master` 后，`master` 的 push 会触发
-[`.github/workflows/release.yml`](.github/workflows/release.yml)，构建 Linux AppImage、
-`.tar.gz` 与 `.tar.xz`，并创建 GitHub Release。Windows 安装包需要在本机执行
+[`.github/workflows/release.yml`](.github/workflows/release.yml)，构建 Linux AppImage
+与 `.tar.zst`，并创建 GitHub Release。Windows 安装包需要在本机执行
 `pnpm dist`（electron-builder 的 NSIS 目标）；自动发布矩阵尚未包含 Windows。版本号按已有 `v*` tag 自动递增
 patch，首次发布为 `0.1.0`；需要指定 minor / major 版本时，在 `dev` 上直接修改
-`package.json` 的 `version` 再合并。发布流程不会把递增后的版本写回仓库。AppImage 与
-tar.gz 便于直接分发，tar.xz 体积更小。产物命名为
-`Maax-<version>-linux-x86_64.AppImage`、`Maax-<version>-linux-x64.tar.gz` 与
-`Maax-<version>-linux-x64.tar.xz`。
+`package.json` 的 `version` 再合并。发布流程不会把递增后的版本写回仓库。AppImage
+便于直接运行，tar.zst 便于免 FUSE 解包运行（`tar --zstd -xf`，需要 zstd）。产物命名为
+`Maax-<version>-linux-x86_64.AppImage` 与 `Maax-<version>-linux-x64.tar.zst`。
 
 ## 架构
 
