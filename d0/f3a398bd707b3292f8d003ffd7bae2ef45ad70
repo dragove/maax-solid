@@ -1,0 +1,101 @@
+src/main/services/application.ts
+  s_3115afb654441c::t_5d4f836a713eb3 638-640,643,646-651,1569-1571
+  s_3115afb654441c::t_88c677ecc89570 27,72,236,641,657,1099-1101,1561-1568,1572-1578,1608,1627,1743-1745,2036,2052,2349
+  s_3115afb654441c::t_f5825f9ff922b7 2333
+src/main/services/adb.test.ts
+  s_3115afb654441c::t_c297ca8b916032 8-12,14,101-163,165-214
+  s_3115afb654441c::t_54c816a770d016 164
+src/main/platform.test.ts
+  s_3115afb654441c::t_885556f19c161d 1-16
+src/renderer/src/shell/AppShell.tsx
+  s_3115afb654441c::t_54c816a770d016 522
+  s_3115afb654441c::t_ceceabb7d6976d 523,1429
+docs/architecture.md
+  s_3115afb654441c::t_a7a3ab0f1ab957 37,62-69,111-112,328-331
+  s_3115afb654441c::t_c3f98e5cb453ee 22
+src/main/services/core-release.test.ts
+  s_3115afb654441c::t_b2a382304e5fe2 20,23-24,35-40
+docs/roadmap.md
+  s_3115afb654441c::t_a7a3ab0f1ab957 73-75
+scripts/prepare.mjs
+  s_3115afb654441c::t_f7dc52d8b56c5a 1-16
+.agents/skills/maax-maintenance/SKILL.md
+  s_3115afb654441c::t_3e9e708446fea4 426-443,452
+  s_3115afb654441c::t_726f855410bbc7 444-451
+src/main/services/adb.ts
+  s_3115afb654441c::t_37944c82aad693 3-5,17-20,110-208,229-232,234-236,241-242,245-255,257-444
+  s_3115afb654441c::t_a4a238064cf1ef 2,209-228,233,237-240,243
+  s_3115afb654441c::t_54c816a770d016 256
+  s_3115afb654441c::t_e50d748fe8ea59 244
+src/main/core-host/ffi.ts
+  s_3115afb654441c::t_ea41bf7534b4ca 3,49-65,67-68
+  s_3115afb654441c::t_a50e1de7c681e5 2
+src/main/ipc.ts
+  s_3115afb654441c::t_59fa888dba22fc 21,161-164
+src/main/services/roguelike-catalog.test.ts
+  s_3115afb654441c::t_c1dd07cb0d2cf6 1,80
+src/renderer/src/pages/Settings.tsx
+  s_3115afb654441c::t_f44039456df27c 51
+src/main/platform.ts
+  s_3115afb654441c::t_ded946f49a2847 1-27
+src/renderer/src/components/AddDeviceDialog.tsx
+  s_3115afb654441c::t_4de577fc642f23 1-2,6,14,21-31,41-44,61-64,71-100,156-190
+  s_3115afb654441c::t_54c816a770d016 20
+src/renderer/src/i18n/i18n.ts
+  s_3115afb654441c::t_5f846c6f7cffd7 263-270,367,787-794,893-894
+  s_3115afb654441c::t_b0ead1f32bbc21 89,402,605,929
+src/main/index.ts
+  s_3115afb654441c::t_c413d56443d7ec 130-132
+  s_3115afb654441c::t_5ce02e088c603d 241-245
+  s_3115afb654441c::t_a08e159154563c 133
+README.md
+  s_3115afb654441c::t_2a275dbfb23600 46-51
+  s_3115afb654441c::t_d2b845235e92ce 94-105
+  s_3115afb654441c::t_88c677ecc89570 42-45,52-56,82,84-85,88-90,116-117,131
+src/main/services/core-release.ts
+  s_3115afb654441c::t_f44be4dec662a2 8-10,36-37,42-43,50-52
+src/main/services/download.ts
+  s_3115afb654441c::t_7243795cdfa3e3 33-45,48-50
+  s_3115afb654441c::t_4324af18a681e8 69-77,80,105
+  s_3115afb654441c::t_b06528ef116003 109-110
+  s_3115afb654441c::t_602504b48e36c3 2-5,10,12-13,18-32,46-47,51-53,60-68,78-79,81-82,84-86,89-91,97-103,106-108,112-113
+AGENTS.md
+  s_3115afb654441c::t_23ce65eed1d002 16-17
+src/shared/ipc.ts
+  s_3115afb654441c::t_1058b4b8520a7a 20,79,138,210
+package.json
+  s_3115afb654441c::t_f7dc52d8b56c5a 11
+src/main/services/download.test.ts
+  s_3115afb654441c::t_8f192f6fa58c17 1-21,23-91
+  s_3115afb654441c::t_8d6c4d0d365bfe 22
+src/renderer/src/effect/desktop.ts
+  s_3115afb654441c::t_85fca719aaa06d 17,94
+src/main/core-host-client.ts
+  s_3115afb654441c::t_bbf1d8a5b7d006 23-24,29-31,50,94-97,107-118
+src/main/services/core-installer.ts
+  s_3115afb654441c::t_98cfece635b86c 9-10,36-54,68,73-74,81-95,182,214,232,258,314,316,338
+  s_3115afb654441c::t_a8d42ca5ca7183 215,233-235
+src/renderer/src/styles.css
+  s_3115afb654441c::t_1a249c64fc66a8 2547-2548,2557-2558,2567
+  s_3115afb654441c::t_a14fd4cd8da8d0 906-919,2498-2546,2549-2556,2559-2566,2568-2574
+src/main/services/core-registry.ts
+  s_3115afb654441c::t_61492acaf17b8a 4,6,71,74,114-116,124,129-133,137,141-145,156,161
+src/shared/schemas.ts
+  s_3115afb654441c::t_9f3657352c669d 442-465
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "d0f3a398bd707b3292f8d003ffd7bae2ef45ad70",
+  "prompts": {},
+  "sessions": {
+    "s_3115afb654441c": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18b65-4239-7184-b318-447b34455416",
+        "model": "deepseek-v4.1-flash-fast"
+      },
+      "human_author": "jingchun <jingchun@tsign.cn>"
+    }
+  }
+}
