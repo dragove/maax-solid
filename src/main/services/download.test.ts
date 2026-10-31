@@ -70,6 +70,22 @@ describe("downloadFile", () => {
     }
   });
 
+  it("rejects a malformed redirect Location instead of crashing with an uncaught exception", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(302, { location: "http://[" });
+      response.end();
+    });
+    const port = await listen(server);
+    const directory = await mkdtemp(join(tmpdir(), "maax-download-"));
+    try {
+      await expect(
+        downloadFile(`http://127.0.0.1:${port}/bad-redirect`, join(directory, "payload.bin")),
+      ).rejects.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("aborts a stalled response instead of hanging forever", async () => {
     const server = createServer((_request, response) => {
       response.writeHead(200, { "content-length": "1024" });

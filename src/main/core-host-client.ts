@@ -102,6 +102,7 @@ export class CoreHostClient {
     }
     if (!this.exited) {
       this.exited = true;
+      this.rejectAll(new Error("MaaCore host stopped"));
       this.child.kill();
     }
     // Windows keeps the loaded DLL locked until the utility process has really
@@ -121,6 +122,7 @@ export class CoreHostClient {
   kill(): void {
     if (this.exited) return;
     this.exited = true;
+    this.rejectAll(new Error("MaaCore host killed"));
     this.child.kill();
   }
 

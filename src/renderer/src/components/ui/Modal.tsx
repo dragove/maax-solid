@@ -64,7 +64,6 @@ export const Modal: Component<ModalProps> = (props) => {
         <button class="modal-backdrop" type="button" aria-label="Close" onClick={props.onClose} />
         <dialog
           class={["modal", { "modal--wide": props.wide }]}
-          open
           aria-modal="true"
           onCancel={(event) => {
             event.preventDefault();
@@ -72,7 +71,7 @@ export const Modal: Component<ModalProps> = (props) => {
           }}
           ref={(element) => {
             dialogEl = element;
-            if (!element.open) element.showModal();
+            element.showModal();
           }}
         >
           <header class="modal-head">

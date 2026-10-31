@@ -42,7 +42,11 @@ const openResponse = (url: URL, signal: AbortSignal, redirects = MAX_REDIRECTS):
             reject(new Error(`Too many redirects while downloading ${url.toString()}`));
             return;
           }
-          openResponse(new URL(location, url), signal, redirects - 1).then(resolve, reject);
+          try {
+            openResponse(new URL(location, url), signal, redirects - 1).then(resolve, reject);
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
           return;
         }
         resolve(response);

@@ -105,8 +105,14 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
           console.error("MaaCore callback failed", error);
         }
       }, koffi.pointer(callbackProto));
-      const handle = asstCreateEx(callback, null);
-      return { handle: handle as bigint, callback };
+      try {
+        const handle = asstCreateEx(callback, null);
+        if (handle === null || handle === 0n) throw new Error("AsstCreateEx returned a null handle");
+        return { handle: handle as bigint, callback };
+      } catch (error) {
+        koffi.unregister(callback as never);
+        throw error;
+      }
     },
     destroy: (handle, callback) => {
       asstDestroy(handle);
@@ -121,15 +127,17 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
     running: (handle) => bool(asstRunning(handle)),
     connected: (handle) => bool(asstConnected(handle)),
     screenshot: (handle) => {
-      asstAsyncScreencap(handle, 1);
       const startedAt = Date.now();
+      if (Number(asstAsyncScreencap(handle, 1)) <= 0) throw new Error("AsstAsyncScreencap failed");
       const sizes = [8 * 1024 * 1024, 16 * 1024 * 1024];
       for (const size of sizes) {
         const buffer = Buffer.allocUnsafe(size);
         const written = asstGetImage(handle, buffer, BigInt(size));
         if (written === NULL_SIZE) continue;
         const length = Number(written);
-        if (length <= 0) throw new Error("MaaCore did not return a screenshot (is the device connected?)");
+        if (!Number.isSafeInteger(length) || length <= 0 || length > size) {
+          throw new Error("MaaCore returned an invalid screenshot length");
+        }
         const png = new Uint8Array(buffer.buffer, buffer.byteOffset, length).slice();
         return { png, ...pngSize(png), durationMs: Date.now() - startedAt };
       }

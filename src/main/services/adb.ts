@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { createConnection } from "node:net";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import type { DiscoveredDevice, DeviceDiscovery, EmulatorKind } from "../../shared/schemas";
 
 /**
@@ -151,15 +151,15 @@ export const adbSearchPaths = (options: AdbLookupOptions = {}): ReadonlyArray<st
 
   if (platform !== "win32") {
     const home = env.HOME ?? "";
-    const sdkRoots = [env.ANDROID_HOME, env.ANDROID_SDK_ROOT, join(home, "Android", "Sdk")].filter(
+    const sdkRoots = [env.ANDROID_HOME, env.ANDROID_SDK_ROOT, posix.join(home, "Android", "Sdk")].filter(
       (root): root is string => typeof root === "string" && root.trim() !== "",
     );
     return uniquePaths(
       [
-        ...sdkRoots.map((root) => join(root, "platform-tools", exe)),
+        ...sdkRoots.map((root) => posix.join(root, "platform-tools", exe)),
         "/usr/bin/adb",
         "/usr/local/bin/adb",
-        ...environmentPaths(env, platform).map((dir) => join(dir, exe)),
+        ...environmentPaths(env, platform).map((dir) => posix.join(dir, exe)),
       ],
       platform,
     );
@@ -167,32 +167,32 @@ export const adbSearchPaths = (options: AdbLookupOptions = {}): ReadonlyArray<st
 
   const programFiles = env.ProgramFiles ?? "C:\\Program Files";
   const programFilesX86 = env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
-  const localAppData = env.LOCALAPPDATA ?? join(env.USERPROFILE ?? "", "AppData", "Local");
-  const sdkRoots = [env.ANDROID_HOME, env.ANDROID_SDK_ROOT, join(localAppData, "Android", "Sdk")].filter(
+  const localAppData = env.LOCALAPPDATA ?? win32.join(env.USERPROFILE ?? "", "AppData", "Local");
+  const sdkRoots = [env.ANDROID_HOME, env.ANDROID_SDK_ROOT, win32.join(localAppData, "Android", "Sdk")].filter(
     (root): root is string => typeof root === "string" && root.trim() !== "",
   );
 
   return uniquePaths(
     [
-      ...sdkRoots.map((root) => join(root, "platform-tools", exe)),
+      ...sdkRoots.map((root) => win32.join(root, "platform-tools", exe)),
       // MuMu 5 (NX) keeps `nx_main/adb.exe`; MuMu 12 uses `shell/adb.exe`.
-      join(programFiles, "Netease", "MuMu", "nx_main", exe),
-      join(programFiles, "Netease", "MuMuPlayer-12.0", "shell", exe),
-      join(programFiles, "MuMuPlayer-12.0", "shell", exe),
-      join(programFilesX86, "Netease", "MuMuPlayer-12.0", "shell", exe),
-      join(programFilesX86, "MuMuPlayer-12.0", "shell", exe),
-      ...(env.LDPLAYER_HOME ? [join(env.LDPLAYER_HOME, exe)] : []),
-      join(programFiles, "LDPlayer", "LDPlayer9", exe),
-      join(programFiles, "LDPlayer", "LDPlayer4.0", exe),
-      join(programFilesX86, "LDPlayer", "LDPlayer9", exe),
-      join(programFilesX86, "LDPlayer", "LDPlayer4.0", exe),
-      join(programFiles, "Nox", "bin", exe),
-      join(programFilesX86, "Nox", "bin", exe),
-      join(programFiles, "BlueStacks_nxt", "HD-Adb.exe"),
-      join(programFilesX86, "BlueStacks_nxt", "HD-Adb.exe"),
-      join(programFiles, "BlueStacks", "HD-Adb.exe"),
-      join(programFilesX86, "BlueStacks", "HD-Adb.exe"),
-      ...environmentPaths(env, platform).map((dir) => join(dir, exe)),
+      win32.join(programFiles, "Netease", "MuMu", "nx_main", exe),
+      win32.join(programFiles, "Netease", "MuMuPlayer-12.0", "shell", exe),
+      win32.join(programFiles, "MuMuPlayer-12.0", "shell", exe),
+      win32.join(programFilesX86, "Netease", "MuMuPlayer-12.0", "shell", exe),
+      win32.join(programFilesX86, "MuMuPlayer-12.0", "shell", exe),
+      ...(env.LDPLAYER_HOME ? [win32.join(env.LDPLAYER_HOME, exe)] : []),
+      win32.join(programFiles, "LDPlayer", "LDPlayer9", exe),
+      win32.join(programFiles, "LDPlayer", "LDPlayer4.0", exe),
+      win32.join(programFilesX86, "LDPlayer", "LDPlayer9", exe),
+      win32.join(programFilesX86, "LDPlayer", "LDPlayer4.0", exe),
+      win32.join(programFiles, "Nox", "bin", exe),
+      win32.join(programFilesX86, "Nox", "bin", exe),
+      win32.join(programFiles, "BlueStacks_nxt", "HD-Adb.exe"),
+      win32.join(programFilesX86, "BlueStacks_nxt", "HD-Adb.exe"),
+      win32.join(programFiles, "BlueStacks", "HD-Adb.exe"),
+      win32.join(programFilesX86, "BlueStacks", "HD-Adb.exe"),
+      ...environmentPaths(env, platform).map((dir) => win32.join(dir, exe)),
     ],
     platform,
   );

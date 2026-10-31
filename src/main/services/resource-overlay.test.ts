@@ -171,6 +171,66 @@ describe("resource overlay", () => {
     ]);
   });
 
+  it("rolls back already-applied entries and preserves existing backup when applying fails mid-stream", async () => {
+    const { staged, target, backup } = await fixture(
+      {
+        "a.json": "v2",
+        "b.json": "v2",
+      },
+      {
+        "a.json": "v1",
+      },
+    );
+    await applyOverlay({
+      stagedRoot: staged,
+      targetRoot: target,
+      backupRoot: backup,
+      stamp: "v1",
+      appliedStamp: "v2",
+    });
+
+    const nextStaged = join(await temporaryRoot(), "staged-next");
+    await mkdir(nextStaged, { recursive: true });
+    await writeFile(join(nextStaged, "a.json"), "v3", "utf8");
+    await writeFile(join(nextStaged, "added.json"), "v3", "utf8");
+
+    await expect(
+      applyOverlay({
+        stagedRoot: nextStaged,
+        targetRoot: target,
+        backupRoot: backup,
+        stamp: "v2",
+        appliedStamp: "v3",
+        onProgress(applied) {
+          if (applied === 2) throw new Error("mid-stream failure");
+        },
+      }),
+    ).rejects.toThrow("mid-stream failure");
+
+    expect(await readFile(join(target, "a.json"), "utf8")).toBe("v2");
+    expect(existsSync(join(target, "added.json"))).toBe(false);
+    expect(await readFile(join(backup, "files", "a.json"), "utf8")).toBe("v1");
+  });
+
+  it("rejects symlinks in the target tree instead of writing outside targetRoot", async () => {
+    const { staged, target, backup } = await fixture({ "linked/outside.json": "pwned" }, {});
+    const outside = await temporaryRoot();
+    await writeFile(join(outside, "outside.json"), "safe", "utf8");
+    await symlink(outside, join(target, "linked"));
+
+    await expect(
+      applyOverlay({
+        stagedRoot: staged,
+        targetRoot: target,
+        backupRoot: backup,
+        stamp: "v1",
+        appliedStamp: "v2",
+      }),
+    ).rejects.toThrow("符号链接");
+
+    expect(await readFile(join(outside, "outside.json"), "utf8")).toBe("safe");
+  });
+
   it("ignores symlinks in the staged tree", async () => {
     const root = await temporaryRoot();
     const staged = join(root, "staged");
