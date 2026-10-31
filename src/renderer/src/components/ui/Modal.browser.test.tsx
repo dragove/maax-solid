@@ -3,6 +3,8 @@ import { userEvent } from "vitest/browser";
 import { createSignal, flush, onSettled } from "solid-js";
 import { render } from "@solidjs/web";
 import { dialogExitMs } from "../../motion";
+// The exit beat is a CSS animation, so the test has to load the real sheet.
+import "../../styles.css";
 import { Modal } from "./Modal";
 
 // Use real Chromium dialogs and Solid's JSX compiler/render pipeline: a DOM
@@ -59,6 +61,19 @@ describe("Modal mounting", () => {
     return element!;
   };
 
+  // The backdrop is a top-layer pseudo-element: it leaves the frame the moment
+  // the dialog closes, so its exit has to run on the dialog's own exit beat.
+  const backdropExit = (): ReadonlyArray<CSSAnimation> =>
+    document
+      .getAnimations()
+      .filter(
+        (animation): animation is CSSAnimation =>
+          animation instanceof CSSAnimation &&
+          animation.effect instanceof KeyframeEffect &&
+          animation.effect.pseudoElement === "::backdrop" &&
+          animation.animationName === "fade-out",
+      );
+
   it("native showModal rejects a disconnected element", () => {
     const element = document.createElement("dialog");
     expect(element.isConnected).toBe(false);
@@ -112,6 +127,12 @@ describe("Modal mounting", () => {
       expect(dialog()).toBe(element);
       expect(element.matches(":modal")).toBe(true);
       expect(container.querySelector(".modal-layer--closing")).not.toBeNull();
+      expect(element.classList.contains("modal--closing")).toBe(true);
+      expect(backdropExit()).toHaveLength(1);
+      expect(Number.parseFloat(getComputedStyle(element, "::backdrop").animationDuration) * 1000).toBeCloseTo(
+        dialogExitMs,
+        3,
+      );
       vi.advanceTimersByTime(dialogExitMs - 1);
       flush();
       expect(dialog()).toBe(element);
@@ -120,6 +141,7 @@ describe("Modal mounting", () => {
       expect(element.open).toBe(false);
       expect(element.isConnected).toBe(false);
       expect(container.querySelector("dialog")).toBeNull();
+      expect(backdropExit()).toHaveLength(0);
       expect(document.activeElement).toBe(launcher);
     }
     expect(showModal).toHaveBeenCalledTimes(2);
@@ -140,6 +162,8 @@ describe("Modal mounting", () => {
     expect(dialog()).toBe(element);
     expect(element.matches(":modal")).toBe(true);
     expect(container.querySelector(".modal-layer--closing")).toBeNull();
+    expect(element.classList.contains("modal--closing")).toBe(false);
+    expect(backdropExit()).toHaveLength(0);
     expect(showModal).toHaveBeenCalledTimes(1);
   });
 
@@ -167,12 +191,9 @@ describe("Modal mounting", () => {
   it("handles a real backdrop click through native light dismissal", async () => {
     const { onClose } = mount(true);
     const element = dialog();
-    const bounds = element.getBoundingClientRect();
-    // Click outside the dialog in the same document, not its inert sibling.
-    await userEvent.click(element, {
-      position: { x: 2 - bounds.x, y: 2 - bounds.y },
-      force: true,
-    });
+    // Click a point outside the dialog box. Its ::backdrop hit-tests as the
+    // dialog itself, and `closedby="any"` turns that into the cancel path.
+    await userEvent.click(document.body, { position: { x: 2, y: 2 }, force: true });
     expect(onClose).toHaveBeenCalledTimes(1);
     await expect.poll(() => container.querySelector("dialog")).toBeNull();
     expect(element.open).toBe(false);
@@ -195,6 +216,8 @@ describe("Modal mounting", () => {
     expect(container.querySelector("dialog")).toBeNull();
   });
 
+  // Mounting into a detached container is a caller error: the unowned settle
+  // fires once, so attaching the container afterwards never opens the dialog.
   it("does not try to open a branch whose render target is disconnected", () => {
     container.remove();
     const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");

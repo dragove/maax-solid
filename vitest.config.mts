@@ -1,6 +1,6 @@
 import solid from "@solidjs/vite-plugin";
 import { playwright } from "@vitest/browser-playwright";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
@@ -8,7 +8,8 @@ export default defineConfig({
       {
         test: {
           name: "node",
-          include: ["src/**/*.test.ts"],
+          include: ["src/**/*.test.{ts,tsx}"],
+          exclude: [...configDefaults.exclude, "**/*.browser.test.tsx"],
         },
       },
       {

@@ -61,9 +61,8 @@ export const Modal: Component<ModalProps> = (props) => {
   return (
     <Show when={props.open || hold()}>
       <div class={["modal-layer", { "modal-layer--closing": closing() }]}>
-        <button class="modal-backdrop" type="button" aria-label="Close" onClick={props.onClose} />
         <dialog
-          class={["modal", { "modal--wide": props.wide }]}
+          class={["modal", { "modal--wide": props.wide, "modal--closing": closing() }]}
           aria-modal="true"
           closedby="any"
           onCancel={(event) => {
