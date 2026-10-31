@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { userEvent } from "vitest/browser";
-import { createSignal, flush, onSettled } from "solid-js";
+import { createSignal, flush } from "solid-js";
 import { render } from "@solidjs/web";
 import { dialogExitMs } from "../../motion";
 // The exit beat is a CSS animation, so the test has to load the real sheet.
@@ -13,18 +13,8 @@ describe("Modal mounting", () => {
   let container: HTMLDivElement;
   let launcher: HTMLButtonElement;
   let dispose: (() => void) | undefined;
-  let reducedMotion: boolean;
 
   beforeEach(() => {
-    reducedMotion = false;
-    const matchMedia = window.matchMedia.bind(window);
-    vi.spyOn(window, "matchMedia").mockImplementation((query) => {
-      const result = matchMedia(query);
-      if (query === "(prefers-reduced-motion: reduce)") {
-        Object.defineProperty(result, "matches", { value: reducedMotion });
-      }
-      return result;
-    });
     container = document.createElement("div");
     launcher = document.createElement("button");
     launcher.textContent = "Open";
@@ -74,40 +64,17 @@ describe("Modal mounting", () => {
           animation.animationName === "fade-out",
       );
 
-  it("native showModal rejects a disconnected element", () => {
-    const element = document.createElement("dialog");
-    expect(element.isConnected).toBe(false);
-    expect(() => element.showModal()).toThrow(expect.objectContaining({ name: "InvalidStateError" }));
-  });
-
-  it("Solid refs run detached, while onSettled runs after insertion", () => {
-    const connections: boolean[] = [];
-    dispose = render(
-      () => (
-        <dialog
-          ref={(element) => {
-            connections.push(element.isConnected);
-            expect(() => element.showModal()).toThrow(expect.objectContaining({ name: "InvalidStateError" }));
-            onSettled(() => {
-              connections.push(element.isConnected);
-              element.showModal();
-            });
-          }}
-        />
-      ),
-      container,
-    );
-    expect(connections).toEqual([false, true]);
-    expect(dialog().matches(":modal")).toBe(true);
-    dialog().close();
-  });
-
-  it("opens an initially visible dialog only after connection and focuses inside", () => {
-    // The spy calls the native method, which would throw if still detached.
-    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
+  it("opens an initially visible dialog after insertion and focuses inside", () => {
+    // showModal() throws InvalidStateError on a detached element, so recording
+    // what the call saw is the assertion that covers the ref-timing regression.
+    const connected: boolean[] = [];
+    const showModal = HTMLDialogElement.prototype.showModal;
+    vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(function (this: HTMLDialogElement) {
+      connected.push(this.isConnected);
+      showModal.call(this);
+    });
     mount(true);
-    expect(showModal).toHaveBeenCalledTimes(1);
-    expect(dialog().open).toBe(true);
+    expect(connected).toEqual([true]);
     expect(dialog().matches(":modal")).toBe(true);
     expect(dialog().contains(document.activeElement)).toBe(true);
   });
@@ -168,7 +135,12 @@ describe("Modal mounting", () => {
   });
 
   it("closes immediately for reduced motion", () => {
-    reducedMotion = true;
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const result = matchMedia(query);
+      if (query === "(prefers-reduced-motion: reduce)") Object.defineProperty(result, "matches", { value: true });
+      return result;
+    });
     const { setOpen } = mount(true);
     const element = dialog();
     setOpen(false);
