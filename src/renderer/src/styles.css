@@ -2867,26 +2867,18 @@ select.input {
 }
 
 /* Modal keeps the layer mounted for its exit beat, then closes and unmounts
-   the dialog in the same task; the layer is inert while it fades. */
+   the dialog in the same task. The layer itself cannot fade: the dialog and its
+   ::backdrop sit in the top layer, which ignores an ancestor's opacity, so the
+   exit runs on .modal--closing (dialog + backdrop) and this only takes the
+   layer out of hit testing. */
 .modal-layer--closing {
   pointer-events: none;
-  animation: fade-out 140ms var(--ease-out) forwards;
 }
 
 /* Dismissal starts immediately instead of hanging on screen and then blinking
    out; only motion that leaves the frame (the toast slide) accelerates. */
 .modal-layer--closing .modal {
   animation: dialog-out 140ms var(--ease-out) forwards;
-}
-
-.modal-backdrop {
-  position: absolute;
-  inset: 0;
-  padding: 0;
-  cursor: default;
-  background: color-mix(in srgb, var(--bg-chrome) 72%, transparent);
-  backdrop-filter: blur(4px);
-  animation: fade-in var(--duration-normal) var(--ease-standard);
 }
 
 .modal {
@@ -2914,6 +2906,13 @@ select.input {
   background: color-mix(in srgb, var(--bg-chrome) 72%, transparent);
   backdrop-filter: blur(4px);
   animation: fade-in var(--duration-normal) var(--ease-standard);
+}
+
+/* The backdrop is dropped the instant the dialog closes, so it needs its own
+   exit; without it the blur snaps to sharp while the dialog is still fading.
+   Keep the duration equal to dialogExitMs so both finish on the same frame. */
+.modal--closing::backdrop {
+  animation: fade-out 140ms var(--ease-out) forwards;
 }
 
 .modal-head {

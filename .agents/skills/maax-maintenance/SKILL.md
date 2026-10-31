@@ -146,9 +146,17 @@ its old option list and displayed value after the data changes.
 
 ### Modal dialogs
 
-- `Modal` renders `<dialog>` and calls `showModal()`, so the dimming and blur
-  belong on `dialog.modal::backdrop`; the sibling `.modal-backdrop` button sits
-  under the top layer and only provides the click target.
+- `Modal` schedules `showModal()` from each new dialog ref with `onSettled`
+  and checks `isConnected`: Solid 2 refs run before DOM insertion. Do not set
+  the JSX `open` attribute, which opens a non-modal dialog instead.
+- Dimming and blur live on `dialog.modal::backdrop` only. Never add a
+  sibling backdrop element: it is inert under the modal top layer, so it cannot
+  catch clicks, and it stacks a second veil on the native one. `closedby="any"`
+  routes native backdrop dismissal through `onCancel`, keeping the exit beat.
+- The backdrop leaves the top layer the instant `close()` runs, so it needs its
+  own exit: `.modal--closing::backdrop` fades out in `dialogExitMs`, otherwise the
+  blur snaps to sharp while the dialog is still fading. `Modal` puts that class
+  on the dialog; the rule has to sit after `.modal::backdrop` to win on order.
 - Do not use the `autofocus` attribute. Chromium rejects it while the launcher
   button still holds focus and logs `Autofocus processing was blocked`; focus
   the intended field from a ref inside the open effect instead.
