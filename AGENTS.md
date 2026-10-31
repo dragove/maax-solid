@@ -13,7 +13,7 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 45 + Solid 2 R
   - [src/renderer/src/effect/solid-effect.ts](src/renderer/src/effect/solid-effect.ts) — Solid 2 × Effect 适配
   - [src/shared/schemas.ts](src/shared/schemas.ts) — Effect Schema 运行时契约
   - [src/main/runtime.ts](src/main/runtime.ts) — 主进程 Effect IPC 逻辑
-- 依赖变更后由 `prepare` 执行 `effect-tsgo patch --no-typescript --oxlint --tsrs`；升级 tsrs / Oxlint / oxlint-tsgolint 前先确认 `@effect/tsgo` 的兼容版本（当前 0.59.0 支持 tsrs `0.20.0-ts7.1.0-beta`；新 tsrs 版本需先有对应的 `@effect/tsgo` 才可升级）。`@effect/tsgo` 0.59 尚不认识 win32 的 tsrs，因此 Windows 上 `prepare` 只 patch Oxlint；`pnpm typecheck` 仍直接运行 `@tsrs/win32-x64`。
+- 依赖变更后由 `prepare` 执行 `effect-tsgo patch`：先 patch Oxlint（Oxlint / oxlint-tsgolint 版本不被 `@effect/tsgo` 支持时直接失败），再用 `--tsrs --skip-missing` patch tsrs（没有对应平台的替换包时跳过该集成，不中断安装）。升级 tsrs / Oxlint / oxlint-tsgolint 前先确认 `@effect/tsgo` 的兼容版本（当前 0.63.0 支持 tsrs `0.20.1-ts7.1.0-beta`、Oxlint 1.88–1.90、oxlint-tsgolint 7.0.2004/7.0.2005；新 tsrs 版本需先有对应的 `@effect/tsgo` 才可升级）。`pnpm typecheck` 始终直接运行 tsrs。
 - 核心宿主按平台加载 `MaaCore.dll`（Windows）或 `libMaaCore.so`（Linux）；Windows 使用 `win-x64` / `win-arm64` 的 `.zip` 发布包，ADB 路径留空时按 Android SDK、MuMu/LDPlayer/Nox/BlueStacks 自带 adb、`PATH` 的顺序解析。不要写死 Linux 库名或只处理 `.tar.gz`。
 
 - pnpm 12 默认对依赖设 24 小时 `minimumReleaseAge` 保护期。升级到刚发布的版本（tsrs / `@effect/tsgo` / Solid 的 rc 之类）时，把**精确版本**逐个加进 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude`（该字段只接受精确版本，不接受范围或通配符）；临时绕过用 `pnpm install --config.minimumReleaseAge=0`，不要为此改全局策略。

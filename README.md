@@ -85,8 +85,8 @@ MAAX_DEV_CORE=/path/to/MAA-vX.Y.Z-linux-x86_64 pnpm dev
 $env:MAAX_DEV_CORE="C:/path/to/MAA-vX.Y.Z-win-x64"; pnpm dev
 ```
 
-Windows 上 `@effect/tsgo` 0.59 的 `prepare` 只 patch Oxlint（它还没有 win32 的
-tsrs 集成）；`pnpm typecheck` 仍直接运行 `@tsrs/win32-x64`。
+`prepare` 先给 Oxlint 打 Effect 规则补丁，再给 tsrs 打补丁；某个平台没有对应的
+tsrs 替换包时只跳过该集成（`--skip-missing`），`pnpm typecheck` 始终直接运行 tsrs。
 
 `pnpm dev` 打开远程调试端口 `9229`，便于在 Wayland/niri 下做本地 UI 调试；
 生产包不开启该端口。

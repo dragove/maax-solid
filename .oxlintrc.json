@@ -6,14 +6,16 @@
     "typeCheck": true
   },
   "ignorePatterns": ["dist/**", "out/**", "docs/**", ".agents/**", "build/icon.svg"],
-  // `effect/FileSystem` is the only filesystem service in Effect 4.0.x and is
-  // annotated `@stability unstable` upstream; these modules own that boundary.
+  // `effect/http` and `effect/FileSystem` are annotated `@stability unstable`
+  // upstream; these modules own those boundaries (the node:http client included).
   "overrides": [
     {
       "files": [
         "src/main/runtime.ts",
         "src/main/services/copilot-setup.ts",
         "src/main/services/core-registry.ts",
+        "src/main/services/download.test.ts",
+        "src/main/services/download.ts",
         "src/main/services/json-store.ts",
         "src/main/services/settings.ts",
         "src/main/services/workspace.ts"

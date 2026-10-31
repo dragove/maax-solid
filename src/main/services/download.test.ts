@@ -1,10 +1,14 @@
+import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
+import { layerNodeHttp } from "@effect/platform-node/NodeHttpClient";
+import { Effect, Layer } from "effect";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { downloadFile } from "./download";
+import type { MaaxError } from "../errors";
+import { Downloader, DownloaderLive, type DownloadOptions, type DownloadResult } from "./download";
 
 const servers: Server[] = [];
 
@@ -14,11 +18,27 @@ const listen = (server: Server): Promise<number> =>
     servers.push(server);
   });
 
+/** The node:http backend is the one production uses; fetch would hide the stream contract. */
+const TestLive = DownloaderLive.pipe(Layer.provide(layerNodeHttp), Layer.provide(NodeFileSystemLayer));
+
+const run = <A>(effect: Effect.Effect<A, MaaxError, Downloader>): Promise<A> =>
+  Effect.runPromise(effect.pipe(Effect.provide(TestLive)));
+
+const download = (
+  url: string,
+  destination: string,
+  options?: DownloadOptions,
+): Effect.Effect<DownloadResult, MaaxError, Downloader> =>
+  Effect.gen(function* () {
+    const downloader = yield* Downloader;
+    return yield* downloader.download(url, destination, options);
+  });
+
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
 });
 
-describe("downloadFile", () => {
+describe("Downloader", () => {
   it("streams the body, follows redirects and reports progress", { timeout: 15_000 }, async () => {
     const payload = Buffer.alloc(256 * 1024, 7);
     const server = createServer((request, response) => {
@@ -41,10 +61,12 @@ describe("downloadFile", () => {
     const progress: number[] = [];
 
     try {
-      const result = await downloadFile(`http://127.0.0.1:${port}/redirect`, target, {
-        label: "test",
-        onProgress: (received) => progress.push(received),
-      });
+      const result = await run(
+        download(`http://127.0.0.1:${port}/redirect`, target, {
+          label: "test",
+          onProgress: (received) => progress.push(received),
+        }),
+      );
       expect(result).toEqual({ bytes: payload.length, total: payload.length });
       expect(await readFile(target)).toEqual(payload);
       expect(progress.at(-1)).toBe(payload.length);
@@ -62,7 +84,7 @@ describe("downloadFile", () => {
     const directory = await mkdtemp(join(tmpdir(), "maax-download-"));
     const target = join(directory, "payload.bin");
     try {
-      await expect(downloadFile(`http://127.0.0.1:${port}/missing`, target, { label: "test" })).rejects.toThrow(
+      await expect(run(download(`http://127.0.0.1:${port}/missing`, target, { label: "test" }))).rejects.toThrow(
         "HTTP 503",
       );
     } finally {
@@ -70,7 +92,7 @@ describe("downloadFile", () => {
     }
   });
 
-  it("rejects a malformed redirect Location instead of crashing with an uncaught exception", async () => {
+  it("rejects a malformed redirect Location instead of hanging", async () => {
     const server = createServer((_request, response) => {
       response.writeHead(302, { location: "http://[" });
       response.end();
@@ -79,7 +101,7 @@ describe("downloadFile", () => {
     const directory = await mkdtemp(join(tmpdir(), "maax-download-"));
     try {
       await expect(
-        downloadFile(`http://127.0.0.1:${port}/bad-redirect`, join(directory, "payload.bin")),
+        run(download(`http://127.0.0.1:${port}/bad-redirect`, join(directory, "payload.bin"))),
       ).rejects.toThrow();
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -95,10 +117,12 @@ describe("downloadFile", () => {
     const directory = await mkdtemp(join(tmpdir(), "maax-download-"));
     try {
       await expect(
-        downloadFile(`http://127.0.0.1:${port}/stall`, join(directory, "payload.bin"), {
-          label: "test",
-          idleTimeoutMs: 100,
-        }),
+        run(
+          download(`http://127.0.0.1:${port}/stall`, join(directory, "payload.bin"), {
+            label: "test",
+            idleTimeoutMs: 100,
+          }),
+        ),
       ).rejects.toThrow("下载超时");
     } finally {
       await rm(directory, { recursive: true, force: true });

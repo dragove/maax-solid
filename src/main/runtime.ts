@@ -1,8 +1,10 @@
 import { layer as NodeFileSystemLive } from "@effect/platform-node/NodeFileSystem";
+import { layerNodeHttp as NodeHttpClientLive } from "@effect/platform-node/NodeHttpClient";
 import { Layer, ManagedRuntime } from "effect";
 import { ApplicationLive, type Application } from "./services/application";
 import { CoreRegistryLive } from "./services/core-registry";
 import { CoreInstallerLive } from "./services/core-installer";
+import { DownloaderLive } from "./services/download";
 import { AppPathsLive } from "./services/paths";
 import { CopilotSetupLive } from "./services/copilot-setup";
 import { PrtsLibraryLive } from "./services/prts-library";
@@ -43,7 +45,9 @@ const AppLive = ApplicationLive.pipe(
   Layer.provideMerge(CoreInstallerWithDeps),
   Layer.provideMerge(EventBusLive),
   Layer.provideMerge(AppPathsLive),
+  Layer.provideMerge(DownloaderLive),
   Layer.provideMerge(NodeFileSystemLive),
+  Layer.provideMerge(NodeHttpClientLive),
 );
 
 export type AppRuntime = ManagedRuntime.ManagedRuntime<Application | EventBus, never>;

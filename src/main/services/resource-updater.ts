@@ -11,7 +11,7 @@ import type {
 import type { DownloadProgress } from "../../shared/schemas";
 import { maaxError, type MaaxError } from "../errors";
 import { extractZip } from "../zip";
-import { downloadFile } from "./download";
+import { Downloader } from "./download";
 import { AppPaths } from "./paths";
 import { applyOverlay, listOverlayBackups, pruneOverlayBackups, restoreOverlay } from "./resource-overlay";
 import { RESOURCE_VERSION_FILE, isNewerResourceStamp } from "../../shared/resource-version";
@@ -67,10 +67,11 @@ const readStampIn = async (resourceDirectory: string): Promise<string | undefine
   }
 };
 
-export const ResourceUpdaterLive: Layer.Layer<ResourceUpdater, never, AppPaths> = Layer.effect(
+export const ResourceUpdaterLive: Layer.Layer<ResourceUpdater, never, AppPaths | Downloader> = Layer.effect(
   ResourceUpdater,
   Effect.gen(function* () {
     const paths = yield* AppPaths;
+    const downloader = yield* Downloader;
     const backupsDirFor = (coreId: string): string => join(paths.resourceBackupsDir, coreId);
     const resourceDirFor = (core: CoreInfo): string => join(core.root, "resource");
 
@@ -155,15 +156,13 @@ export const ResourceUpdaterLive: Layer.Layer<ResourceUpdater, never, AppPaths> 
           });
 
           onProgress("downloading", 0, 0);
-          yield* Effect.tryPromise({
-            try: () =>
-              downloadFile(overriddenUrl("MAAX_RESOURCE_ARCHIVE_URL", RESOURCE_ARCHIVE_URL), archive, {
-                label: "MaaResource",
-                timeoutMs: 10 * 60 * 1000,
-                onProgress: (received, total) => onProgress("downloading", received, total),
-              }),
-            catch: (cause) => maaxError("下载资源归档失败", cause),
-          });
+          yield* downloader
+            .download(overriddenUrl("MAAX_RESOURCE_ARCHIVE_URL", RESOURCE_ARCHIVE_URL), archive, {
+              label: "MaaResource",
+              timeoutMs: 10 * 60 * 1000,
+              onProgress: (received, total) => onProgress("downloading", received, total),
+            })
+            .pipe(Effect.mapError((cause) => maaxError("下载资源归档失败", cause)));
 
           onProgress("extracting", 0, 0);
           yield* Effect.tryPromise({

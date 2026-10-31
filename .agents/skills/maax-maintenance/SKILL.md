@@ -461,10 +461,20 @@ Use a utility process/worker, one host per core version or resource set.
   BlueStacks before falling back to `adb`. MuMu 12/5 exposes the same device as
   `127.0.0.1:16384` (and `:7555` on MuMu 6), `emulator-5554`; dedupe discovery
   by Android id and prefer the TCP endpoint.
-- `downloadFile` uses Node `http`/`https` streams on purpose. Electron's
-  bundled undici asserts (`Parser.finish`: `assert(this.paused)`) when a large
-  `fetch` body ends while paused for backpressure; do not replace it with a
-  `fetch` + async-iterator loop for the multi-hundred-MB core archives.
+- Downloads go through the `Downloader` service
+  (`src/main/services/download.ts`): an `effect/http` `HttpClient` response is
+  streamed into `FileSystem.sink` with throttled progress, an idle timeout and
+  an overall timeout. Its `HttpClient` must be the Node `http`/`https` backend
+  (`@effect/platform-node/NodeHttpClient`'s `layerNodeHttp`), provided in
+  `runtime.ts`; never swap in `FetchHttpClient`/`fetch`. Electron's bundled
+  undici asserts (`Parser.finish`: `assert(this.paused)`) when a large `fetch`
+  body ends while paused for backpressure, which crashes the main process
+  mid-download of the multi-hundred-MB core archives.
+- Keep `@effect/platform-node` / `@effect/platform-node-shared` on the same
+  release line as `effect` itself. A `4.0` platform package with a `4.1` shared
+  package fails the main-process build (the shared package no longer exports
+  `NodeWS`), and the aligned `4.1` pair also stops bundling a 1.2 MB undici
+  chunk that the `4.0.6` node client pulled in.
 - The taskbar follows the Start Menu shortcut whose `System.AppUserModel.ID`
   matches the window's AUMID; when one exists, its icon and display name win
   over the window icon. Set `app.setAppUserModelId("app.maax.desktop")` only in

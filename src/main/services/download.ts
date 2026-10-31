@@ -1,8 +1,8 @@
-import { createWriteStream } from "node:fs";
-import { get as httpGet, type IncomingMessage } from "node:http";
-import { get as httpsGet } from "node:https";
-import { Transform } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { Context, Effect, Layer, Option, Stream } from "effect";
+import { FileSystem } from "effect/FileSystem";
+import * as Headers from "effect/http/Headers";
+import { followRedirects, HttpClient } from "effect/http/HttpClient";
+import { MaaxError, maaxError } from "../errors";
 
 export interface DownloadOptions {
   readonly total?: number;
@@ -15,104 +15,112 @@ export interface DownloadOptions {
   readonly label?: string;
 }
 
+export interface DownloadResult {
+  readonly bytes: number;
+  readonly total: number;
+}
+
+export interface DownloaderApi {
+  /**
+   * Stream a URL to disk, reporting progress at most five times per second.
+   *
+   * The client behind this must be the Node `http`/`https` backend
+   * (`@effect/platform-node/NodeHttpClient`'s `layerNodeHttp`), not
+   * `FetchHttpClient`. Electron ships an older undici build whose parser
+   * asserts when a large response body ends while the iterator has paused it
+   * for backpressure (`assert(this.paused)` in `Parser.finish`), which crashes
+   * the main process in the middle of a 300 MB core download.
+   */
+  readonly download: (
+    url: string,
+    destination: string,
+    options?: DownloadOptions,
+  ) => Effect.Effect<DownloadResult, MaaxError>;
+}
+
+export class Downloader extends Context.Service<Downloader, DownloaderApi>()("maax/Downloader") {}
+
 const MAX_REDIRECTS = 5;
+const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
+const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
+const PROGRESS_INTERVAL_MS = 200;
 
-/**
- * Open a download and follow the redirect chain.
- *
- * This deliberately uses Node's `http`/`https` streams instead of `fetch`.
- * Electron ships an older undici build whose parser asserts when a large
- * response body ends while the async iterator has paused it for backpressure
- * (`assert(this.paused)` in `Parser.finish`), which crashes the main process in
- * the middle of a 300 MB core download. `pipeline` over an IncomingMessage is
- * the battle-tested path for this size and handles pause/resume itself.
- */
-const openResponse = (url: URL, signal: AbortSignal, redirects = MAX_REDIRECTS): Promise<IncomingMessage> =>
-  new Promise((resolve, reject) => {
-    const get = url.protocol === "https:" ? httpsGet : httpGet;
-    const request = get(
-      url,
-      { signal, agent: false, headers: { "user-agent": "Maax", connection: "close" } },
-      (response) => {
-        const status = response.statusCode ?? 0;
-        const location = response.headers.location;
-        if (status >= 300 && status < 400 && location !== undefined) {
-          response.resume();
-          if (redirects <= 0) {
-            reject(new Error(`Too many redirects while downloading ${url.toString()}`));
-            return;
+/** Keep failures that already explain themselves; wrap transport failures. */
+const asFailure =
+  (message: string) =>
+  (cause: unknown): MaaxError =>
+    cause instanceof MaaxError ? cause : maaxError(message, cause);
+
+const declaredLength = (headers: Headers.Headers): number =>
+  Number(Option.getOrUndefined(Headers.get(headers, "content-length"))) || 0;
+
+export const DownloaderLive: Layer.Layer<Downloader, never, FileSystem | HttpClient> = Layer.effect(
+  Downloader,
+  Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    const client = (yield* HttpClient).pipe(followRedirects(MAX_REDIRECTS));
+
+    const download = (
+      url: string,
+      destination: string,
+      options: DownloadOptions = {},
+    ): Effect.Effect<DownloadResult, MaaxError> => {
+      const label = options.label ?? "file";
+      const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+      const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+      const transfer = Effect.scoped(
+        Effect.gen(function* () {
+          const response = yield* client
+            .get(url, { headers: { "user-agent": "Maax", connection: "close" } })
+            .pipe(Effect.mapError(asFailure("无法连接下载服务器")));
+          if (response.status < 200 || response.status >= 300) {
+            return yield* maaxError(`HTTP ${response.status} while downloading ${label}`);
           }
-          try {
-            openResponse(new URL(location, url), signal, redirects - 1).then(resolve, reject);
-          } catch (error) {
-            reject(error instanceof Error ? error : new Error(String(error)));
+
+          const declared = declaredLength(response.headers) || options.total || 0;
+          let received = 0;
+          let lastReport = 0;
+          const report = (force: boolean): void => {
+            const now = Date.now();
+            if (!force && now - lastReport <= PROGRESS_INTERVAL_MS) return;
+            lastReport = now;
+            options.onProgress?.(received, declared);
+          };
+
+          yield* response.stream.pipe(
+            Stream.tap((chunk) =>
+              Effect.sync(() => {
+                received += chunk.byteLength;
+                report(false);
+              }),
+            ),
+            Stream.timeoutOrElse({
+              duration: idleTimeoutMs,
+              orElse: () =>
+                Stream.fail(maaxError(`下载超时：服务器在 ${Math.round(idleTimeoutMs / 1000)} 秒内没有返回数据`)),
+            }),
+            Stream.run(fs.sink(destination)),
+            Effect.mapError(asFailure("写入下载文件失败")),
+          );
+
+          if (declared > 0 && received < declared) {
+            return yield* maaxError(`下载不完整：收到 ${received} / ${declared} 字节`);
           }
-          return;
-        }
-        resolve(response);
-      },
-    );
-    request.on("error", reject);
-  });
+          const total = declared || received;
+          options.onProgress?.(received, total);
+          return { bytes: received, total };
+        }),
+      );
 
-/** Stream a URL to disk, reporting progress at most five times per second. */
-export const downloadFile = async (
-  url: string,
-  destination: string,
-  options: DownloadOptions = {},
-): Promise<{ bytes: number; total: number }> => {
-  const overall = AbortSignal.timeout(options.timeoutMs ?? 60 * 60 * 1000);
-  const idleTimeoutMs = options.idleTimeoutMs ?? 2 * 60 * 1000;
-  const stall = new AbortController();
-  let stallTimer = setTimeout(() => stall.abort(), idleTimeoutMs);
-  const resetStallTimer = (): void => {
-    clearTimeout(stallTimer);
-    stallTimer = setTimeout(() => stall.abort(), idleTimeoutMs);
-  };
-  const signal = AbortSignal.any([overall, stall.signal]);
-  const stallMessage = (): Error =>
-    new Error(`下载超时：服务器在 ${Math.round(idleTimeoutMs / 1000)} 秒内没有返回数据`);
-  let response: IncomingMessage;
-  try {
-    response = await openResponse(new URL(url), signal);
-  } catch (error) {
-    clearTimeout(stallTimer);
-    throw stall.signal.aborted ? stallMessage() : error;
-  }
-  const status = response.statusCode ?? 0;
-  if (status < 200 || status >= 300) {
-    clearTimeout(stallTimer);
-    response.resume();
-    throw new Error(`HTTP ${status} while downloading ${options.label ?? "file"}`);
-  }
+      return transfer.pipe(
+        Effect.timeoutOrElse({
+          duration: timeoutMs,
+          orElse: () => Effect.fail(maaxError(`下载超时：超过 ${Math.round(timeoutMs / 60_000)} 分钟仍未完成`)),
+        }),
+      );
+    };
 
-  const header = response.headers["content-length"];
-  const declared = Number(Array.isArray(header) ? header[0] : header) || options.total || 0;
-  let received = 0;
-  let lastReport = 0;
-  const counter = new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      received += chunk.byteLength;
-      const now = Date.now();
-      if (now - lastReport > 200) {
-        lastReport = now;
-        options.onProgress?.(received, declared);
-      }
-      resetStallTimer();
-      callback(null, chunk);
-    },
-  });
-
-  try {
-    await pipeline(response, counter, createWriteStream(destination));
-  } catch (error) {
-    throw stall.signal.aborted ? stallMessage() : error;
-  } finally {
-    clearTimeout(stallTimer);
-  }
-  if (declared > 0 && received < declared) {
-    throw new Error(`下载不完整：收到 ${received} / ${declared} 字节`);
-  }
-  options.onProgress?.(received, declared || received);
-  return { bytes: received, total: declared || received };
-};
+    return { download } satisfies DownloaderApi;
+  }),
+);

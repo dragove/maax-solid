@@ -1,6 +1,6 @@
 {
   "name": "maax-solid",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "A modern desktop client for MaaAssistantArknights, built with Electron 45, Solid 2 and Effect 4.",
   "license": "AGPL-3.0-or-later",
@@ -28,16 +28,16 @@
     "koffi": "3.3.4"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.6",
-    "@effect/tsgo": "0.59.0",
-    "@effect/vitest": "4.0.6",
+    "@effect/platform-node": "4.1.1",
+    "@effect/tsgo": "0.63.0",
+    "@effect/vitest": "4.1.1",
     "@solidjs/vite-plugin": "3.0.0-next.51",
     "@solidjs/web": "^2.0.0-rc.20",
     "@types/node": "26.6.5",
     "@types/semver": "7.8.0",
     "@types/yauzl": "3.4.0",
     "@vitest/browser-playwright": "5.0.5",
-    "effect": "4.0.6",
+    "effect": "4.1.1",
     "electron": "45.0.0",
     "electron-builder": "26.18.0",
     "electron-vite": "6.0.0",
@@ -48,7 +48,7 @@
     "playwright": "1.64.1",
     "semver": "7.8.5",
     "solid-js": "^2.0.0-rc.20",
-    "tsrs": "0.20.0-ts7.1.0-beta",
+    "tsrs": "0.20.1-ts7.1.0-beta",
     "vite": "8.3.5",
     "vitest": "5.0.5",
     "yauzl": "3.4.0"
