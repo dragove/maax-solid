@@ -5,7 +5,7 @@
     "typeAware": true,
     "typeCheck": true
   },
-  "ignorePatterns": ["dist/**", "out/**", "docs/**", "build/icon.svg"],
+  "ignorePatterns": ["dist/**", "out/**", "docs/**", ".agents/**", "build/icon.svg"],
   // `effect/FileSystem` is the only filesystem service in Effect 4.0.x and is
   // annotated `@stability unstable` upstream; these modules own that boundary.
   "overrides": [

@@ -166,16 +166,26 @@ its old option list and displayed value after the data changes.
 One effect owns `document.documentElement.dataset.theme`. The first application
 is the boot palette and lands instantly; later swaps cross-fade through
 `document.startViewTransition` (styled on `::view-transition-old/new(root)`),
-and `prefers-reduced-motion` keeps the hard switch. The topbar button is a
-binary dark/light toggle because `"system"` is owned by the Settings segmented
-control — a three-state cycle makes light look stuck when the OS is light.
+and `prefers-reduced-motion` keeps the hard switch. The root carries no
+`view-transition-name` the rest of the time — a page switch animates only
+`.content` — so a flip sets `data-theme-transition` both to name the root and
+to fold `.content` into the same snapshot, which keeps one uniform fade with no
+seam at the content edge. Only the transition that set the flag may clear it: a
+second flip skips the running one, and its `finished` would otherwise delete the
+flag before the new transition captures. The topbar button is a binary
+dark/light toggle because `"system"` is owned by the Settings segmented control
+— a three-state cycle makes light look stuck when the OS is light.
 
 ### Motion
 
-Fluent 2 motion tokens live in `styles.css`: `--duration-faster/fast/normal/gentle`,
+Fluent 2 motion tokens live in `styles.css`:
+`--duration-instant/faster/fast/normal/gentle` (60/90/120/160/200ms),
 `--ease-out` (decelerate), `--ease-in` (accelerate) and `--ease-standard`
 (easy-ease). Larger surfaces get more time; hover/focus/selection feedback
-stays around 120ms.
+stays at `--duration-fast`. Pick a duration from a token — a literal `120ms`
+is how the scale drifts apart, and 200ms and up reads as sticky on a desktop
+tool. The two JS-side exit beats in `motion.ts` and `Collapse.tsx` mirror the
+tokens they use.
 
 Pick the curve by what the element does, not by open/close:
 
@@ -223,9 +233,15 @@ Pick the curve by what the element does, not by open/close:
   (`components/ui/SwapStack.tsx`). Every state stays mounted, so the slot keeps
   the widest size and the switch cross-fades instead of jolting the layout;
   `visibility: hidden` removes the inactive copies from the tab order.
-- A segmented control uses `Segmented` (`components/ui/Segmented.tsx`): the
-  highlight is a measured element that slides between options, and locale
-  changes remeasure it through a ResizeObserver.
+- A segmented control uses `Segmented` (`components/ui/Segmented.tsx`): one
+  Fluent underline-tab style, with the selection drawn as an underline on the
+  active item. Nothing is measured, so a locale change cannot desync it, and
+  there is no variant prop — add a second style only with a real caller.
+- A disclosure marker is `Chevron` (`components/ui/Chevron.tsx`): one
+  `chevron-down` glyph rotated by `.chevron--open`, so both states share a shape
+  and only the rotation animates. Do not swap `chevron-right`/`chevron-down`
+  names. Static arrows (a "go to page" chevron, the scroll-to-bottom button)
+  keep their own icon — they are not disclosures.
 - Never animate high-frequency content (log lines, progress values). Also do not
   put an entrance on a row whose data is replaced in place: `<For>` remounts the
   row and the animation replays as flicker.
@@ -488,6 +504,14 @@ Use a utility process/worker, one host per core version or resource set.
   behind the user.
 - Never resume a run after a host crash. Mark the interrupted queue failed;
   resuming could spend sanity, medicine or Originite twice.
+- The ADB daemon is started by whichever adb client runs first, MaaCore
+  included, and it detaches: after the app exits it still owns its port and any
+  fd it inherited (a stale orphan even kept the DevTools port bound and broke
+  the next `pn dev` with `bind() failed: Address already in use`). `execAdb`
+  therefore probes port 5037 before the first command and only a server this
+  app started is stopped, from `Application.shutdown` once the hosts are
+  gone. `SIGINT`/`SIGTERM` are routed through that same shutdown, because a
+  dev run stopped with Ctrl+C never raises `before-quit`.
 
 ### Tools and run activity
 
