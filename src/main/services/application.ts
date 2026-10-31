@@ -69,7 +69,7 @@ import {
 import { scheduleDue } from "../../shared/schedule";
 import { setWindowBehavior } from "../app-behavior";
 import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
-import { discoverAdbDevices, probeAdbConnection, resolveAdbPath } from "./adb";
+import { discoverAdbDevices, probeAdbConnection, releaseAdbServer, resolveAdbPath } from "./adb";
 
 const STAGE_ACTIVITY_URL = "https://api.maa.plus/MaaAssistantArknights/api/gui/StageActivityV2.json";
 
@@ -2331,6 +2331,10 @@ export const ApplicationLive: Layer.Layer<
       }
       hosts.clear();
       yield* Effect.promise(() => Promise.all(stoppingHosts.values()));
+      // MaaCore starts the ADB daemon and leaves it running: it outlives the app
+      // and keeps holding its port (and the fds it inherited). Stop the one this
+      // app started now that no host is using it.
+      yield* Effect.promise(() => releaseAdbServer());
     });
 
     const api: ApplicationApi = {

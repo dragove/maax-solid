@@ -40,7 +40,7 @@ export const adbConnectedOutput = (output: string): boolean => /^(?:already )?co
 
 export const adbReadyState = (output: string): boolean => output.trim() === "device";
 
-export const execAdb: ExecAdb = (adbPath, args, timeoutMs) =>
+const runAdb: ExecAdb = (adbPath, args, timeoutMs) =>
   new Promise((resolve, reject) => {
     execFile(
       adbPath,
@@ -61,6 +61,15 @@ export const execAdb: ExecAdb = (adbPath, args, timeoutMs) =>
       },
     );
   });
+
+/**
+ * Every adb command goes through here so the server tracker sees the client
+ * that started the daemon; see `makeAdbServerTracker`.
+ */
+export const execAdb: ExecAdb = async (adbPath, args, timeoutMs) => {
+  await adbServer.noteUse(adbPath);
+  return runAdb(adbPath, args, timeoutMs);
+};
 
 const firstLine = (...texts: Array<string | undefined>): string | undefined => {
   for (const text of texts) {
@@ -350,6 +359,85 @@ const portOpen = (port: number): Promise<boolean> =>
     socket.once("timeout", () => finish(false));
     socket.once("error", () => finish(false));
   });
+
+/** MaaCore's adb (and every adb client) starts the daemon on this port. */
+const ADB_SERVER_PORT = 5037;
+const ADB_SERVER_KILL_TIMEOUT_MS = 5_000;
+
+export interface AdbServerTrackerOptions {
+  readonly port?: number;
+  readonly portOpen?: (port: number) => Promise<boolean>;
+  readonly exec?: ExecAdb;
+}
+
+export interface AdbServerTracker {
+  /**
+   * Decide ownership before anything can start the daemon. Startup calls this
+   * so a daemon MaaCore spawns before the first `execAdb` is still covered.
+   */
+  readonly prime: () => void;
+  /** Record an adb use before it runs; the first call fixes the client path. */
+  readonly noteUse: (adbPath: string) => Promise<void>;
+  /** `kill-server` when this tracker started the daemon; safe to call twice. */
+  readonly release: () => Promise<void>;
+}
+
+/**
+ * MaaCore starts the ADB daemon itself (`adb -L tcp:5037 fork-server server`)
+ * and that process detaches: it outlives the app, keeps the port bound and
+ * holds every fd it inherited from us. Stop it on exit, but only when nothing
+ * was listening when the app started — a server the user (or Android Studio)
+ * was already running stays alive.
+ */
+export const makeAdbServerTracker = (options: AdbServerTrackerOptions = {}): AdbServerTracker => {
+  const probe = options.portOpen ?? portOpen;
+  const exec = options.exec ?? runAdb;
+  // adb honours ADB_SERVER_PORT, and the daemon MaaCore starts inherits this env.
+  const configuredPort = Number.parseInt(process.env.ADB_SERVER_PORT ?? "", 10);
+  const port =
+    options.port ?? (Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : ADB_SERVER_PORT);
+  // Resolved once and reused: a later probe would also see the daemon this app
+  // just started. `prime` runs it at startup, because MaaCore spawns adb on its
+  // own and can beat the first `execAdb` call.
+  let preexisting: Promise<boolean> | undefined;
+  let adbPath: string | undefined;
+  let released = false;
+
+  const prime = (): void => {
+    if (released) return;
+    preexisting ??= probe(port);
+  };
+
+  const noteUse = async (path: string): Promise<void> => {
+    if (released) return;
+    adbPath ??= path;
+    prime();
+    await preexisting;
+  };
+
+  const release = async (): Promise<void> => {
+    if (released) return;
+    released = true;
+    const wasRunning = await (preexisting ?? Promise.resolve(true));
+    if (wasRunning || adbPath === undefined) return;
+    try {
+      await exec(adbPath, ["kill-server"], ADB_SERVER_KILL_TIMEOUT_MS);
+    } catch {
+      // Losing the daemon is cosmetic; cleanup must never block the quit path.
+    }
+  };
+
+  return { prime, noteUse, release };
+};
+
+/** The tracker every `execAdb` call feeds; see `primeAdbServer`/`releaseAdbServer`. */
+const adbServer = makeAdbServerTracker();
+
+/** Resolve ADB server ownership at startup, before a core host can start it. */
+export const primeAdbServer = (): void => adbServer.prime();
+
+/** Stop the daemon this app started; `Application.shutdown` calls it last. */
+export const releaseAdbServer: () => Promise<void> = adbServer.release;
 
 const androidId = async (adbPath: string, serial: string, exec: ExecAdb): Promise<string | undefined> => {
   try {

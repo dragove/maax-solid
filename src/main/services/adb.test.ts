@@ -9,6 +9,7 @@ import {
   connectionConfigFor,
   discoverAdbDevices,
   emulatorForSerial,
+  makeAdbServerTracker,
   parseAdbDevices,
   probeAdbConnection,
   resolveAdbPath,
@@ -210,5 +211,76 @@ describe("discoverAdbDevices", () => {
     expect(result.devices).toEqual([]);
     expect(result.warning).toContain("无法执行 ADB");
     expect(result.warning).toContain("C:/missing/adb.exe");
+  });
+});
+
+describe("ADB server ownership", () => {
+  const recorder = () => {
+    const calls: Array<ReadonlyArray<string>> = [];
+    const exec: ExecAdb = async (_adbPath, args) => {
+      calls.push(args);
+      return { stdout: "", stderr: "" };
+    };
+    return { calls, exec };
+  };
+
+  it("stops the server it started on release", async () => {
+    const { calls, exec } = recorder();
+    const tracker = makeAdbServerTracker({ portOpen: async () => false, exec });
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    expect(calls).toEqual([["kill-server"]]);
+  });
+
+  it("leaves a server that was already running alone", async () => {
+    const { calls, exec } = recorder();
+    const tracker = makeAdbServerTracker({ portOpen: async () => true, exec });
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    expect(calls).toEqual([]);
+  });
+
+  it("never runs adb when nothing was used or released twice", async () => {
+    const { calls, exec } = recorder();
+    const unused = makeAdbServerTracker({ portOpen: async () => false, exec });
+    await unused.release();
+    expect(calls).toEqual([]);
+
+    const tracker = makeAdbServerTracker({ portOpen: async () => false, exec });
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    await tracker.release();
+    expect(calls).toEqual([["kill-server"]]);
+  });
+
+  it("decides ownership at prime time, before any host can start the daemon", async () => {
+    const { calls, exec } = recorder();
+    const tracker = makeAdbServerTracker({ portOpen: async () => true, exec });
+    tracker.prime();
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    expect(calls).toEqual([]);
+  });
+
+  it("still stops the daemon when nothing listened at startup", async () => {
+    const { calls, exec } = recorder();
+    const tracker = makeAdbServerTracker({ portOpen: async () => false, exec });
+    tracker.prime();
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    expect(calls).toEqual([["kill-server"]]);
+  });
+
+  it("stops the daemon with the first client it saw", async () => {
+    const paths: string[] = [];
+    const exec: ExecAdb = async (adbPath) => {
+      paths.push(adbPath);
+      return { stdout: "", stderr: "" };
+    };
+    const tracker = makeAdbServerTracker({ portOpen: async () => false, exec });
+    await tracker.noteUse("/first/adb");
+    await tracker.noteUse("/second/adb");
+    await tracker.release();
+    expect(paths).toEqual(["/first/adb"]);
   });
 });

@@ -6,6 +6,7 @@ import appIcon from "../../build/icon.png?asset";
 import { attachRendererBootTrace, bootTrace, bootTraceEnabled } from "./boot-trace";
 import { registerIpcHandlers } from "./ipc";
 import { makeRuntime, type AppRuntime } from "./runtime";
+import { primeAdbServer } from "./services/adb";
 import { Application } from "./services/application";
 
 const isDevelopment = !app.isPackaged;
@@ -256,6 +257,9 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(async () => {
       bootTrace("app-ready");
+      // Decide ADB daemon ownership before anything — a core host included —
+      // can start one; see `makeAdbServerTracker`.
+      primeAdbServer();
       // Only the installed build owns the packaged AppUserModelID. A dev run
       // uses the stock electron.exe; claiming the production AUMID there makes
       // Windows pair its Start Menu "Electron" shortcut with the installed app,
@@ -296,6 +300,21 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   void shutdown();
 });
+
+// A dev run is stopped with Ctrl+C (SIGINT) or by the supervising process
+// (SIGTERM), and neither raises "before-quit". Route them through the same
+// shutdown so cleanup such as stopping the ADB server this app started runs.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    // A second signal means the first cleanup stalled; do not trap the run in
+    // the shutdown path, where `before-quit` no longer fires either.
+    if (quitting) {
+      app.exit(1);
+      return;
+    }
+    void shutdown();
+  });
+}
 
 app.on("window-all-closed", () => {
   // A destroyed window is not a quit request while tray mode is enabled; the
