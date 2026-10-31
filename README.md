@@ -94,7 +94,7 @@ tsrs 集成）；`pnpm typecheck` 仍直接运行 `@tsrs/win32-x64`。
 | 命令                 | 说明                                                           |
 | -------------------- | -------------------------------------------------------------- |
 | `pnpm dev`           | Electron + Vite HMR                                            |
-| `pnpm test`          | Vitest 单元测试                                                |
+| `pnpm test`          | Vitest 单元测试与 Chromium 挂载回归测试                        |
 | `pnpm lint`          | Effect 规则、type-aware 检查与 TypeScript 诊断                 |
 | `pnpm typecheck`     | tsrs 纯类型检查（node / web 两个 project）                     |
 | `pnpm format`        | Oxfmt                                                          |
@@ -103,6 +103,11 @@ tsrs 集成）；`pnpm typecheck` 仍直接运行 `@tsrs/win32-x64`。
 | `pnpm package`       | 生成免安装目录（`dist/linux-unpacked` / `dist/win-unpacked`）  |
 | `pnpm dist`          | 当前平台安装包（Linux：AppImage / tar.* / deb；Windows：NSIS） |
 | `pnpm bench:startup` | 对比三种启动方式的耗时与内存（见下文）                         |
+
+首次运行测试前执行 `pnpm exec playwright install chromium`（Linux CI 可加 `--with-deps`）。
+挂载回归测试通过 Solid JSX 编译器在真实 Chromium 中运行，不模拟 `<dialog>` 的原生方法。
+已有 Chromium 时可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指定可执行文件；
+单独运行单元测试或挂载测试可用 `pnpm test --project node` / `pnpm test --project browser`。
 
 `pnpm bench:startup` 使用同一份 app.asar，分别启动 `linux-unpacked`、
 AppImage 和本地 Electron + app.asar，测量到工作台首帧的耗时与稳定后的 PSS/RSS。

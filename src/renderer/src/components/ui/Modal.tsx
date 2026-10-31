@@ -1,4 +1,4 @@
-import { Show, createEffect, createSignal, onCleanup, type Component } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onSettled, type Component } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { dialogExitMs, prefersReducedMotion } from "../../motion";
 
@@ -65,13 +65,18 @@ export const Modal: Component<ModalProps> = (props) => {
         <dialog
           class={["modal", { "modal--wide": props.wide }]}
           aria-modal="true"
+          closedby="any"
           onCancel={(event) => {
             event.preventDefault();
             props.onClose();
           }}
           ref={(element) => {
             dialogEl = element;
-            element.showModal();
+            // Solid 2 refs run before insertion. Schedule each new <Show> branch
+            // after rendering, and ignore a branch removed before it settles.
+            onSettled(() => {
+              if (element.isConnected && !element.open) element.showModal();
+            });
           }}
         >
           <header class="modal-head">
