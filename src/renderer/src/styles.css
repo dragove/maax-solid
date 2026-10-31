@@ -5,6 +5,7 @@
    -------------------------------------------------------------------------- */
 
 :root {
+  view-transition-name: none;
   color-scheme: dark;
 
   /* Keep Latin and CJK families explicit. Generic fallbacks can resolve to very
@@ -32,6 +33,7 @@
 
   --accent: #89b4fa;
   --accent-hover: #9ec2fb;
+  --accent-active: #78a9f7;
   --accent-ink: #11111b;
   --accent-soft: rgba(137, 180, 250, 0.16);
   --accent-text: #89b4fa;
@@ -46,17 +48,26 @@
   --ok-soft: rgba(166, 227, 161, 0.14);
 
   --radius-control: 4px;
-  --radius-surface: 6px;
-  --radius-dialog: 8px;
+  --radius-surface: 8px;
+  --radius-dialog: 12px;
 
-  --shadow-flyout: 0 10px 30px rgba(0, 0, 0, 0.5);
+  /* Fluent 2 Elevation shadows: resting card, hover card, flyout/popover, modal dialog */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.24), 0 0 1px rgba(0, 0, 0, 0.3);
+  --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.32), 0 0 1px rgba(0, 0, 0, 0.35);
+  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.42), 0 0 1px rgba(0, 0, 0, 0.35);
+  --shadow-dialog: 0 18px 48px rgba(0, 0, 0, 0.55), 0 2px 4px rgba(0, 0, 0, 0.35);
+
+  --surface-flyout: rgba(30, 30, 46, 0.94);
 
   /* Fluent 2 motion: duration follows the size of what moves, entrances
-     decelerate, exits accelerate, and state changes stay quick. */
-  --duration-faster: 100ms;
-  --duration-fast: 150ms;
-  --duration-normal: 200ms;
-  --duration-gentle: 250ms;
+     decelerate, exits accelerate, and state changes stay quick. The scale stays
+     short on purpose — 200ms and up reads as sticky on a desktop tool — and
+     every duration in this file comes from these tokens, never a literal. */
+  --duration-instant: 60ms;
+  --duration-faster: 90ms;
+  --duration-fast: 120ms;
+  --duration-normal: 160ms;
+  --duration-gentle: 200ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --ease-out: cubic-bezier(0.1, 0.9, 0.2, 1);
   --ease-in: cubic-bezier(0.7, 0, 1, 0.5);
@@ -82,6 +93,7 @@
 
   --accent: #1e66f5;
   --accent-hover: #1656d6;
+  --accent-active: #1247b5;
   --accent-ink: #ffffff;
   --accent-soft: rgba(30, 102, 245, 0.1);
   --accent-text: #1857d8;
@@ -95,14 +107,31 @@
   --ok: #35701f;
   --ok-soft: rgba(64, 160, 43, 0.12);
 
-  --shadow-flyout: 0 10px 26px rgba(76, 79, 105, 0.16);
+  --shadow-card: 0 1px 3px rgba(76, 79, 105, 0.08), 0 1px 2px rgba(76, 79, 105, 0.05);
+  --shadow-card-hover: 0 4px 14px rgba(76, 79, 105, 0.12), 0 1px 3px rgba(76, 79, 105, 0.06);
+  --shadow-flyout: 0 8px 24px rgba(76, 79, 105, 0.16), 0 1px 3px rgba(76, 79, 105, 0.08);
+  --shadow-dialog: 0 18px 48px rgba(76, 79, 105, 0.22), 0 2px 6px rgba(76, 79, 105, 0.1);
+
+  --surface-flyout: rgba(239, 241, 245, 0.94);
 }
 
 /* Theme flips run as a View Transition cross-fade (see AppShell): both snapshots
-   fade over 220ms so the palette change does not flash. */
+   fade together so the palette change does not flash. The name is opt-in
+   because the root is deliberately unnamed for page switches (see navigate). */
+:root[data-theme-transition] {
+  view-transition-name: root;
+}
+
+/* A theme flip is one uniform cross-fade: fold the content area into the root
+   snapshot instead of letting its own faster group finish first and leave a
+   visible seam at the content edge. */
+:root[data-theme-transition] .content {
+  view-transition-name: none;
+}
+
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: 220ms;
+  animation-duration: var(--duration-normal);
   animation-timing-function: var(--ease);
 }
 
@@ -171,9 +200,13 @@ svg {
   background: var(--accent);
 }
 
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 ::-webkit-scrollbar {
@@ -182,15 +215,19 @@ svg {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--stroke-strong);
+  background: color-mix(in srgb, var(--stroke-strong) 75%, transparent);
   background-clip: content-box;
   border: 3px solid transparent;
   border-radius: 999px;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-width var(--duration-fast) var(--ease-standard);
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--faint);
   background-clip: content-box;
+  border-width: 1.5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -201,6 +238,18 @@ svg {
   width: 1em;
   height: 1em;
   flex: 0 0 auto;
+}
+
+/* A disclosure chevron points right while closed and down while open. Rotate
+   the one `chevron-down` glyph instead of swapping icon names, so the shape
+   stays identical and only the rotation animates. */
+.chevron {
+  transform: rotate(-90deg);
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.chevron--open {
+  transform: rotate(0deg);
 }
 
 .spin {
@@ -362,6 +411,7 @@ svg {
   display: flex;
   align-items: center;
   gap: 9px;
+  -webkit-app-region: drag;
   height: 52px;
   flex: 0 0 52px;
   padding: 0 14px;
@@ -412,32 +462,63 @@ svg {
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 32px;
+  height: 36px;
   padding: 0 12px;
   font-size: 14px;
   color: var(--text-soft);
+  cursor: pointer;
+  user-select: none;
   border-radius: var(--radius-control);
   transition:
-    background 120ms var(--ease),
-    color 120ms var(--ease);
+    background-color var(--duration-faster) var(--ease-out),
+    color var(--duration-faster) var(--ease-out);
+}
+
+.nav-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  background: var(--accent);
+  border-radius: 999px;
+  transform: translateY(-50%);
+  opacity: 0;
+  transition:
+    height var(--duration-fast) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out);
 }
 
 .nav-item .icon {
   font-size: 18px;
   color: var(--muted);
+  transition: color var(--duration-faster) var(--ease-out);
 }
 
 .nav-item:hover {
   color: var(--text);
-  background: var(--surface-alt);
+  background: color-mix(in srgb, var(--surface-alt) 75%, transparent);
+}
+
+.nav-item:active {
+  transform: scale(0.98);
+  transition: transform var(--duration-instant) var(--ease-out);
 }
 
 .nav-item--active {
+  font-weight: 600;
   color: var(--text);
   background: var(--surface-alt);
+}
+
+.nav-item--active::before {
+  height: 18px;
+  opacity: 1;
 }
 
 .nav-item--active .icon {
@@ -460,8 +541,8 @@ svg {
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   transition:
-    background 120ms var(--ease),
-    border-color 120ms var(--ease);
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
 }
 
 .core-status:hover {
@@ -512,6 +593,9 @@ svg {
   padding: 0 10px 0 16px;
   background: var(--bg-chrome);
   border-bottom: 1px solid var(--stroke);
+  /* Custom frame: the top strip is the drag region; interactive children opt out. */
+  -webkit-app-region: drag;
+  user-select: none;
 }
 
 .topbar-crumb {
@@ -527,7 +611,9 @@ svg {
 .topbar-actions {
   display: flex;
   align-items: center;
+  align-self: stretch;
   gap: 4px;
+  -webkit-app-region: no-drag;
 }
 
 .device-pill {
@@ -542,8 +628,8 @@ svg {
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   transition:
-    background 120ms var(--ease),
-    border-color 120ms var(--ease);
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
 }
 
 .device-select {
@@ -593,8 +679,8 @@ svg {
   color: var(--muted);
   border-radius: var(--radius-control);
   transition:
-    color 120ms var(--ease),
-    background 120ms var(--ease),
+    color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease),
     transform var(--duration-faster) var(--ease-standard);
 }
 
@@ -607,6 +693,45 @@ svg {
   background: var(--surface-alt);
 }
 
+/* VSCode-style window buttons for the custom frame: they bleed to the right
+   edge of the window, span the full title-bar height, and the close button
+   uses the OS-danger hover. */
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  /* 100% of the stretched actions row: the full title-bar height minus its
+     1px separator, so the hover fill stops at the border instead of over it. */
+  height: 100%;
+  margin-left: 4px;
+  margin-right: -10px;
+  -webkit-app-region: no-drag;
+}
+
+.window-controls-button {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 100%;
+  padding: 0;
+  color: var(--muted);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  transition:
+    color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease);
+}
+
+.window-controls-button:hover {
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
+.window-controls-close:hover {
+  color: var(--surface);
+  background: var(--danger);
+}
+
 .content {
   flex: 1;
   min-height: 0;
@@ -616,17 +741,31 @@ svg {
   view-transition-name: content;
 }
 
+::view-transition {
+  pointer-events: none !important;
+}
+
+::view-transition-group(root),
+::view-transition-group(content),
+::view-transition-image-pair(root),
+::view-transition-image-pair(content),
+::view-transition-old(root),
+::view-transition-old(content),
+::view-transition-new(root),
+::view-transition-new(content) {
+  pointer-events: none !important;
+}
+
 /* Page switches run as a View Transition (see AppShell `navigate`): the old
    page fades out while the new one fades in, and because only the content area
-   is a named group, the sidebar and topbar stay put. A cross-fade is an
-   in-place change, not a departure, so the outgoing page fades evenly instead
-   of accelerating away. */
+   is a named group, the sidebar and topbar stay put. Rapid clicks interrupt
+   the outgoing animation immediately. */
 ::view-transition-old(content) {
-  animation: fade-out 140ms var(--ease-standard) both;
+  animation: fade-out var(--duration-faster) var(--ease-out) both;
 }
 
 ::view-transition-new(content) {
-  animation: fade-in 200ms var(--ease-standard) both;
+  animation: fade-in var(--duration-fast) var(--ease-out) both;
 }
 
 /* --------------------------------------------------------------------------
@@ -714,14 +853,15 @@ svg {
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   transition:
-    background 120ms var(--ease),
-    border-color 120ms var(--ease),
-    color 120ms var(--ease),
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease),
     transform var(--duration-faster) var(--ease-standard);
 }
 
 .btn:active:not(:disabled) {
-  transform: scale(0.97);
+  transform: scale(0.975);
 }
 
 .btn .icon {
@@ -752,20 +892,36 @@ svg {
 .btn--primary {
   color: var(--accent-ink);
   background: var(--accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .btn--primary:hover:not(:disabled) {
   background: var(--accent-hover);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+}
+
+.btn--primary:active:not(:disabled) {
+  background: var(--accent-active);
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
 .btn--secondary {
   color: var(--text);
   background: var(--surface);
-  border-color: var(--stroke-strong);
+  border-color: var(--stroke);
+  border-bottom-color: var(--stroke-strong);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 .btn--secondary:hover:not(:disabled) {
   background: var(--surface-alt);
+  border-color: var(--stroke-strong);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.16);
+}
+
+.btn--secondary:active:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-alt) 80%, var(--inset));
+  box-shadow: none;
 }
 
 .btn--ghost {
@@ -778,6 +934,10 @@ svg {
   background: var(--surface-alt);
 }
 
+.btn--ghost:active:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-alt) 70%, var(--surface));
+}
+
 .btn--danger {
   color: var(--danger);
   background: transparent;
@@ -786,6 +946,11 @@ svg {
 
 .btn--danger:hover:not(:disabled) {
   background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+.btn--danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 25%, transparent);
 }
 
 /* Collapse wraps a section that can disappear. While closed it stays in the
@@ -829,24 +994,29 @@ svg {
 .input {
   width: 100%;
   height: 32px;
-  padding: 0 8px;
+  padding: 0 10px;
   color: var(--text);
   background: var(--inset);
   border: 1px solid var(--stroke);
+  border-bottom: 2px solid var(--stroke-strong);
   border-radius: var(--radius-control);
   outline: none;
   transition:
-    border-color 120ms var(--ease),
-    box-shadow 120ms var(--ease);
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
-.input:hover:not(:focus) {
+.input:hover:not(:focus):not(:disabled) {
   border-color: var(--stroke-strong);
+  border-bottom-color: var(--faint);
+  background: color-mix(in srgb, var(--inset) 92%, var(--surface-alt));
 }
 
 .input:focus {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  border-color: var(--stroke);
+  border-bottom-color: var(--accent);
+  box-shadow: 0 1px 2px var(--accent-soft);
 }
 
 .input--mono {
@@ -856,6 +1026,20 @@ svg {
 
 .input--number {
   max-width: 120px;
+}
+
+.input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.input-row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.input-row .btn {
+  flex: 0 0 auto;
 }
 
 select.input {
@@ -938,13 +1122,17 @@ select.input {
   color: var(--muted);
   border-radius: var(--radius-control);
   transition:
-    color 120ms var(--ease),
-    background 120ms var(--ease);
+    color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease);
 }
 
 .stage-chevron:hover {
   color: var(--text);
   background: var(--surface-alt);
+}
+
+.stage-chevron .chevron--open {
+  color: var(--text);
 }
 
 .stage-menu {
@@ -957,12 +1145,13 @@ select.input {
   max-height: 300px;
   overflow-y: auto;
   padding: 4px;
-  background: var(--surface);
+  background: var(--surface-flyout);
+  backdrop-filter: blur(16px);
   border: 1px solid var(--stroke-strong);
   border-radius: var(--radius-surface);
   box-shadow: var(--shadow-flyout);
   transform-origin: top;
-  animation: flyout-in 120ms var(--ease-out);
+  animation: flyout-in var(--duration-fast) var(--ease-out);
 }
 
 .stage-menu--up {
@@ -1050,28 +1239,52 @@ select.input {
   height: 22px;
   flex: 0 0 auto;
   background: var(--stroke-strong);
+  border: 1px solid transparent;
   border-radius: 999px;
-  transition: background-color var(--duration-fast) var(--ease-standard);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.switch:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--stroke-strong) 85%, var(--text-soft));
 }
 
 .switch--on {
   background: var(--accent);
 }
 
+.switch--on:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
 .switch-thumb {
   position: absolute;
-  top: 3px;
-  left: 3px;
+  top: 2px;
+  left: 2px;
   width: 16px;
   height: 16px;
   background: var(--text);
-  border-radius: 50%;
-  transition: transform var(--duration-normal) var(--ease-out);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    width var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.switch:active:not(:disabled) .switch-thumb {
+  width: 20px;
 }
 
 .switch--on .switch-thumb {
   background: var(--accent-ink);
   transform: translateX(18px);
+}
+
+.switch--on:active:not(:disabled) .switch-thumb {
+  width: 20px;
+  transform: translateX(14px);
 }
 
 .switch-grid {
@@ -1086,55 +1299,89 @@ select.input {
   border-top: 0;
 }
 
+/* Fluent 2 underline tabs (Pivot): transparent track, and the selection is an
+   underline on the item itself, so nothing has to be measured. */
 .segmented {
   position: relative;
   display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--inset);
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-control);
-}
-
-/* The selection is a separate element so it slides between options instead of
-   blinking. Segmented.tsx keeps it on the active button. */
-.segmented-thumb {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 0;
-  background: var(--surface-alt);
-  border-radius: 3px;
-}
-
-.segmented-thumb[data-ready="true"] {
-  transition:
-    transform var(--duration-normal) var(--ease-out),
-    width var(--duration-normal) var(--ease-out),
-    height var(--duration-normal) var(--ease-out);
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .segmented-item {
   position: relative;
-  z-index: 1;
-  height: 26px;
-  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 12px;
   font-size: 13px;
-  color: var(--muted);
-  border-radius: 3px;
-  transition: color var(--duration-fast) var(--ease-standard);
+  font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  color: var(--text-soft);
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    transform var(--duration-instant) var(--ease-out);
 }
 
-.segmented-item:hover {
+.segmented-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  text-align: center;
+}
+
+.segmented-item:hover:not(.segmented-item--on) {
   color: var(--text);
+  background: color-mix(in srgb, var(--surface-alt) 60%, transparent);
+}
+
+.segmented-item:active:not(.segmented-item--on) {
+  transform: scale(0.98);
 }
 
 .segmented-item--on {
+  font-weight: 600;
   color: var(--text);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.segmented-item--on::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 6px;
+  right: 6px;
+  height: 2.5px;
+  background: var(--accent);
+  border-radius: 999px;
+  transition:
+    left var(--duration-fast) var(--ease-out),
+    right var(--duration-fast) var(--ease-out);
 }
 
 .segmented-item--on:hover {
   color: var(--text);
+  background: color-mix(in srgb, var(--surface-alt) 35%, transparent);
+}
+
+.segmented-item--on:hover::after {
+  left: 2px;
+  right: 2px;
 }
 
 .form-grid {
@@ -1166,16 +1413,26 @@ select.input {
 }
 
 .chip {
-  height: 26px;
-  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
   font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  text-align: center;
   color: var(--text-soft);
+  user-select: none;
+  cursor: pointer;
+  background: transparent;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-control);
   transition:
-    color 120ms var(--ease),
-    background 120ms var(--ease),
-    border-color 120ms var(--ease),
+    color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease),
     transform var(--duration-faster) var(--ease-standard);
 }
 
@@ -1185,10 +1442,12 @@ select.input {
 
 .chip:hover {
   color: var(--text);
+  background: color-mix(in srgb, var(--surface-alt) 60%, transparent);
   border-color: var(--stroke-strong);
 }
 
 .chip--on {
+  font-weight: 600;
   color: var(--accent-text);
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
@@ -1260,6 +1519,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-card);
 }
 
 .status-cell {
@@ -1321,6 +1581,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-card);
 }
 
 .panel-head {
@@ -1473,6 +1734,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-card);
 }
 
 .setup-head h2 {
@@ -1599,6 +1861,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-card);
 }
 
 .queue-title {
@@ -1655,7 +1918,8 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
-  animation: fade-in 120ms var(--ease-standard);
+  box-shadow: var(--shadow-flyout);
+  animation: fade-in var(--duration-fast) var(--ease-standard);
 }
 
 .palette-head {
@@ -1682,20 +1946,22 @@ select.input {
   gap: 9px;
   min-width: 0;
   padding: 10px;
-  animation: surface-in 160ms var(--ease-out) backwards;
+  animation: surface-in var(--duration-normal) var(--ease-out) backwards;
   text-align: left;
   background: var(--inset);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-control);
   transition:
-    background 120ms var(--ease),
-    border-color 120ms var(--ease),
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease),
     transform var(--duration-faster) var(--ease-standard);
 }
 
 .palette-item:hover {
   background: var(--surface-alt);
   border-color: var(--stroke-strong);
+  box-shadow: var(--shadow-card);
 }
 
 .palette-item:active {
@@ -1758,23 +2024,30 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
-  animation: surface-in 180ms var(--ease-out);
+  box-shadow: var(--shadow-card);
+  animation: surface-in var(--duration-normal) var(--ease-out);
   transition:
-    border-color 120ms var(--ease),
-    opacity 120ms var(--ease);
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease),
+    opacity var(--duration-fast) var(--ease);
 }
 
 .task-card:hover {
   border-color: var(--stroke-strong);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .task-card--expanded {
   overflow: visible;
   border-color: var(--stroke-strong);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .task-card--running {
   border-color: color-mix(in srgb, var(--info) 45%, var(--stroke));
+  box-shadow:
+    var(--shadow-card-hover),
+    0 0 6px var(--info-soft);
 }
 
 .task-card--disabled {
@@ -1893,6 +2166,10 @@ select.input {
   color: var(--faint);
 }
 
+.task-card--expanded .task-chevron {
+  color: var(--text-soft);
+}
+
 .task-card-body {
   padding: 12px 14px 14px;
   border-top: 1px solid var(--stroke);
@@ -1951,7 +2228,7 @@ select.input {
   height: 100%;
   background: var(--accent);
   border-radius: inherit;
-  transition: width 240ms var(--ease);
+  transition: width var(--duration-gentle) var(--ease);
 }
 
 .run-task-list {
@@ -2229,11 +2506,26 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
-  transition: border-color var(--duration-normal) var(--ease-standard);
+  box-shadow: var(--shadow-card);
+  transition:
+    border-color var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard);
+}
+
+.device-card:hover {
+  border-color: var(--stroke-strong);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .device-card--online {
   border-color: color-mix(in srgb, var(--ok) 35%, var(--stroke));
+}
+
+.device-card--online:hover {
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--stroke));
+  box-shadow:
+    var(--shadow-card-hover),
+    0 0 6px var(--ok-soft);
 }
 
 .device-card-head {
@@ -2400,9 +2692,9 @@ select.input {
   border: 1px dashed var(--stroke-strong);
   border-radius: var(--radius-surface);
   transition:
-    color 120ms var(--ease),
-    background 120ms var(--ease),
-    border-color 120ms var(--ease);
+    color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
 }
 
 .device-add-card:hover {
@@ -2436,6 +2728,83 @@ select.input {
   line-height: 1.45;
 }
 
+.device-detect {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--inset);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-control);
+  animation: surface-in var(--duration-fast) var(--ease-out);
+}
+
+.device-detect-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--warning);
+}
+
+.device-detect-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.device-detect-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  padding: 6px 8px;
+  color: var(--text);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-control);
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease);
+}
+
+.device-detect-item:hover {
+  background: var(--surface-alt);
+  border-color: var(--accent);
+}
+
+.device-detect-name {
+  grid-column: 1;
+  grid-row: 1;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-detect-serial {
+  grid-column: 1;
+  grid-row: 2;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-detect-config {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
 /* --------------------------------------------------------------------------
    Settings
    -------------------------------------------------------------------------- */
@@ -2467,6 +2836,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-card);
 }
 
 .settings-card-head {
@@ -2561,11 +2931,14 @@ select.input {
 }
 
 .toast {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 12px 12px 12px 13px;
-  background: var(--surface);
+  padding: 12px 14px;
+  overflow: hidden;
+  background: var(--surface-flyout);
+  backdrop-filter: blur(16px);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
   box-shadow: var(--shadow-flyout);
@@ -2573,11 +2946,33 @@ select.input {
   animation: toast-in var(--duration-normal) var(--ease-out);
 }
 
+.toast::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+.toast--success::before {
+  background: var(--ok);
+}
+
+.toast--error::before {
+  background: var(--danger);
+}
+
+.toast--warning::before {
+  background: var(--warning);
+}
+
 /* The row stays mounted for one short beat so the toast can leave instead of
    vanishing; Toaster owns that timer. */
 .toast--leaving {
   pointer-events: none;
-  animation: toast-out 140ms var(--ease-in) forwards;
+  animation: toast-out var(--duration-fast) var(--ease-in) forwards;
 }
 
 .toast--success {
@@ -2731,26 +3126,18 @@ select.input {
 }
 
 /* Modal keeps the layer mounted for its exit beat, then closes and unmounts
-   the dialog in the same task; the layer is inert while it fades. */
+   the dialog in the same task. The layer itself cannot fade: the dialog and its
+   ::backdrop sit in the top layer, which ignores an ancestor's opacity, so the
+   exit runs on .modal--closing (dialog + backdrop) and this only takes the
+   layer out of hit testing. */
 .modal-layer--closing {
   pointer-events: none;
-  animation: fade-out 140ms var(--ease-out) forwards;
 }
 
 /* Dismissal starts immediately instead of hanging on screen and then blinking
    out; only motion that leaves the frame (the toast slide) accelerates. */
 .modal-layer--closing .modal {
-  animation: dialog-out 140ms var(--ease-out) forwards;
-}
-
-.modal-backdrop {
-  position: absolute;
-  inset: 0;
-  padding: 0;
-  cursor: default;
-  background: color-mix(in srgb, var(--bg-chrome) 72%, transparent);
-  backdrop-filter: blur(4px);
-  animation: fade-in var(--duration-normal) var(--ease-standard);
+  animation: dialog-out var(--duration-fast) var(--ease-out) forwards;
 }
 
 .modal {
@@ -2763,7 +3150,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke-strong);
   border-radius: var(--radius-dialog);
-  box-shadow: var(--shadow-flyout);
+  box-shadow: var(--shadow-dialog);
   animation:
     dialog-fade var(--duration-normal) var(--ease-standard),
     dialog-lift var(--duration-gentle) var(--ease-out);
@@ -2776,8 +3163,15 @@ select.input {
 /* Modal.tsx calls showModal(), so the dimming has to come from the top layer. */
 .modal::backdrop {
   background: color-mix(in srgb, var(--bg-chrome) 72%, transparent);
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(16px) saturate(120%);
   animation: fade-in var(--duration-normal) var(--ease-standard);
+}
+
+/* The backdrop is dropped the instant the dialog closes, so it needs its own
+   exit; without it the blur snaps to sharp while the dialog is still fading.
+   Keep the duration equal to dialogExitMs so both finish on the same frame. */
+.modal--closing::backdrop {
+  animation: fade-out var(--duration-fast) var(--ease-out) forwards;
 }
 
 .modal-head {
@@ -2826,7 +3220,8 @@ select.input {
   gap: 10px;
   width: min(340px, calc(100vw - 40px));
   padding: 12px;
-  background: var(--surface);
+  background: var(--surface-flyout);
+  backdrop-filter: blur(16px);
   border: 1px solid var(--stroke-strong);
   border-radius: var(--radius-surface);
   box-shadow: var(--shadow-flyout);
@@ -2878,7 +3273,7 @@ select.input {
   height: 100%;
   background: var(--accent);
   border-radius: inherit;
-  transition: width 200ms linear;
+  transition: width var(--duration-normal) linear;
 }
 
 .download-meta {
@@ -3021,6 +3416,44 @@ select.input {
   font-size: 11px;
   line-height: 1.6;
   color: var(--faint);
+}
+
+.credits-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.credits-list li + li {
+  border-top: 1px solid var(--stroke);
+}
+
+.credits-list a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+}
+
+.credits-list a:hover {
+  text-decoration: none;
+}
+
+.credits-list a:hover .credits-name {
+  text-decoration: underline;
+}
+
+.credits-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.credits-note {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
 }
 
 /* --------------------------------------------------------------------------
@@ -3170,6 +3603,241 @@ select.input {
 }
 
 .file-name--empty {
+  color: var(--faint);
+}
+
+/* Positional starting-operator rows: three fixed recruit slots that fill
+   top-down. Each row expands into an inline search panel — an overlay would be
+   clipped by the task card — so the list never fights the card's own scroll. */
+.opers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.opers-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.opers-slot {
+  flex: 0 0 auto;
+  width: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.opers-token {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  text-align: left;
+  background: var(--inset);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-control);
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease);
+}
+
+.opers-token:hover:not(:disabled) {
+  border-color: var(--stroke-strong);
+}
+
+.opers-token--open {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.opers-token:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.opers-avatar,
+.opers-badge {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+}
+
+.opers-avatar {
+  object-fit: cover;
+}
+
+.opers-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+/* No name yet: a dashed square reads as "empty slot" without extra markup. */
+.opers-badge:empty {
+  background: transparent;
+  border: 1px dashed var(--stroke-strong);
+}
+
+.opers-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opers-token--empty .opers-name {
+  color: var(--faint);
+}
+
+.opers-caret {
+  flex: 0 0 auto;
+  color: var(--faint);
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    color var(--duration-fast) var(--ease);
+}
+
+.opers-token--open .opers-caret {
+  color: var(--text);
+}
+
+.opers-support {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Reserved footprint of the clear button: an empty row has no clear button, and
+   without this the token would grow by exactly that much. */
+.opers-remove {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+}
+
+.opers-menu {
+  margin-left: 18px;
+  padding: 6px;
+  background: var(--surface-flyout);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-flyout);
+  transform-origin: top;
+  animation: flyout-in var(--duration-fast) var(--ease-out);
+}
+
+.opers-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.opers-search-icon {
+  position: absolute;
+  left: 8px;
+  font-size: 13px;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.oper-search-input {
+  padding-left: 27px;
+}
+
+.opers-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 220px;
+  margin-top: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.opers-group {
+  margin: 6px 6px 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+
+.opers-group:first-child {
+  margin-top: 0;
+}
+
+.opers-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  text-align: left;
+  border-radius: var(--radius-control);
+}
+
+.opers-option:hover,
+.opers-option--active {
+  background: var(--surface-alt);
+}
+
+.opers-option-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opers-option-meta {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.opers-option-tag {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-radius: 999px;
+}
+
+.opers-option--custom {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--stroke);
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+}
+
+.opers-empty {
+  margin: 8px 6px;
+  font-size: 12px;
   color: var(--faint);
 }
 
@@ -3339,6 +4007,55 @@ select.input {
   padding-top: 2px;
 }
 
+/* Difficulty checkbox of one batch row: both may be on, neither means skip. */
+.mode-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px 1px 5px;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.mode-toggle input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.mode-toggle--on {
+  border-color: transparent;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.mode-toggle--raid.mode-toggle--on {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.mode-toggle--locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mode-toggle--locked input {
+  cursor: not-allowed;
+}
+
 .copilot-mode {
   flex: 0 0 auto;
   padding: 0 6px;
@@ -3353,6 +4070,12 @@ select.input {
 .copilot-mode--raid {
   color: var(--warning);
   background: var(--warning-soft);
+}
+
+.copilot-mode--skip {
+  border: 1px dashed var(--stroke);
+  color: var(--faint);
+  background: transparent;
 }
 
 .copilot-kind {
@@ -3425,6 +4148,71 @@ select.input {
   gap: 8px;
 }
 
+.browser-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.browser-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.browser-tab:hover:not(.browser-tab--active) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-alt) 60%, transparent);
+}
+
+.browser-tab--active {
+  color: var(--text);
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.browser-tab--active .icon {
+  color: var(--accent);
+}
+
+.browser-tab--active::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 4px;
+  right: 4px;
+  height: 2.5px;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.browser-tab .icon {
+  width: 14px;
+  height: 14px;
+}
+
 .browser-search {
   display: flex;
   flex-wrap: wrap;
@@ -3466,7 +4254,7 @@ select.input {
   background: var(--surface);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
   transform-origin: top;
-  animation: flyout-in 120ms var(--ease-out);
+  animation: flyout-in var(--duration-fast) var(--ease-out);
 }
 
 .browser-suggestions button {
@@ -3624,10 +4412,20 @@ select.input {
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
   background: var(--inset);
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease),
+    background-color var(--duration-fast) var(--ease);
+}
+
+.browser-item:hover {
+  border-color: var(--stroke-strong);
+  box-shadow: var(--shadow-card);
 }
 
 .browser-item--open {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--stroke));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--stroke));
+  box-shadow: var(--shadow-card);
 }
 
 .browser-row {
@@ -3727,6 +4525,42 @@ select.input {
   margin-top: 8px;
 }
 
+.browser-set-desc {
+  display: -webkit-box;
+  margin: 3px 0 0;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.browser-set-body {
+  padding: 0 8px 8px;
+  border-top: 1px dashed var(--stroke);
+}
+
+.browser-set-list {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.browser-set-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+}
+
+.browser-set-row + .browser-set-row {
+  border-top: 1px solid var(--stroke);
+}
+
 /* --------------------------------------------------------------------------
    Copilot tab
    -------------------------------------------------------------------------- */
@@ -3787,6 +4621,7 @@ select.input {
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
   background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 
 .copilot-panel-head {
@@ -3857,7 +4692,25 @@ select.input {
 
 .tool-tabs {
   display: flex;
+  align-items: center;
   justify-content: flex-start;
+  width: 100%;
+  border-bottom: 1px solid var(--stroke);
+  margin-bottom: 8px;
+}
+
+.tool-tabs .segmented-item {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 14px;
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+}
+
+.tool-tabs .segmented-item--on::after {
+  bottom: -1px;
+  left: 6px;
+  right: 6px;
+  height: 2.5px;
 }
 
 .tool-panel {
@@ -3868,6 +4721,7 @@ select.input {
   background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-card);
 }
 
 .tool-panel-head {
@@ -4212,9 +5066,9 @@ select.input {
   border: 1px solid var(--stroke);
   border-radius: var(--radius-control);
   transition:
-    color 120ms var(--ease),
-    background 120ms var(--ease),
-    border-color 120ms var(--ease);
+    color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
 }
 
 .weekday:hover {
@@ -4255,6 +5109,14 @@ select.input {
   background: var(--inset);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-control);
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    background-color var(--duration-fast) var(--ease);
+}
+
+.stat-card:hover {
+  border-color: var(--stroke-strong);
+  background: color-mix(in srgb, var(--inset) 90%, var(--surface-alt));
 }
 
 .stat-card span {
@@ -4364,6 +5226,14 @@ select.input {
   background: var(--surface-alt);
   border: 1px solid transparent;
   border-radius: var(--radius-control);
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    background-color var(--duration-fast) var(--ease);
+}
+
+.history-row:hover {
+  border-color: var(--stroke);
+  background: color-mix(in srgb, var(--surface-alt) 85%, var(--surface));
 }
 
 .history-main {

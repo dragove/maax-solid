@@ -146,9 +146,17 @@ its old option list and displayed value after the data changes.
 
 ### Modal dialogs
 
-- `Modal` renders `<dialog>` and calls `showModal()`, so the dimming and blur
-  belong on `dialog.modal::backdrop`; the sibling `.modal-backdrop` button sits
-  under the top layer and only provides the click target.
+- `Modal` schedules `showModal()` from each new dialog ref with `onSettled`
+  and checks `isConnected`: Solid 2 refs run before DOM insertion. Do not set
+  the JSX `open` attribute, which opens a non-modal dialog instead.
+- Dimming and blur live on `dialog.modal::backdrop` only. Never add a
+  sibling backdrop element: it is inert under the modal top layer, so it cannot
+  catch clicks, and it stacks a second veil on the native one. `closedby="any"`
+  routes native backdrop dismissal through `onCancel`, keeping the exit beat.
+- The backdrop leaves the top layer the instant `close()` runs, so it needs its
+  own exit: `.modal--closing::backdrop` fades out in `dialogExitMs`, otherwise the
+  blur snaps to sharp while the dialog is still fading. `Modal` puts that class
+  on the dialog; the rule has to sit after `.modal::backdrop` to win on order.
 - Do not use the `autofocus` attribute. Chromium rejects it while the launcher
   button still holds focus and logs `Autofocus processing was blocked`; focus
   the intended field from a ref inside the open effect instead.
@@ -158,16 +166,26 @@ its old option list and displayed value after the data changes.
 One effect owns `document.documentElement.dataset.theme`. The first application
 is the boot palette and lands instantly; later swaps cross-fade through
 `document.startViewTransition` (styled on `::view-transition-old/new(root)`),
-and `prefers-reduced-motion` keeps the hard switch. The topbar button is a
-binary dark/light toggle because `"system"` is owned by the Settings segmented
-control — a three-state cycle makes light look stuck when the OS is light.
+and `prefers-reduced-motion` keeps the hard switch. The root carries no
+`view-transition-name` the rest of the time — a page switch animates only
+`.content` — so a flip sets `data-theme-transition` both to name the root and
+to fold `.content` into the same snapshot, which keeps one uniform fade with no
+seam at the content edge. Only the transition that set the flag may clear it: a
+second flip skips the running one, and its `finished` would otherwise delete the
+flag before the new transition captures. The topbar button is a binary
+dark/light toggle because `"system"` is owned by the Settings segmented control
+— a three-state cycle makes light look stuck when the OS is light.
 
 ### Motion
 
-Fluent 2 motion tokens live in `styles.css`: `--duration-faster/fast/normal/gentle`,
+Fluent 2 motion tokens live in `styles.css`:
+`--duration-instant/faster/fast/normal/gentle` (60/90/120/160/200ms),
 `--ease-out` (decelerate), `--ease-in` (accelerate) and `--ease-standard`
 (easy-ease). Larger surfaces get more time; hover/focus/selection feedback
-stays around 120ms.
+stays at `--duration-fast`. Pick a duration from a token — a literal `120ms`
+is how the scale drifts apart, and 200ms and up reads as sticky on a desktop
+tool. The two JS-side exit beats in `motion.ts` and `Collapse.tsx` mirror the
+tokens they use.
 
 Pick the curve by what the element does, not by open/close:
 
@@ -215,9 +233,15 @@ Pick the curve by what the element does, not by open/close:
   (`components/ui/SwapStack.tsx`). Every state stays mounted, so the slot keeps
   the widest size and the switch cross-fades instead of jolting the layout;
   `visibility: hidden` removes the inactive copies from the tab order.
-- A segmented control uses `Segmented` (`components/ui/Segmented.tsx`): the
-  highlight is a measured element that slides between options, and locale
-  changes remeasure it through a ResizeObserver.
+- A segmented control uses `Segmented` (`components/ui/Segmented.tsx`): one
+  Fluent underline-tab style, with the selection drawn as an underline on the
+  active item. Nothing is measured, so a locale change cannot desync it, and
+  there is no variant prop — add a second style only with a real caller.
+- A disclosure marker is `Chevron` (`components/ui/Chevron.tsx`): one
+  `chevron-down` glyph rotated by `.chevron--open`, so both states share a shape
+  and only the rotation animates. Do not swap `chevron-right`/`chevron-down`
+  names. Static arrows (a "go to page" chevron, the scroll-to-bottom button)
+  keep their own icon — they are not disclosures.
 - Never animate high-frequency content (log lines, progress values). Also do not
   put an entrance on a row whose data is replaced in place: `<For>` remounts the
   row and the animation replays as flicker.
@@ -423,6 +447,43 @@ Use a utility process/worker, one host per core version or resource set.
   timing separately, keep both and label them, rather than replacing one with
   the other.
 
+### Windows host
+
+- Windows releases use `MaaCore.dll` plus sibling native DLLs (`MaaUtils`,
+  `opencv_world4_maa`, `onnxruntime_maa`, the control units). The core host puts
+  the core directory first on `PATH` before `koffi.load`, otherwise the first
+  `LoadLibraryW` can resolve a stale copy from another emulator/install.
+- The release suffix is `win-x64` / `win-arm64` and the archive is `.zip`; use
+  `src/main/platform.ts` (`coreLibraryName`, `coreArchiveKind`) instead of
+  branching on the library name in every caller.
+- ADB is usually not on `PATH`. Resolve it from the Android SDK, MuMu
+  (`nx_main/adb.exe`, `nx_device/<version>/shell/adb.exe`), LDPlayer, Nox and
+  BlueStacks before falling back to `adb`. MuMu 12/5 exposes the same device as
+  `127.0.0.1:16384` (and `:7555` on MuMu 6), `emulator-5554`; dedupe discovery
+  by Android id and prefer the TCP endpoint.
+- Downloads go through the `Downloader` service
+  (`src/main/services/download.ts`): an `effect/http` `HttpClient` response is
+  streamed into `FileSystem.sink` with throttled progress, an idle timeout and
+  an overall timeout. Its `HttpClient` must be the Node `http`/`https` backend
+  (`@effect/platform-node/NodeHttpClient`'s `layerNodeHttp`), provided in
+  `runtime.ts`; never swap in `FetchHttpClient`/`fetch`. Electron's bundled
+  undici asserts (`Parser.finish`: `assert(this.paused)`) when a large `fetch`
+  body ends while paused for backpressure, which crashes the main process
+  mid-download of the multi-hundred-MB core archives.
+- Keep `@effect/platform-node` / `@effect/platform-node-shared` on the same
+  release line as `effect` itself. A `4.0` platform package with a `4.1` shared
+  package fails the main-process build (the shared package no longer exports
+  `NodeWS`), and the aligned `4.1` pair also stops bundling a 1.2 MB undici
+  chunk that the `4.0.6` node client pulled in.
+- The taskbar follows the Start Menu shortcut whose `System.AppUserModel.ID`
+  matches the window's AUMID; when one exists, its icon and display name win
+  over the window icon. Set `app.setAppUserModelId("app.maax.desktop")` only in
+  a packaged build: a dev run that claims the production AUMID makes Windows
+  create an `Electron.lnk` for the stock `electron.exe`, and the installed app
+  then shows the Electron icon in the taskbar. Also pass `icon` to
+  `BrowserWindow` on Windows; otherwise a frameless window can fall back to
+  Electron's logo even though the exe and tray icons are correct.
+
 ### Host lifetime and recovery
 
 - A host is keyed by core + resource server and shared by its devices; membership
@@ -453,6 +514,14 @@ Use a utility process/worker, one host per core version or resource set.
   behind the user.
 - Never resume a run after a host crash. Mark the interrupted queue failed;
   resuming could spend sanity, medicine or Originite twice.
+- The ADB daemon is started by whichever adb client runs first, MaaCore
+  included, and it detaches: after the app exits it still owns its port and any
+  fd it inherited (a stale orphan even kept the DevTools port bound and broke
+  the next `pn dev` with `bind() failed: Address already in use`). `execAdb`
+  therefore probes port 5037 before the first command and only a server this
+  app started is stopped, from `Application.shutdown` once the hosts are
+  gone. `SIGINT`/`SIGTERM` are routed through that same shutdown, because a
+  dev run stopped with Ctrl+C never raises `before-quit`.
 
 ### Tools and run activity
 
@@ -475,6 +544,11 @@ Use a utility process/worker, one host per core version or resource set.
   window close handler runs outside Effect. `window-all-closed` must keep the
   app alive when close-to-tray is enabled and a tray exists; otherwise a
   programmatic window close would strand a hidden process.
+- The mirror also carries the app `locale` and notifies the shell through
+  `setShellSync`; the Electron shell owns the `Tray` and keeps it in step with
+  the settings: no icon while close-to-tray is off, and the menu and the
+  "still running" notification follow the app locale, not `app.getLocale()`
+  (the OS one). Do not create the tray unconditionally at startup.
 - Log/diagnostics exports are local only. The diagnostics folder intentionally
   includes device addresses and paths, so document that before sharing.
 
@@ -525,6 +599,41 @@ write JSON with a bare `writeFile` in place.
   `TASK_DEFINITIONS`, `getTaskDefaults`, `buildMaaTaskParams`,
   `TASK_PALETTE_ORDER` and `TaskCard`'s `summaryFor`. The exhaustive
   switches fail the type check if one is missed — do not cast around them.
+- Theme-dependent fields own their choices: `TaskField.options` may be a
+  function of the params, so the Roguelike theme decides the mode list, the
+  difficulty range and the opening rewards. `fieldOptions(field, params)` is
+  the only resolver — reading `field.options` directly leaves a dynamic select
+  empty. `withTaskParam` (renderer edit) and `buildRoguelikeParams` (payload)
+  clamp the same rules: a mode kept from another theme, a level above the
+  theme's ceiling, or an opening-reset switch outside mode 4 makes MaaCore
+  reject the whole parameter set.
+- The Roguelike payload is built per theme and mode, never by spreading the
+  stored params. Some keys are mandatory in one mode (`blackflow_start_animals`
+  and `blackflow_start_rewards` in 30003, `find_playTime_target` in 20001) and
+  rejected in another (`start_with_elite_two` outside mode 4, an empty
+  `start_foldartal_list`). Blackflow fields are stored UI-side
+  (`blackflow_animal_1/2`, reward ids, priority order, `*_fast_flight`) and
+  become the core's array, bitmask and fixed mechanic loadout; the blue rewards
+  only count while a feathered serpent is required.
+- `kind: "opers"` is the starting-operator list: three fixed positions,
+  filled top-down (a position stays disabled until the previous one has a name),
+  mapped to the ordered `core_char_list`. Clearing a position clears the later
+  ones — the core cannot skip a recruit slot. A plan written before the list
+  existed shows its `core_char` in the first position; writing the list drops
+  the legacy `core_char`/`use_support` so the form never sends an operator it
+  does not display.
+- `StartingOperPicker` (`components/OperPicker.tsx`) expands a row into an
+  inline search panel instead of an overlay: the task card clips its overflow,
+  so a flyout would be cut off. `roguelike.operators` returns the whole
+  catalogue marked with the theme's recommendations
+  (`<core>/resource/roguelike/<theme>/recruitment.json`, `priority[].opers[]`
+  entries flagged `is_start`) and ordered recommended-first; the panel renders
+  the first 60 matches, so typing must narrow the list. A query that matches no
+  catalogue name still offers "use this name": the core accepts any Chinese name.
+  Avatars come from `<core>/resource/template/avatar/<id>.png` through
+  `operator.avatars`, downscaled to 40 px in main with `nativeImage` and cached;
+  only part of the catalogue (and no hand-typed name) has one, so the component
+  must keep an initial-letter badge as the fallback.
 - The stage picker's list is built in the main process: a hard-coded permanent
   list plus the live windows of `StageActivityV2.json` from `api.maa.plus`,
   cached per `client:locale` for ten minutes. A failed fetch still returns the

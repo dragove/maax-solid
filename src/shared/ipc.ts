@@ -8,11 +8,16 @@ import type {
   CopilotResolveResult,
   CopilotItem,
   CopilotOptions,
+  CopilotSearchItem,
   CopilotSearchResult,
+  CopilotSetSearchResult,
   CopilotSetup,
   CoreInfo,
+  OperatorAvatar,
   OperatorEntry,
+  RoguelikeOperator,
   CoreReleaseCheck,
+  DeviceDiscovery,
   DeviceDraft,
   DeviceView,
   LogEntry,
@@ -39,7 +44,20 @@ import type {
 export const IPC_CHANNELS = {
   command: "maax:command",
   event: "maax:event",
+  /** Fire-and-forget window-frame actions (custom title bar, non-macOS). */
+  window: "maax:window",
+  /** Main → renderer: pushed whenever the window maximized state flips. */
+  windowState: "maax:window-state",
 } as const;
+
+export const WINDOW_ACTIONS = {
+  minimize: "minimize",
+  toggleMaximize: "toggle-maximize",
+  close: "close",
+  isMaximized: "is-maximized",
+} as const;
+
+export type WindowAction = (typeof WINDOW_ACTIONS)[keyof typeof WINDOW_ACTIONS];
 
 export const COMMANDS = {
   bootstrap: "app.bootstrap",
@@ -58,6 +76,7 @@ export const COMMANDS = {
   updateResource: "resources.update",
   rollbackResource: "resources.rollback",
   stageCatalog: "stages.catalog",
+  discoverDevices: "devices.discover",
   addDevice: "devices.add",
   updateDevice: "devices.update",
   removeDevice: "devices.remove",
@@ -77,8 +96,12 @@ export const COMMANDS = {
   resolveCopilot: "copilot.resolve",
   readCopilotDetail: "copilot.detail",
   searchCopilot: "copilot.search",
+  searchCopilotSets: "copilot.sets",
+  copilotSetItems: "copilot.set-items",
   searchCopilotLevels: "copilot.levels",
   searchOperators: "copilot.operators",
+  roguelikeOperators: "roguelike.operators",
+  operatorAvatars: "operator.avatars",
   updateCopilotOptions: "copilot.options",
   setCopilotItems: "copilot.items",
   startCopilot: "copilot.start",
@@ -112,6 +135,7 @@ export interface CommandPayloads {
   "resources.update": { coreId: string };
   "resources.rollback": { coreId: string; backupId: string };
   "stages.catalog": undefined;
+  "devices.discover": { adbPath?: string };
   "devices.add": DeviceDraft;
   "devices.update": { id: string; patch: Partial<DeviceDraft> };
   "devices.remove": { id: string };
@@ -141,8 +165,17 @@ export interface CommandPayloads {
     limit?: number;
     language?: "zh" | "en";
   };
+  "copilot.sets": {
+    keyword?: string;
+    creatorId?: string;
+    page?: number;
+    limit?: number;
+  };
+  "copilot.set-items": { ids: ReadonlyArray<number> };
   "copilot.levels": { query: string };
   "copilot.operators": { query: string };
+  "roguelike.operators": { theme: string };
+  "operator.avatars": { ids: ReadonlyArray<string> };
   "copilot.options": Partial<CopilotOptions>;
   "copilot.items": { items: ReadonlyArray<CopilotItem> };
   "copilot.start": { deviceId: string; itemId?: string };
@@ -174,6 +207,7 @@ export interface CommandResults {
   "resources.update": ResourceApplyResult;
   "resources.rollback": ResourceApplyResult;
   "stages.catalog": StageCatalog;
+  "devices.discover": DeviceDiscovery;
   "devices.add": DeviceView;
   "devices.update": DeviceView;
   "devices.remove": ReadonlyArray<DeviceView>;
@@ -193,8 +227,12 @@ export interface CommandResults {
   "copilot.resolve": CopilotResolveResult;
   "copilot.detail": CopilotDetail | null;
   "copilot.search": CopilotSearchResult;
+  "copilot.sets": CopilotSetSearchResult;
+  "copilot.set-items": ReadonlyArray<CopilotSearchItem>;
   "copilot.levels": ReadonlyArray<CopilotLevel>;
   "copilot.operators": ReadonlyArray<OperatorEntry>;
+  "roguelike.operators": ReadonlyArray<RoguelikeOperator>;
+  "operator.avatars": ReadonlyArray<OperatorAvatar>;
   "copilot.options": CopilotSetup;
   "copilot.items": CopilotSetup;
   "copilot.start": RunSnapshot;
@@ -212,4 +250,13 @@ export interface CommandResults {
 export interface MaaxBridge {
   invoke(command: string, payload: unknown): Promise<unknown>;
   subscribe(listener: (event: unknown) => void): () => void;
+  /** VSCode-style custom frame controls; `enabled` mirrors a non-darwin host. */
+  windowFrame: {
+    readonly enabled: boolean;
+    minimize(): void;
+    toggleMaximize(): void;
+    close(): void;
+    isMaximized(): Promise<boolean>;
+    onMaximizedChange(listener: (maximized: boolean) => void): () => void;
+  };
 }

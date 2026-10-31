@@ -19,7 +19,7 @@ built around one rule: **the UI and the native core never share a process**.
                 │ MessagePort protocol (requests + batched callbacks)
 ┌───────────────┴─────────────────────────────────────────────┐
 │ MaaCore utility process (one per core version)              │
-│ koffi → libMaaCore.so · AsstHandle lifecycle · screenshots  │
+│ koffi → MaaCore native library · AsstHandle · screenshots   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -34,7 +34,7 @@ a callback and lose the window on a core crash.
 One utility process per installed core version/resource additionally gives us:
 
 - side-by-side core versions without SONAME / `RTLD_GLOBAL` collisions;
-- clean upgrade and rollback (the loaded `.so` is never replaced in place);
+- clean upgrade and rollback (the loaded native library is never replaced in place);
 - a supervisor that can reject pending requests and surface a typed error when
   the helper exits.
 
@@ -59,8 +59,14 @@ does not know how it is implemented.
   download from the official release API before anything is written.
 - Installation is staged in `userData/cores/.install-*` and then renamed into
   place, so an interrupted download never produces a half-usable core.
-- `libMaaCore.so` and `resource/` must stay together: MaaCore uses `$ORIGIN`
-  RUNPATH and a full resource tree is required (all roguelike themes).
+- The native library and `resource/` must stay together: on Linux MaaCore
+  resolves its dependencies through `$ORIGIN` RUNPATH; on Windows the host puts
+  the core directory first on `PATH` so `MaaCore.dll` can find the sibling
+  `opencv_world4_maa.dll`, `onnxruntime_maa.dll` and `MaaUtils.dll`. A full
+  resource tree is required on both (all roguelike themes).
+- Windows releases ship a `.zip`; the installer uses the same `yauzl` reader as
+  resource updates. Linux keeps `.tar.gz`. `platformSuffixFor` maps
+  `win32/x64` to `win-x64` and `win32/arm64` to `win-arm64`.
 - The user data directory passed to `AsstSetUserDir` is writable and separate
   from the (usually read-only) core directory.
 
@@ -102,8 +108,8 @@ gates only the core buttons (`coreBusy`), never the run controls. The new
 version becomes active immediately unless a device still holds a session or a
 run is active; in those cases the current core stays and the user switches later
 in Settings. A manual switch is refused while a run is preparing or running.
-Windows and macOS archives still need their own host variants, so
-`platformSuffixFor` only lists Linux.
+Windows uses the same installer path with the `win-x64` archive; macOS still
+needs its own library suffix and archive format.
 
 The component manager can also **repair** a managed core by downloading the
 matching release again and swapping the directory through a staging copy; the
@@ -189,7 +195,8 @@ queued twice.
 
 ## Tray, notifications and diagnostics
 
-Closing the window hides it to the system tray when the preference is enabled;
+Closing the window hides it to the system tray (the default; the Settings
+preference can turn it off);
 the close handler is skipped during application shutdown and the tray menu can
 reopen or quit. A tray host is optional on Linux: if it cannot be created the
 window closes normally instead of becoming unreachable. Run-completion
@@ -229,12 +236,19 @@ folder is generated locally and is not uploaded anywhere.
   connected session, without a plan. Runs created that way carry no `planId`.
   The queue palette therefore does not offer `Copilot`; the other copilot-based
   tasks (SSS, Paradox) remain queue entries because they are repeatable.
-- A copilot task runs a **batch**: `params.copilot_list` becomes
-  `copilot_list: [{ id: <position>, filename, is_raid }]` for MaaCore, which
-  executes the entries in order and reports progress by that position. Normal
-  and raid runs of one file are two entries sharing a filename — the PRTS
-  `difficulty` bitmask (1 normal, 2 raid, 3 both) decides how many entries
-  `copilot.resolve` creates.
+- A copilot task runs a **batch**: `params.copilot_list` keeps one saved row
+  per downloaded file, and `buildMaaTaskParams` expands each row into one
+  MaaCore entry per checked difficulty,
+  `copilot_list: [{ id: <position>, filename, is_raid }]`. The core executes
+  the entries in order and reports progress by that position, so the saved rows
+  and the expanded list are mapped back through `copilotItemEntries`.
+- The two difficulty boxes are independent: 普通 and 突袭/磨难/险地 may both be
+  checked (the file runs twice), neither means the row is skipped, and a
+  cleared difficulty is unchecked automatically while the other stays queued.
+  H stages (H17-4) have no 突袭 variant and only offer 普通; a `tough_` map only
+  offers the hard bit. The PRTS `difficulty` bitmask (1 normal, 2 raid, 3 both)
+  seeds the selection when `copilot.resolve` downloads a file, and the stage
+  family can only narrow it.
 - A batch uses MaaCore's multi-assignment mode, which starts on the **target
   chapter's stage map**. The tab keeps that prerequisite visible and owns a log
   stream; from the home screen or another chapter the core only swipes
@@ -265,6 +279,12 @@ A detail view never fetches anything: `copilot/query` already returns the whole
 document, including operator requirements. Measured for a full browse → add
 session: two requests on open (catalogue + one query), zero for details,
 suggestions and repeat searches, one per added assignment.
+
+Sets have their own tab. `POST /set/query` returns each set's ordered
+`copilot_ids`; expanding one asks `copilot.set-items`, which fetches the
+summaries through `copilot/query?copilot_ids=…` in chunks of 50 and restores
+the set's own order. Adding a whole set reuses `copilot.resolve`, so every
+member is downloaded under the same rate limit as a single assignment.
 
 Search parameters, as the site actually implements them:
 
@@ -305,11 +325,10 @@ PRTS filters on the **Chinese** name, which is what the picker sends.
 
 ## Known limits / next steps
 
-- Linux x86_64/aarch64 is the tested platform. The core host assumes
-  `libMaaCore.so`; Windows/macOS need their own library filename and archive
-  format handling.
-- Core download currently uses `tar` for `.tar.gz`; Windows `.zip` archives
-  need the existing `yauzl` reader wired into the core installer.
+- Windows x64 (MuMu 12/5) and Linux x86_64/aarch64 are tested. macOS still
+  needs a `libMaaCore.dylib` host, `.dmg` runtime layout and release suffix.
+- Windows packages are not part of the automatic release workflow yet; build
+  them locally with `pnpm dist`.
 - The app updater is not wired yet; core/resource updates are independent of
   the app version.
 - Scheduled runs only fire while MAAX is open; close-to-tray keeps it alive but

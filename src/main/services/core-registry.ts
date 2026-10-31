@@ -1,8 +1,9 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { createHash } from "node:crypto";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import semver from "semver";
+import { coreLibraryPath, coreResourceConfigPath } from "../platform";
 import { CoreInfoSchema, type CoreInfo, type CoreSource } from "../../shared/schemas";
 import { maaxError } from "../errors";
 import { AppPaths } from "./paths";
@@ -67,10 +68,10 @@ const readResourceStamp = (fs: FileSystem, resourcePath: string): Effect.Effect<
 
 const inspectCore = (fs: FileSystem, root: string): Effect.Effect<CoreInspection> =>
   Effect.gen(function* () {
-    const libPath = join(root, "libMaaCore.so");
+    const libPath = coreLibraryPath(root);
     const resourcePath = join(root, "resource");
     const libExists = yield* fs.exists(libPath).pipe(Effect.orElseSucceed(() => false));
-    const resourceExists = yield* fs.exists(join(resourcePath, "config.json")).pipe(Effect.orElseSucceed(() => false));
+    const resourceExists = yield* fs.exists(coreResourceConfigPath(root)).pipe(Effect.orElseSucceed(() => false));
     const status = libExists && resourceExists ? "ready" : libExists ? "broken" : "missing";
     if (status !== "ready") return { status, libPath, resourcePath };
     const resourceStamp = yield* readResourceStamp(fs, resourcePath);
@@ -110,33 +111,38 @@ export const CoreRegistryLive: Layer.Layer<CoreRegistry, never, AppPaths | FileS
       Effect.gen(function* () {
         const trimmed = root.trim();
         if (trimmed === "") return yield* maaxError("目录为空");
-        const absolute = trimmed.startsWith("/") ? trimmed : join(process.cwd(), trimmed);
+        // `resolve` handles both `/path` on Linux and `C:\path`/UNC paths on
+        // Windows, including relative input typed into the import field.
+        const absolute = resolve(trimmed);
         const current = yield* Ref.get(coreRef);
         const existing = current.find((core) => core.root === absolute);
-        if (existing) return existing;
 
         const info = yield* inspectCore(fs, absolute);
         if (info.status !== "ready") {
           return yield* maaxError(
             "这个目录不是有效的 MaaCore 安装",
-            `需要 ${join(absolute, "libMaaCore.so")} 与 ${join(absolute, "resource/config.json")}`,
+            `需要 ${coreLibraryPath(absolute)} 与 ${coreResourceConfigPath(absolute)}`,
           );
         }
         const version = versionFromRoot(absolute);
         const core: CoreInfo = {
-          id: coreIdFor(absolute),
-          label: basename(absolute),
-          version,
-          channel: "local",
-          source,
+          id: existing?.id ?? coreIdFor(absolute),
+          label: existing?.label ?? basename(absolute),
+          version: existing?.version ?? version,
+          channel: existing?.channel ?? "local",
+          source: existing?.source ?? source,
           root: absolute,
           libPath: info.libPath,
           resourcePath: info.resourcePath,
-          managed,
+          managed: existing?.managed ?? managed,
           status: "ready",
           ...(info.resourceStamp === undefined ? {} : { resourceStamp: info.resourceStamp }),
         };
-        const next = sortCores([...current, core]);
+        // Re-adding a path must refresh a stale/broken entry instead of
+        // returning it unchanged after a repaired or re-downloaded install.
+        const next = sortCores(
+          existing ? current.map((item) => (item.id === core.id ? core : item)) : [...current, core],
+        );
         yield* Ref.set(coreRef, next);
         yield* persist(next);
         return core;
@@ -147,12 +153,12 @@ export const CoreRegistryLive: Layer.Layer<CoreRegistry, never, AppPaths | FileS
         const current = yield* Ref.get(coreRef);
         const existing = current.find((core) => core.id === id);
         if (!existing) return yield* maaxError("核心不存在");
-        const absolute = root.trim();
+        const absolute = resolve(root.trim());
         const info = yield* inspectCore(fs, absolute);
         if (info.status !== "ready") {
           return yield* maaxError(
             "移动后的目录不是有效的 MaaCore 安装",
-            `需要 ${join(absolute, "libMaaCore.so")} 与 ${join(absolute, "resource/config.json")}`,
+            `需要 ${coreLibraryPath(absolute)} 与 ${coreResourceConfigPath(absolute)}`,
           );
         }
         const nextCore: CoreInfo = {

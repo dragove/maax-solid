@@ -4,10 +4,16 @@ import type { CopilotItem } from "./schemas";
  * The one hard-mode switch MaaCore has for a normal-stage assignment.
  *
  * The game names that mode by stage family — 突袭 for side stories, 磨难 for
- * main story chapters 10-14, 险地 from chapter 15 on — but the core only sees
+ * main story chapters 10–14, 险地 from chapter 15 on — but the core only sees
  * `is_raid`, so both difficulties stay two entries that differ in that flag.
  */
 export type CopilotMode = "normal" | "raid";
+
+/** Which difficulties one batch row will attempt; both may be checked. */
+export interface CopilotModeSelection {
+  readonly normal: boolean;
+  readonly raid: boolean;
+}
 
 /**
  * The copilot site leaves `difficulty` unset on most main story uploads, so a
@@ -22,6 +28,14 @@ export const isToughStage = (stageId: string, stageCode = ""): boolean =>
   stageId.startsWith("tough_") || stageCode.includes("磨难") || stageId.includes("磨难");
 
 /**
+ * Main story hard stages (H1-1 … H17-4) are their own difficulty. The game has
+ * no 突袭/磨难 run of them, so the catalogue code starting with H — or the
+ * `hard_` stage id — means only 普通 can be selected.
+ */
+export const isHardStage = (stageId: string, stageCode = ""): boolean =>
+  stageId.startsWith("hard_") || /^H\d+-\d+/iu.test(stageId) || /^H\d+-\d+/iu.test(stageCode);
+
+/**
  * Chapters 15 and later call the hard mode 险地 instead of 突袭/磨难.
  *
  * Saved batch entries carry the catalogue's display code (17-8（标准）), while
@@ -33,61 +47,202 @@ export const isHazardStage = (stageId: string): boolean => {
   return match !== null && Number(match[1]) >= 15;
 };
 
+/** Which difficulty bits this stage actually has. */
+export const copilotStageModes = (stageId: string, stageCode = ""): ReadonlyArray<CopilotMode> => {
+  if (isToughStage(stageId, stageCode)) return ["raid"];
+  if (isHardStage(stageId, stageCode)) return ["normal"];
+  return ["normal", "raid"];
+};
+
 /**
- * Which difficulty entries an assignment can produce.
+ * Which difficulty entries a search result can produce.
  *
  * `difficulty` is a bitmask: 1 normal, 2 raid, 3 both, 0 unset. An unset mask
  * offers both modes because the site does not mark 险地/磨难 uploads; the user
- * picks explicitly, which is the same choice MAA exposes by adding an entry as
- * normal or as raid.
+ * picks explicitly. Tough and H stages override the mask: those maps only have
+ * one difficulty in the game.
  */
-export const copilotModes = (difficulty: number, stageId: string): ReadonlyArray<CopilotMode> => {
-  if (isToughStage(stageId)) return ["raid"];
-  if (difficulty === 0) return ["normal", "raid"];
+export const copilotModes = (difficulty: number, stageId: string, stageCode = ""): ReadonlyArray<CopilotMode> => {
+  const available = copilotStageModes(stageId, stageCode);
+  if (available.length === 1) return available;
+  if (difficulty === 0) return available;
   const modes: CopilotMode[] = [];
   if ((difficulty & 1) !== 0) modes.push("normal");
   if ((difficulty & 2) !== 0) modes.push("raid");
   return modes.length === 0 ? ["normal"] : modes;
 };
 
-/** Force the core's raid switch on the entries a resolve produced. */
-export const withCopilotMode = (items: ReadonlyArray<CopilotItem>, mode: CopilotMode): ReadonlyArray<CopilotItem> =>
-  items.map((item) => ((item.kind ?? "normal") === "normal" ? { ...item, isRaid: mode === "raid" } : item));
-
 /**
- * Pick the entries for one requested difficulty.
+ * The difficulties a batch row has checked.
  *
- * A file that declares both difficulties resolves to two entries; keep the one
- * the user asked for. A file that never declared the mode still gets one entry
- * flipped to it — MAA allows a raid run of any file, and main story uploads
- * carry no mask at all.
+ * Batches saved before the two checkboxes existed carry one `isRaid` flag plus
+ * an enable switch; that shape is read here and folded into a selection. The
+ * stage always wins: a 磨难 map cannot run as normal, an H map cannot run as
+ * raid.
  */
-export const selectCopilotMode = (items: ReadonlyArray<CopilotItem>, mode: CopilotMode): ReadonlyArray<CopilotItem> => {
-  const matched = items.filter((item) => (item.kind ?? "normal") !== "normal" || item.isRaid === (mode === "raid"));
-  if (matched.length > 0) return matched;
-  return withCopilotMode(
-    items.filter((item) => (item.kind ?? "normal") === "normal"),
-    mode,
-  );
+export const copilotItemModes = (
+  item: Pick<CopilotItem, "modes" | "isRaid" | "enabled" | "kind" | "stage">,
+): CopilotModeSelection => {
+  if ((item.kind ?? "normal") !== "normal") return { normal: false, raid: false };
+  const available = copilotStageModes(item.stage);
+  if (item.modes === undefined) {
+    // The retired shape only knew one bit, and a 磨难 map saved with the wrong
+    // one still belongs on the hard map. The stage decides when it has one bit.
+    const active = item.enabled !== false;
+    if (available.length === 1) {
+      return { normal: active && available[0] === "normal", raid: active && available[0] === "raid" };
+    }
+    if (!active) return { normal: false, raid: false };
+    return item.isRaid === true ? { normal: false, raid: true } : { normal: true, raid: false };
+  }
+  return {
+    normal: available.includes("normal") && item.modes.normal,
+    raid: available.includes("raid") && item.modes.raid,
+  };
+};
+
+/** A row runs only while at least one difficulty is checked. */
+export const copilotItemActive = (item: CopilotItem): boolean => {
+  if ((item.kind ?? "normal") !== "normal") return item.enabled !== false;
+  const modes = copilotItemModes(item);
+  return modes.normal || modes.raid;
 };
 
 /**
- * The mode a batch entry will actually run in. A 磨难 entry saved before the
- * stage check existed still has `isRaid: false`; the stage code keeps the UI
- * honest (and `buildMaaTaskParams` forces the core switch for it).
+ * Drop the retired shape so every reader sees one model.
+ *
+ * Only normal assignments are rewritten: SSS and paradox rows keep the plain
+ * `enabled` switch, and their `modes` field is meaningless.
  */
-export const copilotEntryMode = (entry: Pick<CopilotItem, "isRaid" | "stage" | "kind">): CopilotMode =>
-  (entry.kind ?? "normal") !== "normal" ? "normal" : entry.isRaid || isToughStage(entry.stage) ? "raid" : "normal";
+export const normalizeCopilotItem = (item: CopilotItem): CopilotItem => {
+  if ((item.kind ?? "normal") !== "normal") return item;
+  return {
+    id: item.id,
+    copilotId: item.copilotId,
+    filename: item.filename,
+    stage: item.stage,
+    title: item.title,
+    ...(item.kind === undefined ? {} : { kind: item.kind }),
+    modes: copilotItemModes(item),
+  };
+};
+
+/**
+ * Read the entries of a saved `copilot_list` parameter. Plan params are not
+ * schema-decoded, so this both guards the shape and normalises legacy rows; an
+ * old normal+raid entry pair folds into one row with both boxes.
+ */
+export const readCopilotBatch = (value: unknown): ReadonlyArray<CopilotItem> =>
+  Array.isArray(value) ? mergeCopilotItems([], value.filter(isCopilotItem)) : [];
+
+/** Fold an off-switch for one difficulty of a batch row. */
+export const unscheduleCopilotMode = (item: CopilotItem, mode: CopilotMode): CopilotItem => {
+  if ((item.kind ?? "normal") !== "normal") return { ...item, enabled: false };
+  const normalized = normalizeCopilotItem(item);
+  return { ...normalized, modes: { ...copilotItemModes(normalized), [mode]: false } };
+};
+
+/**
+ * A single run is one MaaCore file with no batch list, so it also retires one
+ * difficulty. Prefer the first checked box, then whatever the stage has; a row
+ * that is skipped entirely still runs, because the single-run button overrides
+ * the checkboxes.
+ */
+export const withSingleMode = (item: CopilotItem): CopilotItem => {
+  const normalized = normalizeCopilotItem(item);
+  if ((normalized.kind ?? "normal") !== "normal") return normalized;
+  const modes = copilotItemModes(normalized);
+  const mode: CopilotMode = modes.normal
+    ? "normal"
+    : modes.raid
+      ? "raid"
+      : (copilotStageModes(normalized.stage)[0] ?? "normal");
+  return { ...normalized, modes: { normal: mode === "normal", raid: mode === "raid" } };
+};
+
+/**
+ * A MaaCore `copilot_list` entry: one file plus the difficulty it runs in.
+ *
+ * Normal assignments produce one entry per checked difficulty; SSS and paradox
+ * files are one entry each and never carry the raid bit.
+ */
+export interface CopilotRunEntry {
+  readonly item: CopilotItem;
+  readonly mode: CopilotMode;
+}
+
+/** Expand the batch rows into the entries MaaCore actually runs. */
+export const copilotItemEntries = (items: ReadonlyArray<CopilotItem>): ReadonlyArray<CopilotRunEntry> =>
+  items.flatMap((raw) => {
+    const item = normalizeCopilotItem(raw);
+    if ((item.kind ?? "normal") !== "normal") {
+      return item.enabled === false ? [] : [{ item, mode: "normal" as const }];
+    }
+    const modes = copilotItemModes(item);
+    const entries: CopilotRunEntry[] = [];
+    if (modes.normal) entries.push({ item, mode: "normal" });
+    if (modes.raid) entries.push({ item, mode: "raid" });
+    return entries;
+  });
+
+const copilotItemKey = (item: CopilotItem): string =>
+  item.copilotId > 0 ? `prts:${item.copilotId}` : `file:${item.filename}`;
+
+/**
+ * Fold a downloaded assignment or set into the batch.
+ *
+ * One row owns one file: adding the same PRTS assignment in the other
+ * difficulty must check that bit instead of appending a second row, and adding
+ * a set twice must not duplicate anything.
+ */
+export const mergeCopilotItems = (
+  current: ReadonlyArray<CopilotItem>,
+  incoming: ReadonlyArray<CopilotItem>,
+): ReadonlyArray<CopilotItem> => {
+  const rows = current.map(normalizeCopilotItem);
+  for (const raw of incoming) {
+    const item = normalizeCopilotItem(raw);
+    const index = rows.findIndex((row) => copilotItemKey(row) === copilotItemKey(item));
+    const existing = rows[index];
+    if (existing === undefined) {
+      rows.push(item);
+      continue;
+    }
+    if ((existing.kind ?? "normal") !== "normal" || (item.kind ?? "normal") !== "normal") {
+      rows[index] = item;
+      continue;
+    }
+    const before = copilotItemModes(existing);
+    const after = copilotItemModes(item);
+    rows[index] = { ...existing, modes: { normal: before.normal || after.normal, raid: before.raid || after.raid } };
+  }
+  return rows;
+};
+
+/** Keep only the difficulty the user asked for when adding a search result. */
+export const selectCopilotMode = (items: ReadonlyArray<CopilotItem>, mode: CopilotMode): ReadonlyArray<CopilotItem> =>
+  items.map((raw) => {
+    const item = normalizeCopilotItem(raw);
+    if ((item.kind ?? "normal") !== "normal") return item;
+    const available = copilotStageModes(item.stage);
+    return {
+      ...item,
+      modes: {
+        normal: available.includes("normal") && mode === "normal",
+        raid: available.includes("raid") && mode === "raid",
+      },
+    };
+  });
 
 /** Saved task params are not schema-decoded; keep a batch to real entries. */
 export const isCopilotItem = (value: unknown): value is CopilotItem => {
   const item = value as Partial<CopilotItem> | null;
-  return (
-    typeof item?.id === "string" &&
-    typeof item.filename === "string" &&
-    typeof item.isRaid === "boolean" &&
-    typeof item.stage === "string"
-  );
+  if (typeof item?.id !== "string" || typeof item.filename !== "string" || typeof item.stage !== "string") {
+    return false;
+  }
+  if (typeof item.copilotId !== "number" || typeof item.title !== "string") return false;
+  if (item.modes !== undefined) return typeof item.modes.normal === "boolean" && typeof item.modes.raid === "boolean";
+  return typeof item.isRaid === "boolean";
 };
 
 export type CopilotModeLabelKey = "copilot.normal" | "copilot.raid" | "copilot.tough" | "copilot.hazard";

@@ -20,10 +20,15 @@ export interface CoreHostOptions {
 export class CoreHostClient {
   private readonly child: UtilityProcess;
   private readonly pending = new Map<number, PendingRequest>();
+  private readonly exitPromise: Promise<void>;
+  private resolveExit!: () => void;
   private nextId = 1;
   private exited = false;
 
   constructor(private readonly options: CoreHostOptions) {
+    this.exitPromise = new Promise((resolve) => {
+      this.resolveExit = resolve;
+    });
     const hostEntry = join(__dirname, "core-host.js");
     const env = Object.fromEntries(
       Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
@@ -42,6 +47,7 @@ export class CoreHostClient {
     });
     this.child.on("message", (message: EngineMessage) => this.onMessage(message));
     this.child.on("exit", (code) => {
+      this.resolveExit();
       if (this.exited) return;
       this.exited = true;
       const reason = `MaaCore host exited with code ${code ?? "unknown"}`;
@@ -85,7 +91,10 @@ export class CoreHostClient {
   }
 
   async stop(): Promise<void> {
-    if (this.exited) return;
+    if (this.exited) {
+      await this.waitForExit(1_000);
+      return;
+    }
     try {
       await this.request({ id: 0, op: "shutdown" } as EngineRequest, 5_000);
     } catch {
@@ -93,13 +102,27 @@ export class CoreHostClient {
     }
     if (!this.exited) {
       this.exited = true;
+      this.rejectAll(new Error("MaaCore host stopped"));
       this.child.kill();
     }
+    // Windows keeps the loaded DLL locked until the utility process has really
+    // exited; callers rename/repair the core directory right after this.
+    await this.waitForExit(3_000);
+  }
+
+  private async waitForExit(timeoutMs: number): Promise<void> {
+    await Promise.race([
+      this.exitPromise,
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, timeoutMs);
+      }),
+    ]);
   }
 
   kill(): void {
     if (this.exited) return;
     this.exited = true;
+    this.rejectAll(new Error("MaaCore host killed"));
     this.child.kill();
   }
 

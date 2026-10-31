@@ -1,11 +1,12 @@
 import { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, shell } from "electron";
-import { closeToTray } from "./app-behavior";
+import { closeToTray, setShellSync, shellLocale } from "./app-behavior";
 import { Effect } from "effect";
 import { join } from "node:path";
 import appIcon from "../../build/icon.png?asset";
 import { attachRendererBootTrace, bootTrace, bootTraceEnabled } from "./boot-trace";
 import { registerIpcHandlers } from "./ipc";
 import { makeRuntime, type AppRuntime } from "./runtime";
+import { primeAdbServer } from "./services/adb";
 import { Application } from "./services/application";
 
 const isDevelopment = !app.isPackaged;
@@ -44,25 +45,27 @@ function showMainWindow(): void {
   mainWindow.focus();
 }
 
+function trayMenu(): Menu {
+  const zh = shellLocale() === "zh-CN";
+  return Menu.buildFromTemplate([
+    { label: zh ? "显示 MAAX" : "Show MAAX", click: showMainWindow },
+    { type: "separator" },
+    {
+      label: zh ? "退出 MAAX" : "Quit MAAX",
+      click: () => {
+        void shutdown();
+      },
+    },
+  ]);
+}
+
 function createTray(): void {
   if (tray) return;
-  const zh = app.getLocale().toLowerCase().startsWith("zh");
   try {
     const image = nativeImage.createFromPath(appIcon);
     tray = new Tray(image.isEmpty() ? appIcon : image.resize({ width: 22, height: 22 }));
     tray.setToolTip("Maax");
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: zh ? "显示 MAAX" : "Show MAAX", click: showMainWindow },
-        { type: "separator" },
-        {
-          label: zh ? "退出 MAAX" : "Quit MAAX",
-          click: () => {
-            void shutdown();
-          },
-        },
-      ]),
-    );
+    tray.setContextMenu(trayMenu());
     tray.on("click", showMainWindow);
     tray.on("double-click", showMainWindow);
   } catch (error) {
@@ -72,6 +75,22 @@ function createTray(): void {
     tray = null;
   }
 }
+
+/**
+ * Keeps the tray in step with the behavior mirror: the icon exists only while
+ * close-to-tray is on, and its menu is rebuilt when the app locale changes.
+ */
+function syncTray(): void {
+  if (!closeToTray()) {
+    tray?.destroy();
+    tray = null;
+    return;
+  }
+  if (tray) tray.setContextMenu(trayMenu());
+  else createTray();
+}
+
+setShellSync(syncTray);
 
 function openExternalUrl(url: string): void {
   try {
@@ -122,9 +141,15 @@ async function createWindow(): Promise<void> {
     minHeight: 640,
     show: false,
     title: "Maax",
+    // VSCode-style custom frame on Windows/Linux: the renderer draws its own
+    // title bar (drag region + window controls). macOS keeps native traffic lights.
+    ...(process.platform === "darwin" ? {} : { frame: false }),
     backgroundColor: "#1b1b1b",
     autoHideMenuBar: true,
-    ...(process.platform === "linux" ? { icon: appIcon } : {}),
+    // Set the window icon on Windows too: the frameless window must not fall
+    // back to the stock Electron logo when no AUMID shortcut supplies an icon
+    // (dev runs and the unpacked build).
+    ...(process.platform === "darwin" ? {} : { icon: appIcon }),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: true,
@@ -153,7 +178,7 @@ async function createWindow(): Promise<void> {
     window.hide();
     if (!trayHintShown && Notification.isSupported()) {
       trayHintShown = true;
-      const zh = app.getLocale().toLowerCase().startsWith("zh");
+      const zh = shellLocale() === "zh-CN";
       new Notification({
         title: zh ? "MAAX 仍在运行" : "MAAX is still running",
         body: zh
@@ -232,7 +257,14 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(async () => {
       bootTrace("app-ready");
-      app.setAppUserModelId("app.maax.desktop");
+      // Decide ADB daemon ownership before anything — a core host included —
+      // can start one; see `makeAdbServerTracker`.
+      primeAdbServer();
+      // Only the installed build owns the packaged AppUserModelID. A dev run
+      // uses the stock electron.exe; claiming the production AUMID there makes
+      // Windows pair its Start Menu "Electron" shortcut with the installed app,
+      // and the taskbar then shows that shortcut's Electron icon.
+      if (app.isPackaged) app.setAppUserModelId("app.maax.desktop");
       runtime = makeRuntime();
       bootTrace("runtime-created");
       registerIpcHandlers(runtime, () => mainWindow);
@@ -242,7 +274,6 @@ if (!hasSingleInstanceLock) {
       session.defaultSession.setPermissionCheckHandler(() => false);
 
       await createWindow();
-      createTray();
 
       app.on("activate", () => {
         if (BrowserWindow.getAllWindows().length === 0) {
@@ -269,6 +300,21 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   void shutdown();
 });
+
+// A dev run is stopped with Ctrl+C (SIGINT) or by the supervising process
+// (SIGTERM), and neither raises "before-quit". Route them through the same
+// shutdown so cleanup such as stopping the ADB server this app started runs.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    // A second signal means the first cleanup stalled; do not trap the run in
+    // the shutdown path, where `before-quit` no longer fires either.
+    if (quitting) {
+      app.exit(1);
+      return;
+    }
+    void shutdown();
+  });
+}
 
 app.on("window-all-closed", () => {
   // A destroyed window is not a quit request while tray mode is enabled; the

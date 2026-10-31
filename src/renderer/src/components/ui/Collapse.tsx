@@ -9,8 +9,10 @@ interface CollapseProps {
   readonly children: () => JSX.Element;
 }
 
-const OPEN_MS = 200;
-const CLOSE_MS = 160;
+// The `--duration-normal` / `--duration-fast` motion tokens; the wrapper is
+// measured in JS, so these two are the only durations that cannot be variables.
+const OPEN_MS = 160;
+const CLOSE_MS = 120;
 /**
  * Both directions decelerate.
  *

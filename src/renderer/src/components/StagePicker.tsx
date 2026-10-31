@@ -1,6 +1,7 @@
 import { For, Show, createMemo, createSignal, type Component } from "solid-js";
 import type { Locale, StageCatalogEntry } from "../../../shared/schemas";
 import { t } from "../i18n/i18n";
+import { Chevron } from "./ui/Chevron";
 import { Icon } from "./ui/Icon";
 
 interface StagePickerProps {
@@ -137,7 +138,7 @@ export const StagePicker: Component<StagePickerProps> = (props) => {
             else openMenu();
           }}
         >
-          <Icon name={open() ? "chevron-down" : "chevron-right"} />
+          <Chevron open={open()} />
         </button>
       </div>
       <Show when={open()}>

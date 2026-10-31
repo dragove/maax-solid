@@ -4,14 +4,18 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildCopilotQuery,
+  buildCopilotSetBody,
   detailFromContent,
   isCopilotPath,
   itemsFromContent,
   mapCopilotSearch,
+  mapCopilotSetSearch,
   parseCopilotInput,
   readCopilotDetail,
   repairCopilotFile,
+  searchCopilotByIds,
 } from "./copilot";
+import type { PrtsClient } from "./prts";
 
 describe("copilot references", () => {
   it("reads bare ids", () => {
@@ -48,45 +52,67 @@ describe("copilot items", () => {
     doc: { title: "昨日海 YW-EX-3" },
   };
 
-  it("expands a dual-difficulty assignment into normal and raid entries", () => {
+  it("keeps a dual-difficulty assignment as one row with both boxes", () => {
     const items = itemsFromContent(content, 106833, "/tmp/prts-106833.json");
-    expect(items.map((item) => item.isRaid)).toEqual([false, true]);
-    expect(items.every((item) => item.filename === "/tmp/prts-106833.json")).toBe(true);
-    expect(items.every((item) => item.stage === "act52side_ex03")).toBe(true);
-    expect(items[0]!.title).toBe("昨日海 YW-EX-3");
-    expect(new Set(items.map((item) => item.id)).size).toBe(2);
-  });
-
-  it("keeps a normal-only assignment to one entry", () => {
-    expect(itemsFromContent({ ...content, difficulty: 1 }, 1, "/tmp/a.json")).toHaveLength(1);
-    expect(itemsFromContent({ ...content, difficulty: 0 }, 1, "/tmp/a.json")).toHaveLength(1);
-    expect(itemsFromContent({ stage_name: "1-7" }, 1, "/tmp/a.json")[0]!.isRaid).toBe(false);
-  });
-
-  it("keeps a raid-only assignment to one raid entry", () => {
-    const items = itemsFromContent({ ...content, difficulty: 2 }, 1, "/tmp/a.json");
     expect(items).toHaveLength(1);
-    expect(items[0]!.isRaid).toBe(true);
+    expect(items[0]).toMatchObject({
+      filename: "/tmp/prts-106833.json",
+      stage: "act52side_ex03",
+      title: "昨日海 YW-EX-3",
+      modes: { normal: true, raid: true },
+    });
   });
 
-  it("marks a tough stage as a raid entry even without a difficulty mask", () => {
+  it("defaults an unset mask to normal", () => {
+    expect(itemsFromContent({ ...content, difficulty: 0 }, 1, "/tmp/a.json")[0]!.modes).toEqual({
+      normal: true,
+      raid: false,
+    });
+    expect(itemsFromContent({ stage_name: "1-7" }, 1, "/tmp/a.json")[0]!.modes).toEqual({
+      normal: true,
+      raid: false,
+    });
+  });
+
+  it("keeps a raid-only assignment on the hard bit", () => {
+    expect(itemsFromContent({ ...content, difficulty: 2 }, 1, "/tmp/a.json")[0]!.modes).toEqual({
+      normal: false,
+      raid: true,
+    });
+  });
+
+  it("routes a tough stage to the hard bit even without a difficulty mask", () => {
     const items = itemsFromContent({ stage_name: "tough_12-16", doc: { title: "12-18 磨难" } }, 1, "/tmp/a.json");
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ isRaid: true, stage: "tough_12-16", kind: "normal" });
+    expect(items[0]).toMatchObject({
+      modes: { normal: false, raid: true },
+      stage: "tough_12-16",
+      kind: "normal",
+    });
+  });
+
+  it("never selects raid for an H stage", () => {
+    const items = itemsFromContent(
+      { stage_name: "hard_17-04", difficulty: 3, doc: { title: "H17-4" } },
+      1,
+      "/tmp/a.json",
+    );
+    expect(items[0]!.modes).toEqual({ normal: true, raid: false });
   });
 
   it("falls back to the stage code when there is no title", () => {
     expect(itemsFromContent({ stage_name: "1-7" }, 1, "/tmp/a.json")[0]!.title).toBe("1-7");
   });
 
-  it("marks an SSS protocol file as one non-raid entry", () => {
+  it("marks an SSS protocol file as one row without difficulties", () => {
     const items = itemsFromContent(
       { type: "SSS", stage_name: "lt_21_01", difficulty: 3, doc: { title: "保全派驻 LT-1" } },
       7,
       "/tmp/sss.json",
     );
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ kind: "sss", isRaid: false, stage: "lt_21_01" });
+    expect(items[0]).toMatchObject({ kind: "sss", stage: "lt_21_01" });
+    expect(items[0]!.modes).toBeUndefined();
   });
 
   it("keeps ordinary files typed as normal", () => {
@@ -332,5 +358,87 @@ describe("copilot search mapping", () => {
   it("tolerates an empty or malformed response", () => {
     expect(mapCopilotSearch(undefined, new Map())).toEqual({ page: 1, total: 0, hasNext: false, items: [] });
     expect(mapCopilotSearch({ data: { data: [] } }, new Map()).items).toEqual([]);
+  });
+});
+
+describe("copilot sets", () => {
+  it("builds a snake_case POST body with clamped paging", () => {
+    expect(buildCopilotSetBody({ keyword: " 相见欢 ", creatorId: "54130", page: 2, limit: 200 })).toEqual({
+      page: 2,
+      limit: 50,
+      keyword: "相见欢",
+      creator_id: "54130",
+    });
+    expect(buildCopilotSetBody({ page: 0, limit: 0, keyword: "  " })).toEqual({ page: 1, limit: 1 });
+  });
+
+  it("maps a set page and skips unusable rows", () => {
+    const result = mapCopilotSetSearch({
+      data: {
+        has_next: true,
+        total: 2683,
+        data: [
+          {
+            id: 56210,
+            name: "相见欢OR",
+            description: "自用",
+            creator: "Sylvain",
+            creator_id: "54130",
+            copilot_ids: [46417, 82135],
+            create_time: "2026-10-26T14:04:29",
+            update_time: "2026-10-26T15:07:28",
+          },
+          { id: 0, name: "broken" },
+        ],
+      },
+    });
+    expect(result).toEqual({
+      total: 2683,
+      hasNext: true,
+      items: [
+        {
+          id: 56210,
+          name: "相见欢OR",
+          description: "自用",
+          creator: "Sylvain",
+          creatorId: "54130",
+          copilotIds: [46417, 82135],
+          createTime: "2026-10-26T14:04:29",
+          updateTime: "2026-10-26T15:07:28",
+        },
+      ],
+    });
+  });
+
+  it("fetches set contents in the set's own order", async () => {
+    const client = {
+      getJson: async (path: string) => {
+        const ids = new URLSearchParams(path.split("?")[1]).getAll("copilot_ids").map(Number);
+        return {
+          data: {
+            data: ids.map((id) => ({
+              id,
+              content: JSON.stringify({ stage_name: "main_01-07", doc: { title: `t${id}` } }),
+            })),
+          },
+        };
+      },
+    } as unknown as PrtsClient;
+    const items = await searchCopilotByIds(client, [3, 1, 3], new Map());
+    expect(items.map((item) => item.id)).toEqual([3, 1]);
+  });
+
+  it("chunks the id filter at the page cap", async () => {
+    const calls: number[] = [];
+    const client = {
+      getJson: async (path: string) => {
+        const ids = new URLSearchParams(path.split("?")[1]).getAll("copilot_ids").map(Number);
+        calls.push(ids.length);
+        return { data: { data: ids.map((id) => ({ id, content: "{}" })) } };
+      },
+    } as unknown as PrtsClient;
+    const ids = Array.from({ length: 60 }, (_, index) => index + 1);
+    expect(await searchCopilotByIds(client, ids, new Map())).toHaveLength(60);
+    expect(calls).toEqual([50, 10]);
   });
 });

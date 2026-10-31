@@ -1,4 +1,4 @@
-import { isToughStage } from "./copilot-mode";
+import { copilotItemActive, copilotItemEntries, readCopilotBatch } from "./copilot-mode";
 import type { AppSettings, CopilotSetup, TaskConfig, TaskType } from "./schemas";
 
 /**
@@ -11,7 +11,7 @@ export interface LocalizedText {
   readonly en: string;
 }
 
-export type FieldKind = "switch" | "number" | "text" | "stage" | "select" | "multi-select" | "tags" | "file";
+export type FieldKind = "switch" | "number" | "text" | "stage" | "select" | "multi-select" | "tags" | "file" | "opers";
 
 export interface FieldOption {
   readonly value: string | number;
@@ -24,7 +24,8 @@ export interface TaskField {
   readonly label: LocalizedText;
   readonly description?: LocalizedText;
   readonly placeholder?: LocalizedText;
-  readonly options?: ReadonlyArray<FieldOption>;
+  /** Static list, or a function of the current params when the theme owns the choices. */
+  readonly options?: ReadonlyArray<FieldOption> | ((params: Record<string, unknown>) => ReadonlyArray<FieldOption>);
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
@@ -38,6 +39,10 @@ export interface TaskField {
   readonly satisfies?: (params: Record<string, unknown>) => boolean;
   readonly visibleWhen?: (params: Record<string, unknown>) => boolean;
 }
+
+/** Resolve a field's options for the current params (theme-dependent lists). */
+export const fieldOptions = (field: TaskField, params: Record<string, unknown>): ReadonlyArray<FieldOption> =>
+  typeof field.options === "function" ? field.options(params) : (field.options ?? []);
 
 export interface TaskDefinition {
   readonly type: TaskType;
@@ -58,18 +63,242 @@ const paramString = (params: Record<string, unknown>, key: string): string =>
 
 const paramFlag = (params: Record<string, unknown>, key: string): boolean => params[key] === true;
 
+/** A field option the current theme may not offer. */
+interface ThemedOption extends FieldOption {
+  readonly themes?: ReadonlyArray<string>;
+}
+
+const ROGUELIKE_THEME_OPTIONS: ReadonlyArray<FieldOption> = [
+  { value: "Phantom", label: { zh: "傀影与猩红血钻", en: "Phantom & Crimson Solitaire" } },
+  { value: "Mizuki", label: { zh: "水月与深蓝之树", en: "Mizuki & Caerula Arbor" } },
+  { value: "Sami", label: { zh: "探索者的银凇止境", en: "Expeditioner's Jǫklumarkar" } },
+  { value: "Sarkaz", label: { zh: "萨卡兹的无终奇语", en: "Tales of the Unfathomable" } },
+  { value: "JieGarden", label: { zh: "岁的界园志异", en: "Sui's Garden of Grotesqueries" } },
+  { value: "BlackFlow", label: { zh: "黑流树海", en: "Blackflow" } },
+];
+
+/** Theme ids in core order; also whitelists the resource lookup in main. */
+export const ROGUELIKE_THEMES: ReadonlyArray<string> = ROGUELIKE_THEME_OPTIONS.map((option) => String(option.value));
+
+/** Highest in-game difficulty per theme; unused in monthly-squad and exploration modes. */
+const ROGUELIKE_MAX_DIFFICULTY: Readonly<Record<string, number>> = {
+  Phantom: 15,
+  Mizuki: 18,
+  Sami: 15,
+  Sarkaz: 18,
+  JieGarden: 18,
+  BlackFlow: 16,
+};
+
+/** MaaCore's sentinel for "swipe to the last entry", i.e. the highest unlocked difficulty. */
+const ROGUELIKE_MAX_DIFFICULTY_VALUE = 2147483647;
+
+const normalizeRoguelikeTheme = (theme: string): string => (ROGUELIKE_THEMES.includes(theme) ? theme : "Phantom");
+
+/**
+ * Modes MaaCore accepts per theme (`RoguelikeConfig::is_valid_mode`). A mode
+ * carried over from another theme makes the whole task parameter set fail, so
+ * both the form and the builder clamp it instead of forwarding it.
+ */
+const ROGUELIKE_MODE_VALUES: Readonly<Record<string, ReadonlyArray<number>>> = {
+  Phantom: [0, 1, 4, 6, 7],
+  Mizuki: [0, 1, 4, 6, 7],
+  Sami: [0, 1, 4, 5, 6, 7],
+  Sarkaz: [0, 1, 4, 6, 7],
+  JieGarden: [0, 1, 4, 6, 7, 20001],
+  BlackFlow: [0, 1, 30003],
+};
+
+const ROGUELIKE_MODE_OPTIONS: ReadonlyArray<FieldOption> = [
+  { value: 0, label: { zh: "刷等级，尽可能多打层数", en: "Gain experience, clear as far as possible" } },
+  { value: 1, label: { zh: "刷源石锭，投资完自动退出", en: "Farm Originium Ingots, exit after investing" } },
+  { value: 4, label: { zh: "刷开局（热水壶 / 精二直升）", en: "Farm a starting reward or Elite 2 start" } },
+  { value: 5, label: { zh: "刷坍缩范式", en: "Farm Collapsal Paradigms" } },
+  { value: 6, label: { zh: "月度小队", en: "Monthly squad" } },
+  { value: 7, label: { zh: "深入调查", en: "Deep investigation" } },
+  { value: 20001, label: { zh: "刷常乐节点", en: "Farm Playtime nodes" } },
+  { value: 30003, label: { zh: "刷开局，命中后保留这一局", en: "Farm starting rewards, keep the run" } },
+];
+
+export const roguelikeModeValues = (theme: string): ReadonlyArray<number> =>
+  ROGUELIKE_MODE_VALUES[normalizeRoguelikeTheme(theme)] ?? [0];
+
+export const roguelikeModeOptions = (theme: string): ReadonlyArray<FieldOption> => {
+  const allowed = roguelikeModeValues(theme);
+  return ROGUELIKE_MODE_OPTIONS.filter((option) => allowed.includes(Number(option.value)));
+};
+
+/** Idempotent clamp shared by the param writer and the payload builder. */
+export const roguelikeModeFor = (theme: string, mode: number): number =>
+  roguelikeModeValues(theme).includes(mode) ? mode : 0;
+
+/**
+ * The core reads `-1` as "keep the current difficulty", `INT_MAX` as "highest"
+ * and anything else as a concrete level. A level the theme does not have would
+ * leave the selector on a value that is not on screen.
+ */
+export const roguelikeDifficultyOptions = (theme: string): ReadonlyArray<FieldOption> => {
+  const max = ROGUELIKE_MAX_DIFFICULTY[normalizeRoguelikeTheme(theme)] ?? 15;
+  const levels = Array.from({ length: max + 1 }, (_, index) => max - index);
+  return [
+    { value: -1, label: { zh: "不切换", en: "Don't switch" } },
+    { value: ROGUELIKE_MAX_DIFFICULTY_VALUE, label: { zh: `最高（${max}）`, en: `Max (${max})` } },
+    ...levels.map((level) => ({ value: level, label: { zh: String(level), en: String(level) } })),
+  ];
+};
+
+export const roguelikeDifficultyValue = (theme: string, difficulty: number): number =>
+  roguelikeDifficultyOptions(theme).some((option) => Number(option.value) === difficulty) ? difficulty : -1;
+
+const ROGUELIKE_ROLE_OPTIONS: ReadonlyArray<ThemedOption> = [
+  { value: "先手必胜", label: { zh: "先手必胜（先锋、狙击、特种）", en: "First Move Advantage" } },
+  { value: "稳扎稳打", label: { zh: "稳扎稳打（重装、术师、狙击）", en: "Slow and Steady" } },
+  { value: "取长补短", label: { zh: "取长补短（近卫、辅助、医疗）", en: "Overcoming Weaknesses" } },
+  {
+    value: "灵活部署",
+    label: { zh: "灵活部署（先锋、辅助、特种）", en: "Flexible Deployment" },
+    themes: ["JieGarden", "BlackFlow"],
+  },
+  {
+    value: "坚不可摧",
+    label: { zh: "坚不可摧（重装、术师、医疗）", en: "Unbreakable" },
+    themes: ["JieGarden", "BlackFlow"],
+  },
+  { value: "随心所欲", label: { zh: "随心所欲（三张随机）", en: "As Your Heart Desires" } },
+];
+
+/** A stored role the theme no longer offers stays selectable instead of silently showing another one. */
+export const roguelikeRoleOptions = (theme: string, current: unknown): ReadonlyArray<FieldOption> => {
+  const normalized = normalizeRoguelikeTheme(theme);
+  const options = ROGUELIKE_ROLE_OPTIONS.filter(
+    (option) => option.themes === undefined || option.themes.includes(normalized),
+  ).map((option) => ({ value: option.value, label: option.label }));
+  const value = typeof current === "string" ? current.trim() : "";
+  return value !== "" && !options.some((option) => String(option.value) === value)
+    ? [...options, { value, label: { zh: value, en: value } }]
+    : options;
+};
+
 /** Rewards offered by the mode-4 opening reset; the core wants a flag object. */
-const COLLECTIBLE_REWARDS: ReadonlyArray<FieldOption> = [
+const COLLECTIBLE_REWARDS: ReadonlyArray<ThemedOption> = [
   { value: "hot_water", label: { zh: "热水壶", en: "Hot water" } },
   { value: "shield", label: { zh: "护盾", en: "Shield" } },
   { value: "ingot", label: { zh: "源石锭", en: "Ingot" } },
-  { value: "hope", label: { zh: "希望", en: "Hope" } },
+  { value: "hope", label: { zh: "希望", en: "Hope" }, themes: ["Phantom", "Mizuki", "Sami", "Sarkaz"] },
   { value: "random", label: { zh: "随机奖励", en: "Random reward" } },
-  { value: "key", label: { zh: "钥匙", en: "Key" } },
-  { value: "dice", label: { zh: "骰子", en: "Dice" } },
-  { value: "ideas", label: { zh: "构想 ×2", en: "2 Ideas" } },
-  { value: "ticket", label: { zh: "票券", en: "Ticket" } },
+  { value: "key", label: { zh: "钥匙", en: "Key" }, themes: ["Mizuki"] },
+  { value: "dice", label: { zh: "骰子", en: "Dice" }, themes: ["Mizuki"] },
+  { value: "ideas", label: { zh: "构想 ×2", en: "2 Ideas" }, themes: ["Sarkaz"] },
+  { value: "ticket", label: { zh: "票券", en: "Ticket" }, themes: ["JieGarden"] },
 ];
+
+export const collectibleRewardOptions = (theme: string): ReadonlyArray<FieldOption> => {
+  const normalized = normalizeRoguelikeTheme(theme);
+  return COLLECTIBLE_REWARDS.filter((option) => option.themes === undefined || option.themes.includes(normalized)).map(
+    (option) => ({ value: option.value, label: option.label }),
+  );
+};
+
+/** At most three starting recruits; their classes must differ in game. */
+export const ROGUELIKE_STARTING_OPERS = 3;
+
+export interface StartingOper {
+  readonly name: string;
+  readonly useSupport: boolean;
+}
+
+export const readStartingOpers = (value: unknown): ReadonlyArray<StartingOper> =>
+  Array.isArray(value)
+    ? value.flatMap((item) => {
+        if (typeof item !== "object" || item === null) return [];
+        const record = item as Record<string, unknown>;
+        return [{ name: typeof record.name === "string" ? record.name : "", useSupport: record.useSupport === true }];
+      })
+    : [];
+
+const BLACKFLOW_SERPENT = "swaddled_feathered_serpent";
+
+const BLACKFLOW_ANIMAL_OPTIONS: ReadonlyArray<FieldOption> = [
+  { value: "swaddled_cat", label: { zh: "襁褓中的猫", en: "Swaddled Cat" } },
+  { value: "swaddled_dog", label: { zh: "襁褓中的狗", en: "Swaddled Dog" } },
+  { value: "swaddled_cerberus", label: { zh: "襁褓三头犬", en: "Swaddled Cerberus" } },
+  { value: BLACKFLOW_SERPENT, label: { zh: "襁褓羽蛇", en: "Swaddled Feathered Serpent" } },
+];
+
+/** Requirement slots; the core takes 0-2 animals and at most one feathered serpent. */
+export const blackflowAnimalOptions = (other: unknown): ReadonlyArray<FieldOption> => [
+  { value: "", label: { zh: "不要求", en: "No requirement" } },
+  ...BLACKFLOW_ANIMAL_OPTIONS.filter((option) => option.value !== BLACKFLOW_SERPENT || other !== BLACKFLOW_SERPENT),
+];
+
+export const hasBlackflowSerpent = (params: Record<string, unknown>): boolean =>
+  params.blackflow_animal_1 === BLACKFLOW_SERPENT || params.blackflow_animal_2 === BLACKFLOW_SERPENT;
+
+interface BlackflowReward {
+  readonly id: string;
+  readonly label: LocalizedText;
+  /** The six blue cards only a feathered serpent in the preparation run brings. */
+  readonly serpent: boolean;
+}
+
+const BLACKFLOW_REWARDS: ReadonlyArray<BlackflowReward> = [
+  { id: "unnumbered_item", label: { zh: "未编号物", en: "Unnumbered Item" }, serpent: false },
+  { id: "survey_advance", label: { zh: "调查预付款", en: "Survey Advance" }, serpent: false },
+  { id: "space_lease", label: { zh: "空间租赁", en: "Space Lease" }, serpent: false },
+  { id: "regression_compensation", label: { zh: "退行补偿", en: "Regression Compensation" }, serpent: false },
+  { id: "forest_ride", label: { zh: "林间代步", en: "Forest Ride" }, serpent: false },
+  { id: "nest_parasitism", label: { zh: "巢寄生", en: "Nest Parasitism" }, serpent: false },
+  { id: "pegasus", label: { zh: "襁褓天马", en: "Swaddled Pegasus" }, serpent: true },
+  { id: "hippogriff", label: { zh: "襁褓骏鹰", en: "Swaddled Hippogriff" }, serpent: true },
+  { id: "dragon", label: { zh: "襁褓巨龙", en: "Swaddled Dragon" }, serpent: true },
+  { id: "hydra", label: { zh: "襁褓九头蛇", en: "Swaddled Hydra" }, serpent: true },
+  { id: "bai_ze", label: { zh: "襁褓白泽", en: "Swaddled Bai Ze" }, serpent: true },
+  { id: "golden_crow", label: { zh: "襁褓金乌", en: "Swaddled Golden Crow" }, serpent: true },
+];
+
+/** MAA's recommended pick order, used when utopia is on and nothing else was ordered. */
+const BLACKFLOW_REWARD_PRIORITY: ReadonlyArray<string> = [
+  "pegasus",
+  "space_lease",
+  "forest_ride",
+  "unnumbered_item",
+  "regression_compensation",
+  "survey_advance",
+  "nest_parasitism",
+  "hippogriff",
+  "dragon",
+  "hydra",
+  "bai_ze",
+  "golden_crow",
+];
+
+const readStringList = (value: unknown): ReadonlyArray<string> =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+export const blackflowRewardOptions = (serpent: boolean): ReadonlyArray<FieldOption> =>
+  BLACKFLOW_REWARDS.filter((reward) => !reward.serpent || serpent).map((reward) => ({
+    value: reward.id,
+    label: reward.label,
+  }));
+
+export const blackflowRewardPriorityOptions = (): ReadonlyArray<FieldOption> =>
+  BLACKFLOW_REWARDS.map((reward) => ({ value: reward.id, label: reward.label }));
+
+/** Bit positions match the core's `blackflow_start_rewards` mask. */
+export const blackflowRewardMask = (value: unknown, withSerpent: boolean): number => {
+  const picked = readStringList(value);
+  return BLACKFLOW_REWARDS.reduce((mask, reward, index) => {
+    if (reward.serpent && !withSerpent) return mask;
+    return picked.includes(reward.id) ? mask | (1 << index) : mask;
+  }, 0);
+};
+
+/** First picked card wins, so the stored order is preserved; empty falls back to MAA's order. */
+export const blackflowRewardPriority = (value: unknown): ReadonlyArray<string> => {
+  const known = new Set(BLACKFLOW_REWARDS.map((reward) => reward.id));
+  const picked = [...new Set(readStringList(value).filter((id) => known.has(id)))];
+  return picked.length > 0 ? picked : BLACKFLOW_REWARD_PRIORITY;
+};
 
 export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
   StartUp: {
@@ -469,56 +698,52 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
     type: "Roguelike",
     name: { zh: "集成战略", en: "Integrated Strategies" },
     description: {
-      zh: "自动刷取肉鸽分数、源石锭或主题奖励，可指定主题、分队与开局干员。",
-      en: "Farm Integrated Strategies score, ingots or theme rewards with a chosen squad and starting operator.",
+      zh: "自动刷取肉鸽分数、源石锭或主题奖励，支持六个主题、开局凹奖励与黑流树海刷开局。",
+      en: "Farm Integrated Strategies score, ingots or theme rewards across all six themes, including opening resets and Blackflow starting-reward runs.",
     },
     icon: "compass",
     fields: [
-      {
-        key: "theme",
-        kind: "select",
-        label: { zh: "主题", en: "Theme" },
-        options: [
-          { value: "Phantom", label: { zh: "傀影与猩红血钻", en: "Phantom & Crimson Solitaire" } },
-          { value: "Mizuki", label: { zh: "水月与深蓝之树", en: "Mizuki & Caerula Arbor" } },
-          { value: "Sami", label: { zh: "探索者的银凇止境", en: "Expeditioner's Jǫklumarkar" } },
-          { value: "Sarkaz", label: { zh: "萨卡兹的无终奇语", en: "Tales of the Unfathomable" } },
-          { value: "JieGarden", label: { zh: "岁的界园志异", en: "Sui's Garden of Grotesqueries" } },
-        ],
-      },
+      { key: "theme", kind: "select", label: { zh: "主题", en: "Theme" }, options: ROGUELIKE_THEME_OPTIONS },
       {
         key: "mode",
         kind: "select",
         label: { zh: "模式", en: "Mode" },
-        options: [
-          { value: 0, label: { zh: "刷分与奖励", en: "Score & rewards" } },
-          { value: 1, label: { zh: "刷源石锭", en: "Farm ingots" } },
-          { value: 4, label: { zh: "凹开局", en: "Opening reset" } },
-          { value: 5, label: { zh: "刷坍缩范式（萨米）", en: "Collapsal paradigms (Sami)" } },
-          { value: 6, label: { zh: "月度小队", en: "Monthly squad" } },
-          { value: 7, label: { zh: "深入调查", en: "Deep exploration" } },
-        ],
+        options: (params) => roguelikeModeOptions(paramString(params, "theme")),
+      },
+      {
+        key: "difficulty",
+        kind: "select",
+        label: { zh: "难度等级", en: "Difficulty" },
+        description: {
+          zh: "不切换表示沿用游戏内当前难度；最高为该主题已解锁的最高难度。",
+          en: "Don't switch keeps the current in-game difficulty; Max uses the highest unlocked one.",
+        },
+        options: (params) => roguelikeDifficultyOptions(paramString(params, "theme")),
       },
       {
         key: "squad",
         kind: "text",
         label: { zh: "分队", en: "Squad" },
         placeholder: { zh: "指挥分队", en: "指挥分队" },
-        description: { zh: "填写游戏内中文分队名。", en: "Use the in-game Chinese squad name." },
+        description: {
+          zh: "游戏内中文分队名，例如指挥分队、特勤分队、点刺成锭分队。",
+          en: "Use the in-game Chinese squad name.",
+        },
       },
       {
         key: "roles",
-        kind: "text",
+        kind: "select",
         label: { zh: "职业组", en: "Role group" },
-        placeholder: { zh: "取长补短", en: "取长补短" },
-        description: { zh: "填写游戏内中文职业组名。", en: "Use the in-game Chinese role group name." },
+        options: (params) => roguelikeRoleOptions(paramString(params, "theme"), params.roles),
       },
       {
-        key: "core_char",
-        kind: "text",
-        label: { zh: "开局干员", en: "Starting operator" },
-        placeholder: { zh: "留空则按练度自动选择", en: "Leave empty to pick automatically" },
-        description: { zh: "仅支持单个干员的中文名。", en: "A single operator's Chinese name." },
+        key: "core_char_list",
+        kind: "opers",
+        label: { zh: "开局干员", en: "Starting operators" },
+        description: {
+          zh: "按开局免费招募的顺位填写，最多 3 个；每个位置可单独设为助战。三个位置的职业不能相同。",
+          en: "Filled in recruit order, up to three; each slot can use a support operator. The three classes must differ.",
+        },
       },
       {
         key: "starts_count",
@@ -529,20 +754,7 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
         step: 1,
         description: { zh: "达到次数后停止，0 表示不限。", en: "Stop after this many runs. 0 means unlimited." },
       },
-      {
-        key: "difficulty",
-        kind: "number",
-        label: { zh: "难度等级", en: "Difficulty" },
-        min: 0,
-        max: 99,
-        step: 1,
-        description: { zh: "0 表示使用当前已解锁的最高难度。", en: "0 uses the highest unlocked difficulty." },
-      },
-      {
-        key: "investment_enabled",
-        kind: "switch",
-        label: { zh: "投资源石锭", en: "Invest ingots" },
-      },
+      { key: "investment_enabled", kind: "switch", label: { zh: "投资源石锭", en: "Invest ingots" } },
       {
         key: "investments_count",
         kind: "number",
@@ -557,24 +769,11 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
         visibleWhen: (params) => paramFlag(params, "investment_enabled"),
       },
       {
-        key: "stop_at_final_boss",
-        kind: "switch",
-        label: { zh: "最终 Boss 前停止", en: "Stop before the final boss" },
-        description: { zh: "仅适用于非傀影主题。", en: "Not available in Phantom & Crimson Solitaire." },
-        advanced: true,
-        visibleWhen: (params) => paramString(params, "theme") !== "Phantom",
-      },
-      {
-        key: "stop_at_max_level",
-        kind: "switch",
-        label: { zh: "等级刷满后停止", en: "Stop at max level" },
-        advanced: true,
-      },
-      {
         key: "stop_when_investment_full",
         kind: "switch",
         label: { zh: "投资满后停止", en: "Stop when investment is full" },
         advanced: true,
+        visibleWhen: (params) => paramFlag(params, "investment_enabled") && paramNumber(params, "mode") === 1,
       },
       {
         key: "investment_with_more_score",
@@ -582,20 +781,28 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
         label: { zh: "投资后继续购物", en: "Shop after investing" },
         description: { zh: "仅适用于刷源石锭模式。", en: "Only used by the Originium Ingot farming mode." },
         advanced: true,
-        visibleWhen: (params) => paramNumber(params, "mode") === 1,
+        visibleWhen: (params) =>
+          paramFlag(params, "investment_enabled") &&
+          paramNumber(params, "mode") === 1 &&
+          paramString(params, "theme") !== "BlackFlow",
       },
       {
-        key: "use_support",
+        key: "stop_at_final_boss",
         kind: "switch",
-        label: { zh: "开局干员为助战", en: "Starting operator is support" },
+        label: { zh: "最终 Boss 前停止", en: "Stop before the final boss" },
+        description: {
+          zh: "仅适用于刷等级模式，且不适用于傀影主题。",
+          en: "Only in the level mode, and not in Phantom.",
+        },
         advanced: true,
+        visibleWhen: (params) => paramNumber(params, "mode") === 0 && paramString(params, "theme") !== "Phantom",
       },
       {
-        key: "use_nonfriend_support",
+        key: "stop_at_max_level",
         kind: "switch",
-        label: { zh: "允许非好友助战", en: "Allow non-friend support" },
+        label: { zh: "等级刷满后停止", en: "Stop at max level" },
         advanced: true,
-        visibleWhen: (params) => paramFlag(params, "use_support"),
+        visibleWhen: (params) => paramNumber(params, "mode") === 0,
       },
       {
         key: "start_with_elite_two",
@@ -619,7 +826,7 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
           zh: "凹开局时期望的奖励，全部留空则沿用核心默认值。",
           en: "Rewards to look for during opening reset. Leave empty for the core defaults.",
         },
-        options: COLLECTIBLE_REWARDS,
+        options: (params) => collectibleRewardOptions(paramString(params, "theme")),
         advanced: true,
         visibleWhen: (params) => paramNumber(params, "mode") === 4,
       },
@@ -628,8 +835,12 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
         kind: "text",
         label: { zh: "凹开局分队", en: "Reset squad" },
         placeholder: { zh: "留空则与分队相同", en: "Empty uses the squad above" },
+        description: {
+          zh: "刷开局（含黑流树海准备局）时使用的分队。",
+          en: "Squad used by the opening-reset run, including the Blackflow preparation run.",
+        },
         advanced: true,
-        visibleWhen: (params) => paramNumber(params, "mode") === 4,
+        visibleWhen: (params) => paramNumber(params, "mode") === 4 || paramNumber(params, "mode") === 30003,
       },
       {
         key: "collectible_mode_shopping",
@@ -643,9 +854,21 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
         kind: "text",
         label: { zh: "第一层密文板", en: "First-floor Foldartal" },
         placeholder: { zh: "填写密文板名称", en: "Foldartal name" },
-        description: { zh: "仅适用于萨米主题。", en: "Only used by the Sami theme." },
+        description: { zh: "仅适用于萨米主题；凹到后停止任务。", en: "Sami only; stops once it appears." },
         advanced: true,
         visibleWhen: (params) => paramString(params, "theme") === "Sami",
+      },
+      {
+        key: "start_foldartal_list",
+        kind: "tags",
+        label: { zh: "开局密文板", en: "Starting Foldartals" },
+        placeholder: { zh: "例如 迁徙, 捕猎", en: "e.g. 迁徙, 捕猎" },
+        description: {
+          zh: "用逗号分隔的密文板名，全部到手才算凹开局成功；需配合生活至上分队。仅适用于萨米主题的刷开局模式。",
+          en: "Comma-separated Foldartal names. Sami opening reset only; pair it with the 生活至上分队 squad.",
+        },
+        advanced: true,
+        visibleWhen: (params) => paramString(params, "theme") === "Sami" && paramNumber(params, "mode") === 4,
       },
       {
         key: "expected_collapsal_paradigms",
@@ -663,7 +886,7 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
         key: "refresh_trader_with_dice",
         kind: "switch",
         label: { zh: "用骰子刷新商店", en: "Refresh the shop with dice" },
-        description: { zh: "仅适用于水月主题。", en: "Only used by the Mizuki theme." },
+        description: { zh: "仅适用于水月主题，用于刷指路鳞。", en: "Mizuki only, used to farm the guided scale." },
         advanced: true,
         visibleWhen: (params) => paramString(params, "theme") === "Mizuki",
       },
@@ -688,8 +911,111 @@ export const TASK_DEFINITIONS: Readonly<Record<TaskType, TaskDefinition>> = {
         advanced: true,
         visibleWhen: (params) => paramNumber(params, "mode") === 7,
       },
+      {
+        key: "use_nonfriend_support",
+        kind: "switch",
+        label: { zh: "允许非好友助战", en: "Allow non-friend support" },
+        advanced: true,
+      },
+      {
+        key: "start_with_seed",
+        kind: "text",
+        label: { zh: "指定种子", en: "Start with seed" },
+        placeholder: { zh: "例如 2b3c4d,rogue_1,120", en: "e.g. 2b3c4d,rogue_1,120" },
+        description: {
+          zh: "留空则不启用；界园主题与萨卡兹主题刷源石锭（点刺成锭 / 后勤分队）时生效。",
+          en: "Leave empty to disable. JieGarden, and Sarkaz ingot farming with 点刺成锭 / 后勤分队.",
+        },
+        advanced: true,
+        visibleWhen: (params) =>
+          paramString(params, "theme") === "JieGarden" ||
+          (paramString(params, "theme") === "Sarkaz" && paramNumber(params, "mode") === 1),
+      },
+      {
+        key: "find_playTime_target",
+        kind: "select",
+        label: { zh: "目标常乐节点", en: "Playtime node" },
+        description: { zh: "仅适用于界园的刷常乐节点模式。", en: "JieGarden Playtime farming only." },
+        options: [
+          { value: 1, label: { zh: "令 · 掷地有声", en: "Ling · Resounding Words" } },
+          { value: 2, label: { zh: "黍 · 种因得果", en: "Shu · Reap What You Sow" } },
+          { value: 3, label: { zh: "年 · 三缺一", en: "Nian · Mahjong Trio" } },
+        ],
+        visibleWhen: (params) => paramString(params, "theme") === "JieGarden" && paramNumber(params, "mode") === 20001,
+      },
+      {
+        key: "blackflow_fast_flight",
+        kind: "switch",
+        label: { zh: "快速飞三层", en: "Fly to Floor 3 quickly" },
+        description: {
+          zh: "刷等级时固定用特勤分队、稳扎稳打和满天赋机械师开局，第二层飞到第三层后重开；机械师天赋没点满不要勾选。",
+          en: "Fixes the start to Special Squad, Slow and Steady and a fully talented Mechanic, then flies to Floor 3 and restarts. Do not enable without a fully talented Mechanic.",
+        },
+        visibleWhen: (params) => paramString(params, "theme") === "BlackFlow" && paramNumber(params, "mode") === 0,
+      },
+      {
+        key: "blackflow_animal_1",
+        kind: "select",
+        label: { zh: "襁褓动物 · 第一只", en: "Swaddled animal · 1st" },
+        options: (params) => blackflowAnimalOptions(params.blackflow_animal_2),
+        visibleWhen: (params) => paramString(params, "theme") === "BlackFlow" && paramNumber(params, "mode") === 30003,
+      },
+      {
+        key: "blackflow_animal_2",
+        kind: "select",
+        label: { zh: "襁褓动物 · 第二只", en: "Swaddled animal · 2nd" },
+        options: (params) => blackflowAnimalOptions(params.blackflow_animal_1),
+        visibleWhen: (params) => paramString(params, "theme") === "BlackFlow" && paramNumber(params, "mode") === 30003,
+      },
+      {
+        key: "blackflow_start_rewards",
+        kind: "multi-select",
+        label: { zh: "期望的开局奖励", en: "Desired rewards" },
+        description: {
+          zh: "命中任意一项即可，退出后保留这一局；羽蛇奖励只在选择羽蛇时生效。",
+          en: "Any hit completes the run and keeps it; Feathered Serpent rewards only count with a serpent.",
+        },
+        options: (params) => blackflowRewardOptions(hasBlackflowSerpent(params)),
+        visibleWhen: (params) => paramString(params, "theme") === "BlackFlow" && paramNumber(params, "mode") === 30003,
+      },
+      {
+        key: "blackflow_start_utopia",
+        kind: "switch",
+        label: { zh: "凹第一层实托邦", en: "Reroll until Floor 1 is Utopia" },
+        description: {
+          zh: "命中奖励后按优先级选卡并进入第一层，第一层是实托邦才保留这一局；需要难度 6 以上。",
+          en: "Picks cards by priority and enters Floor 1; keeps the run only if Floor 1 has Utopia. Requires difficulty 6+.",
+        },
+        visibleWhen: (params) => paramString(params, "theme") === "BlackFlow" && paramNumber(params, "mode") === 30003,
+      },
+      {
+        key: "blackflow_start_reward_priority",
+        kind: "multi-select",
+        label: { zh: "开局奖励优先级", en: "Reward pick priority" },
+        description: {
+          zh: "按选择顺序优先；留空则使用推荐顺序。凹实托邦时生效。",
+          en: "Earlier picks win; empty uses the recommended order. Utopia only.",
+        },
+        options: blackflowRewardPriorityOptions(),
+        visibleWhen: (params) =>
+          paramString(params, "theme") === "BlackFlow" &&
+          paramNumber(params, "mode") === 30003 &&
+          paramFlag(params, "blackflow_start_utopia"),
+      },
+      {
+        key: "blackflow_start_run_fast_flight",
+        kind: "switch",
+        label: { zh: "准备局快速飞三层", en: "Fly preparation runs to Floor 3" },
+        description: {
+          zh: "准备局固定用特勤分队、稳扎稳打和满天赋机械师开局；目标局仍用上面的常规设置。机械师天赋没点满不要勾选。",
+          en: "Preparation runs fix Special Squad, Slow and Steady and a fully talented Mechanic; the target run keeps the normal settings.",
+        },
+        advanced: true,
+        visibleWhen: (params) => paramString(params, "theme") === "BlackFlow" && paramNumber(params, "mode") === 30003,
+      },
     ],
   },
+
   Reclamation: {
     type: "Reclamation",
     name: { zh: "生息演算", en: "Reclamation" },
@@ -1080,9 +1406,14 @@ export const TASK_PALETTE_ORDER: ReadonlyArray<TaskType> = [
   "CloseDown",
 ];
 
-/** A copilot task can carry a batch of assignments instead of one file. */
+/**
+ * A copilot task can carry a batch of assignments instead of one file.
+ *
+ * Rows with neither difficulty checked are skipped, so a list made only of
+ * skipped rows needs a local file just like an empty one.
+ */
 export const hasCopilotList = (params: Record<string, unknown>): boolean =>
-  Array.isArray(params.copilot_list) && params.copilot_list.length > 0;
+  copilotItemEntries(readCopilotBatch(params.copilot_list)).length > 0;
 
 export function getTaskDefaults(type: TaskType): Record<string, unknown> {
   switch (type) {
@@ -1163,30 +1494,39 @@ export function getTaskDefaults(type: TaskType): Record<string, unknown> {
       return {
         theme: "Phantom",
         mode: 0,
+        difficulty: ROGUELIKE_MAX_DIFFICULTY_VALUE,
         squad: "指挥分队",
         roles: "取长补短",
-        core_char: "",
+        core_char_list: [],
         starts_count: 0,
-        difficulty: 0,
         investment_enabled: true,
         investments_count: 0,
-        stop_at_final_boss: false,
-        stop_at_max_level: false,
         stop_when_investment_full: false,
         investment_with_more_score: false,
-        use_support: false,
-        use_nonfriend_support: false,
+        stop_at_final_boss: false,
+        stop_at_max_level: false,
         start_with_elite_two: false,
         only_start_with_elite_two: false,
         collectible_mode_start_list: [],
         collectible_mode_squad: "",
         collectible_mode_shopping: false,
         first_floor_foldartal: "",
+        start_foldartal_list: [],
         expected_collapsal_paradigms: ["目空一些", "睁眼瞎", "图像损坏", "一抹黑"],
         refresh_trader_with_dice: false,
         monthly_squad_auto_iterate: false,
         monthly_squad_check_comms: false,
         deep_exploration_auto_iterate: false,
+        use_nonfriend_support: false,
+        start_with_seed: "",
+        find_playTime_target: 1,
+        blackflow_fast_flight: false,
+        blackflow_animal_1: "",
+        blackflow_animal_2: "",
+        blackflow_start_rewards: [],
+        blackflow_start_utopia: false,
+        blackflow_start_reward_priority: [],
+        blackflow_start_run_fast_flight: false,
       };
     case "Reclamation":
       return {
@@ -1243,6 +1583,203 @@ const parseLocation = (value: string): [number, number] => {
   return location.every((part) => Number.isInteger(part) && part >= 0) ? location : [0, 0];
 };
 
+const BLACKFLOW_FLIGHT_SQUAD = "特勤分队";
+const BLACKFLOW_FLIGHT_ROLES = "稳扎稳打";
+const BLACKFLOW_FLIGHT_CORE_CHAR = "机械师";
+
+/** The two requirement slots in order; the core rejects more than one feathered serpent. */
+const blackflowAnimals = (first: unknown, second: unknown): ReadonlyArray<string> => {
+  const allowed = BLACKFLOW_ANIMAL_OPTIONS.map((option) => String(option.value));
+  let serpent = false;
+  return [first, second].flatMap((slot) => {
+    if (typeof slot !== "string" || !allowed.includes(slot)) return [];
+    if (slot === BLACKFLOW_SERPENT) {
+      if (serpent) return [];
+      serpent = true;
+    }
+    return [slot];
+  });
+};
+
+/**
+ * MaaCore's Roguelike task is theme-driven: one key can reject the whole
+ * parameter set in a theme (`start_with_elite_two` outside mode 4, an empty
+ * `start_foldartal_list`, Blackflow's mandatory start-run fields) and be ignored
+ * in another. Build the payload from the current theme and mode instead of
+ * forwarding every stored key, so a plan switched between themes does not carry
+ * a stale combination.
+ */
+function buildRoguelikeParams(taskParams: Record<string, unknown>, settings: AppSettings): Record<string, unknown> {
+  const theme = normalizeRoguelikeTheme(paramString(taskParams, "theme"));
+  const mode = roguelikeModeFor(theme, paramNumber(taskParams, "mode"));
+  const params: Record<string, unknown> = {
+    enable: true,
+    client_type: settings.clientType,
+    theme,
+    mode,
+    // A stored plan always has it; an imported one without it keeps the core's "don't switch".
+    difficulty: roguelikeDifficultyValue(theme, typeof taskParams.difficulty === "number" ? taskParams.difficulty : -1),
+  };
+
+  // 满天赋机械师：刷等级与刷开局的准备局都固定这一套开局组合。
+  const flight = theme === "BlackFlow" && mode === 0 && paramFlag(taskParams, "blackflow_fast_flight");
+  const prepFlight =
+    theme === "BlackFlow" && mode === 30003 && paramFlag(taskParams, "blackflow_start_run_fast_flight");
+  const squad = flight ? BLACKFLOW_FLIGHT_SQUAD : paramString(taskParams, "squad").trim();
+  const roles = flight ? BLACKFLOW_FLIGHT_ROLES : paramString(taskParams, "roles").trim();
+  if (squad !== "") params.squad = squad;
+  if (roles !== "") params.roles = roles;
+
+  // A written list wins over the legacy single operator; MaaCore only falls back
+  // to `core_char` while `core_char_list` is absent.
+  const startOpers = readStartingOpers(taskParams.core_char_list)
+    .slice(0, ROGUELIKE_STARTING_OPERS)
+    .filter((oper) => oper.name.trim() !== "");
+  if (flight || startOpers.length > 0) {
+    const list = flight ? [{ name: BLACKFLOW_FLIGHT_CORE_CHAR, useSupport: false }] : startOpers;
+    params.core_char_list = list.map((oper) => ({ name: oper.name.trim(), use_support: oper.useSupport }));
+  } else {
+    const legacy = paramString(taskParams, "core_char").trim();
+    if (legacy !== "") {
+      params.core_char = legacy;
+      params.use_support = paramFlag(taskParams, "use_support");
+    }
+  }
+
+  const starts = paramNumber(taskParams, "starts_count");
+  if (starts > 0) params.starts_count = starts;
+
+  // The core defaults investment to on; only an explicit false turns it off.
+  const invest = taskParams.investment_enabled !== false;
+  params.investment_enabled = invest;
+  params.use_nonfriend_support = paramFlag(taskParams, "use_nonfriend_support");
+  if (invest) {
+    const investments = paramNumber(taskParams, "investments_count");
+    if (investments > 0) params.investments_count = investments;
+    params.stop_when_investment_full = paramFlag(taskParams, "stop_when_investment_full");
+    if (mode === 1 && theme !== "BlackFlow") {
+      params.investment_with_more_score = paramFlag(taskParams, "investment_with_more_score");
+    }
+  }
+
+  if (mode === 0) {
+    if (theme !== "Phantom") params.stop_at_final_boss = paramFlag(taskParams, "stop_at_final_boss");
+    params.stop_at_max_level = paramFlag(taskParams, "stop_at_max_level");
+    // Blackflow leveling pushes ending 1; fast flight instead keeps the core's
+    // fast burn profile, which is what makes the mechanic jump worth it.
+    if (theme === "BlackFlow" && !flight) params.blackflow_strategy = "ending1";
+  }
+
+  if (mode === 4) {
+    params.collectible_mode_shopping = paramFlag(taskParams, "collectible_mode_shopping");
+    params.start_with_elite_two = paramFlag(taskParams, "start_with_elite_two");
+    if (params.start_with_elite_two === true) {
+      params.only_start_with_elite_two = paramFlag(taskParams, "only_start_with_elite_two");
+    }
+    const picked = new Set(readStringList(taskParams.collectible_mode_start_list));
+    params.collectible_mode_start_list = Object.fromEntries(
+      collectibleRewardOptions(theme).map((option) => [String(option.value), picked.has(String(option.value))]),
+    );
+  }
+  const resetSquad = prepFlight ? BLACKFLOW_FLIGHT_SQUAD : paramString(taskParams, "collectible_mode_squad").trim();
+  if ((mode === 4 || mode === 30003) && resetSquad !== "") params.collectible_mode_squad = resetSquad;
+
+  if (mode === 6) {
+    params.monthly_squad_auto_iterate = paramFlag(taskParams, "monthly_squad_auto_iterate");
+    params.monthly_squad_check_comms = paramFlag(taskParams, "monthly_squad_check_comms");
+  }
+  if (mode === 7) params.deep_exploration_auto_iterate = paramFlag(taskParams, "deep_exploration_auto_iterate");
+
+  if (theme === "Sami") {
+    const foldartal = paramString(taskParams, "first_floor_foldartal").trim();
+    if (foldartal !== "") params.first_floor_foldartal = foldartal;
+    if (mode === 4) {
+      const list = readStringList(taskParams.start_foldartal_list).filter((name) => name.trim() !== "");
+      if (list.length > 0) params.start_foldartal_list = list;
+    }
+    if (mode === 5) {
+      const paradigms = readStringList(taskParams.expected_collapsal_paradigms).filter((name) => name.trim() !== "");
+      if (paradigms.length > 0) params.expected_collapsal_paradigms = paradigms;
+    }
+  }
+  if (theme === "Mizuki") params.refresh_trader_with_dice = paramFlag(taskParams, "refresh_trader_with_dice");
+
+  if (theme === "JieGarden" || theme === "Sarkaz") {
+    const seed = paramString(taskParams, "start_with_seed").trim();
+    if (seed !== "") params.start_with_seed = seed;
+  }
+  if (theme === "JieGarden" && mode === 20001) {
+    const target = paramNumber(taskParams, "find_playTime_target");
+    params.find_playTime_target = target >= 1 && target <= 3 ? Math.trunc(target) : 1;
+  }
+
+  if (theme === "BlackFlow" && mode === 30003) {
+    const animals = blackflowAnimals(taskParams.blackflow_animal_1, taskParams.blackflow_animal_2);
+    const serpent = animals.includes(BLACKFLOW_SERPENT);
+    // Both keys are mandatory for mode 30003 even when nothing is required.
+    params.blackflow_start_animals = [...animals];
+    params.blackflow_start_rewards = blackflowRewardMask(taskParams.blackflow_start_rewards, serpent);
+    if (prepFlight) {
+      params.collectible_mode_roles = BLACKFLOW_FLIGHT_ROLES;
+      params.collectible_mode_core_char_list = [{ name: BLACKFLOW_FLIGHT_CORE_CHAR, use_support: false }];
+    }
+    if (paramFlag(taskParams, "blackflow_start_utopia")) {
+      params.blackflow_start_utopia = true;
+      params.blackflow_start_reward_priority = [...blackflowRewardPriority(taskParams.blackflow_start_reward_priority)];
+    }
+  }
+
+  return params;
+}
+
+/**
+ * Apply one form edit plus the follow-up rules that keep a Roguelike plan
+ * consistent: the theme owns the valid modes and difficulty range, leaving
+ * mode 4 clears the opening-reset switches the core would reject, and a written
+ * operator list replaces the legacy single-operator keys.
+ */
+export function withTaskParam(
+  type: TaskType,
+  params: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...params, [key]: value };
+  if (type !== "Roguelike") return next;
+
+  const theme = normalizeRoguelikeTheme(paramString(next, "theme"));
+  if (key === "theme") {
+    next.mode = roguelikeModeFor(theme, paramNumber(next, "mode"));
+    next.difficulty = roguelikeDifficultyValue(theme, paramNumber(next, "difficulty"));
+  }
+  if (key === "mode") next.mode = roguelikeModeFor(theme, paramNumber(next, "mode"));
+  if (key === "mode" && next.mode !== 4) {
+    next.start_with_elite_two = false;
+    next.only_start_with_elite_two = false;
+  }
+  if (key === "start_with_elite_two" && value !== true) next.only_start_with_elite_two = false;
+  if (key === "core_char_list") {
+    // The list is the only operator field the form shows; a leftover single
+    // operator would keep being sent for a value the user can no longer see.
+    delete next.core_char;
+    delete next.use_support;
+  }
+  if (key === "blackflow_animal_1" && value === BLACKFLOW_SERPENT && next.blackflow_animal_2 === BLACKFLOW_SERPENT) {
+    next.blackflow_animal_2 = "";
+  }
+  if (key === "blackflow_animal_2" && value === BLACKFLOW_SERPENT && next.blackflow_animal_1 === BLACKFLOW_SERPENT) {
+    next.blackflow_animal_1 = "";
+  }
+  if (
+    key === "blackflow_start_utopia" &&
+    value === true &&
+    readStringList(next.blackflow_start_reward_priority).length === 0
+  ) {
+    next.blackflow_start_reward_priority = [...BLACKFLOW_REWARD_PRIORITY];
+  }
+  return next;
+}
+
 export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Record<string, unknown> {
   const common: Record<string, unknown> = {
     enable: true,
@@ -1280,35 +1817,8 @@ export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Rec
       return { ...common, ...task.params };
     case "Award":
       return { ...common, ...task.params };
-    case "Roguelike": {
-      const params: Record<string, unknown> = { ...common, ...task.params };
-      // The core treats an omitted count as "unlimited" and an omitted operator
-      // as "pick by level", so zero and empty strings stay out of the payload.
-      for (const key of ["core_char", "first_floor_foldartal", "collectible_mode_squad"]) {
-        if (paramString(params, key).trim() === "") delete params[key];
-      }
-      if (Number(params.starts_count) === 0) delete params.starts_count;
-      if (Number(params.investments_count) === 0) delete params.investments_count;
-
-      const paradigms = Array.isArray(params.expected_collapsal_paradigms)
-        ? params.expected_collapsal_paradigms.filter(
-            (value): value is string => typeof value === "string" && value.trim() !== "",
-          )
-        : [];
-      if (paradigms.length === 0) delete params.expected_collapsal_paradigms;
-      else params.expected_collapsal_paradigms = paradigms;
-
-      const rewards = Array.isArray(params.collectible_mode_start_list)
-        ? params.collectible_mode_start_list.filter((value): value is string => typeof value === "string")
-        : [];
-      if (rewards.length === 0) delete params.collectible_mode_start_list;
-      else {
-        params.collectible_mode_start_list = Object.fromEntries(
-          COLLECTIBLE_REWARDS.map((option) => [String(option.value), rewards.includes(String(option.value))]),
-        );
-      }
-      return params;
-    }
+    case "Roguelike":
+      return buildRoguelikeParams(task.params, settings);
     case "Reclamation": {
       const params: Record<string, unknown> = { ...common, ...task.params };
       const tools = Array.isArray(params.tools_to_craft)
@@ -1331,20 +1841,19 @@ export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Rec
       if (Number(task.params.formation_index) > 0) params.formation_index = Number(task.params.formation_index);
 
       const manual = task.params.manual_start === true;
-      const batch = Array.isArray(task.params.copilot_list) ? task.params.copilot_list : [];
-      const entries = batch.flatMap((item) => {
-        const entry = item as { filename?: unknown; isRaid?: unknown; stage?: unknown; enabled?: unknown };
-        if (entry.enabled === false) return [];
-        if (typeof entry.filename !== "string" || entry.filename.trim() === "") return [];
-        // A `tough_` stage stored before difficulty inference landed still has
-        // isRaid false; the stage id keeps that saved batch on the 磨难 map.
-        const isRaid = entry.isRaid === true || (typeof entry.stage === "string" && isToughStage(entry.stage));
-        // The core reports progress by this index, so it must be the position in
-        // the whole list; normal and raid runs of one file share the file.
-        return [{ id: 0, filename: entry.filename, is_raid: isRaid }];
-      });
-      if (entries.length > 0 && (!manual || entries.length !== 1)) {
-        return { ...params, copilot_list: entries.map((entry, index) => ({ ...entry, id: index })) };
+      // Each checked difficulty is its own MaaCore entry; a row with neither
+      // difficulty checked is skipped. The core reports progress by this index,
+      // so it must be the position in the expanded list.
+      const entries = copilotItemEntries(readCopilotBatch(task.params.copilot_list));
+      if (entries.length > 0 && !manual) {
+        return {
+          ...params,
+          copilot_list: entries.map((entry, index) => ({
+            id: index,
+            filename: entry.item.filename,
+            is_raid: entry.mode === "raid",
+          })),
+        };
       }
       // Legacy single file or manual start: send the stored parameters and drop
       // the batch. Manual start deliberately carries one filename instead of
@@ -1354,7 +1863,8 @@ export function buildMaaTaskParams(task: TaskConfig, settings: AppSettings): Rec
       delete single.copilot_list;
       delete single.manual_start;
       delete single.is_raid;
-      if (manual && entries.length === 1) single.filename = entries[0]!.filename;
+      const manualEntry = entries[0];
+      if (manual && manualEntry !== undefined) single.filename = manualEntry.item.filename;
       if (Number(task.params.formation_index) <= 0) delete single.formation_index;
       single.loop_times = params.loop_times;
       return single;
@@ -1414,7 +1924,7 @@ export function createCopilotTask(setup: CopilotSetup, id = crypto.randomUUID(),
     enabled: true,
     name: "",
     params: {
-      copilot_list: setup.items.filter((item) => item.enabled !== false),
+      copilot_list: setup.items.filter(copilotItemActive),
       filename: "",
       formation: setup.options.formation,
       add_trust: setup.options.addTrust,
@@ -1443,7 +1953,7 @@ export function createCopilotRunTasks(
   id = crypto.randomUUID(),
   manual = false,
 ): ReadonlyArray<TaskConfig> {
-  const items = setup.items.filter((item) => item.enabled !== false);
+  const items = setup.items.filter(copilotItemActive);
   if (items.length === 0) return [];
   const kinds = new Set(items.map((item) => item.kind ?? "normal"));
   if (kinds.size > 1) return [];

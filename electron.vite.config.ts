@@ -21,7 +21,7 @@ const buildMetadata = {
   electron: versionOf(manifest.devDependencies?.electron),
   solid: versionOf(manifest.dependencies?.["solid-js"] ?? manifest.devDependencies?.["solid-js"]),
   effect: versionOf(manifest.devDependencies?.effect),
-  typescript: versionOf(manifest.devDependencies?.typescript),
+  tsrs: versionOf(manifest.devDependencies?.tsrs),
 };
 
 export default defineConfig({

@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 
 /**
@@ -129,6 +129,18 @@ export interface ApplyOverlayOptions {
  * Files are moved into place with `rename`, so a failure leaves whole files
  * behind rather than truncated ones; re-running the same overlay is safe.
  */
+const assertNoSymlinkChain = async (root: string, relative: string): Promise<void> => {
+  const parts = relative.split(/[\\/]+/u).filter((part) => part !== "" && part !== ".");
+  let current = resolve(root);
+  for (const part of parts) {
+    current = join(current, part);
+    const info = await lstat(current).catch(() => undefined);
+    if (info?.isSymbolicLink()) {
+      throw new Error(`资源目标路径包含符号链接：${relative}`);
+    }
+  }
+};
+
 export const applyOverlay = async (options: ApplyOverlayOptions): Promise<OverlayManifest> => {
   const files = await listFiles(options.stagedRoot);
   // Build the backup beside its final name so an interrupted apply never looks
@@ -138,7 +150,9 @@ export const applyOverlay = async (options: ApplyOverlayOptions): Promise<Overla
   await mkdir(options.targetRoot, { recursive: true });
   await mkdir(join(partialRoot, OVERLAY_FILES_DIR), { recursive: true });
 
+  const realTargetRoot = await realpath(options.targetRoot).catch(() => resolve(options.targetRoot));
   const entries: OverlayEntry[] = [];
+  const appliedEntries: OverlayEntry[] = [];
   let bytes = 0;
 
   try {
@@ -146,25 +160,34 @@ export const applyOverlay = async (options: ApplyOverlayOptions): Promise<Overla
       const source = resolve(options.stagedRoot, relative);
       const target = resolve(options.targetRoot, relative);
       if (!insideOf(options.targetRoot, target)) throw new Error(`资源归档条目越界：${relative}`);
+      await assertNoSymlinkChain(options.targetRoot, relative);
 
-      const existing = await stat(target).catch(() => undefined);
+      const existing = await lstat(target).catch(() => undefined);
+      if (existing && !existing.isFile()) {
+        throw new Error(`资源目标路径不是普通文件：${relative}`);
+      }
       if (existing?.isFile() && (await sameContent(source, target))) {
         options.onProgress?.(index + 1, files.length);
         continue;
       }
 
       const size = (await stat(source)).size;
+      let entry: OverlayEntry;
       if (existing?.isFile()) {
         const backup = join(partialRoot, OVERLAY_FILES_DIR, relative);
         await mkdir(dirname(backup), { recursive: true });
         await copyFile(target, backup);
-        entries.push({ path: toManifestPath(relative), action: "replaced", bytes: size });
+        entry = { path: toManifestPath(relative), action: "replaced", bytes: size };
       } else {
-        entries.push({ path: toManifestPath(relative), action: "added", bytes: size });
+        entry = { path: toManifestPath(relative), action: "added", bytes: size };
       }
+      entries.push(entry);
 
       await mkdir(dirname(target), { recursive: true });
+      const realParent = await realpath(dirname(target));
+      if (!insideOf(realTargetRoot, realParent)) throw new Error(`资源归档条目越界：${relative}`);
       await moveIntoPlace(source, target);
+      appliedEntries.push(entry);
       bytes += size;
       options.onProgress?.(index + 1, files.length);
     }
@@ -181,6 +204,15 @@ export const applyOverlay = async (options: ApplyOverlayOptions): Promise<Overla
     await rename(partialRoot, options.backupRoot);
     return manifest;
   } catch (error) {
+    for (const entry of [...appliedEntries].reverse()) {
+      const target = resolve(options.targetRoot, entry.path);
+      if (!insideOf(options.targetRoot, target)) continue;
+      if (entry.action === "replaced") {
+        await copyFile(join(partialRoot, OVERLAY_FILES_DIR, entry.path), target).catch(() => undefined);
+      } else {
+        await rm(target, { force: true }).catch(() => undefined);
+      }
+    }
     await rm(partialRoot, { recursive: true, force: true }).catch(() => undefined);
     throw error;
   }
@@ -199,6 +231,7 @@ export const restoreOverlay = async (backupDirectory: string, targetRoot: string
   for (const entry of manifest.entries) {
     const target = resolve(targetRoot, entry.path);
     if (!insideOf(targetRoot, target)) throw new Error(`资源备份条目越界：${entry.path}`);
+    await assertNoSymlinkChain(targetRoot, entry.path);
     if (entry.action === "replaced") {
       await mkdir(dirname(target), { recursive: true });
       await copyFile(join(backupDirectory, OVERLAY_FILES_DIR, entry.path), target);

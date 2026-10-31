@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import { BrowserWindow, Notification, app, dialog } from "electron";
+import { BrowserWindow, Notification, app, dialog, nativeImage } from "electron";
 import { randomUUID } from "node:crypto";
 import { cpus, release, totalmem } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
@@ -17,9 +17,14 @@ import type {
   CopilotOptions,
   CopilotResolveResult,
   CopilotSetup,
+  OperatorAvatar,
   OperatorEntry,
+  RoguelikeOperator,
+  CopilotSearchItem,
   CopilotSearchResult,
+  CopilotSetSearchResult,
   CoreReleaseCheck,
+  DeviceDiscovery,
   DeviceDraft,
   DeviceProfile,
   DeviceStatus,
@@ -53,11 +58,18 @@ import {
   createTask,
   firstMissingField,
 } from "../../shared/tasks";
-import { copilotSucceededItems, type CopilotRunOutcome } from "../../shared/copilot-progress";
+import { copilotSucceededEntries, type CopilotRunOutcome } from "../../shared/copilot-progress";
+import {
+  copilotItemActive,
+  normalizeCopilotItem,
+  unscheduleCopilotMode,
+  withSingleMode,
+  type CopilotMode,
+} from "../../shared/copilot-mode";
 import { scheduleDue } from "../../shared/schedule";
-import { setCloseToTray } from "../app-behavior";
+import { setWindowBehavior } from "../app-behavior";
 import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
-import { probeAdbConnection } from "./adb";
+import { discoverAdbDevices, probeAdbConnection, releaseAdbServer, resolveAdbPath } from "./adb";
 
 const STAGE_ACTIVITY_URL = "https://api.maa.plus/MaaAssistantArknights/api/gui/StageActivityV2.json";
 
@@ -146,7 +158,7 @@ interface StageCache {
   readonly catalog: StageCatalog;
 }
 import { CoreHostClient } from "../core-host-client";
-import { repairCopilotFile, type CopilotSearchParams } from "./copilot";
+import { repairCopilotFile, type CopilotSearchParams, type CopilotSetSearchParams } from "./copilot";
 import { CoreRegistry } from "./core-registry";
 import { CoreInstaller } from "./core-installer";
 import { maaxError, type MaaxError } from "../errors";
@@ -154,6 +166,13 @@ import { EventBus } from "../events";
 import { AppPaths } from "./paths";
 import { CopilotSetupStore } from "./copilot-setup";
 import { OperatorCatalogue } from "./operator-catalog";
+import {
+  AVATAR_LIMIT,
+  avatarPath,
+  isAvatarId,
+  mergeRoguelikeOperators,
+  readStartingOperators,
+} from "./roguelike-catalog";
 import { PrtsLibrary } from "./prts-library";
 import { ResourceUpdater, type ResourceProgress } from "./resource-updater";
 import { RunHistory as RunHistoryService } from "./run-history";
@@ -214,6 +233,7 @@ export interface ApplicationApi {
   readonly setActiveCore: (
     id: string,
   ) => Effect.Effect<{ settings: AppSettings; cores: ReadonlyArray<CoreInfo> }, MaaxError>;
+  readonly discoverDevices: (adbPath: string) => Effect.Effect<DeviceDiscovery>;
   readonly addDevice: (draft: DeviceDraft) => Effect.Effect<DeviceView, MaaxError>;
   readonly updateDevice: (id: string, patch: Partial<DeviceDraft>) => Effect.Effect<DeviceView, MaaxError>;
   readonly removeDevice: (id: string) => Effect.Effect<ReadonlyArray<DeviceView>>;
@@ -234,8 +254,12 @@ export interface ApplicationApi {
   readonly resolveCopilot: (input: string) => Effect.Effect<CopilotResolveResult, MaaxError>;
   readonly readCopilotDetail: (filename: string) => Effect.Effect<CopilotDetail | null>;
   readonly searchCopilot: (params: CopilotSearchParams) => Effect.Effect<CopilotSearchResult, MaaxError>;
+  readonly copilotSetSearch: (params: CopilotSetSearchParams) => Effect.Effect<CopilotSetSearchResult, MaaxError>;
+  readonly copilotSetItems: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<CopilotSearchItem>, MaaxError>;
   readonly copilotLevels: (query: string) => Effect.Effect<ReadonlyArray<CopilotLevel>, MaaxError>;
   readonly copilotOperators: (query: string) => Effect.Effect<ReadonlyArray<OperatorEntry>, MaaxError>;
+  readonly roguelikeOperators: (theme: string) => Effect.Effect<ReadonlyArray<RoguelikeOperator>>;
+  readonly operatorAvatars: (ids: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<OperatorAvatar>>;
   readonly updateCopilotOptions: (patch: Partial<CopilotOptions>) => Effect.Effect<CopilotSetup, MaaxError>;
   readonly setCopilotItems: (items: CopilotSetup["items"]) => Effect.Effect<CopilotSetup, MaaxError>;
   readonly startCopilot: (deviceId: string, itemId?: string) => Effect.Effect<RunSnapshot, MaaxError>;
@@ -342,18 +366,74 @@ export const ApplicationLive: Layer.Layer<
      * Operators come from the active core's `resource/battle_data.json`, so the
      * list always matches the installed game data and costs no request.
      */
+    /** The resource tree of the core the user activated; the source of every operator read. */
+    const activeResourceRoot = Effect.gen(function* () {
+      const currentSettings = yield* settings.get;
+      const ready = (yield* registry.list).filter((core) => core.status === "ready");
+      const active = currentSettings.activeCoreId
+        ? ready.find((core) => core.id === currentSettings.activeCoreId)
+        : ready[0];
+      return active === undefined ? undefined : join(active.root, "resource");
+    });
+
     const copilotOperators = (query: string) =>
       Effect.gen(function* () {
-        const currentSettings = yield* settings.get;
-        const ready = (yield* registry.list).filter((core) => core.status === "ready");
-        const active = currentSettings.activeCoreId
-          ? ready.find((core) => core.id === currentSettings.activeCoreId)
-          : ready[0];
-        if (!active) return yield* maaxError("没有可用的核心，无法读取干员数据");
+        const root = yield* activeResourceRoot;
+        if (root === undefined) return yield* maaxError("没有可用的核心，无法读取干员数据");
         return yield* Effect.tryPromise({
-          try: () => operatorCatalogue.search(join(active.root, "resource"), query),
+          try: () => operatorCatalogue.search(root, query),
           catch: (cause) => maaxError("无法读取干员数据", cause),
         });
+      });
+
+    /**
+     * The Roguelike starting-operator picker: the whole catalogue, marked with
+     * the theme's recommendations. The list is only a suggestion — the core
+     * accepts any Chinese name — so a missing core, file or malformed JSON must
+     * leave the field usable instead of failing the command.
+     */
+    const roguelikeOperators = (theme: string) =>
+      Effect.gen(function* () {
+        const root = yield* activeResourceRoot;
+        if (root === undefined) return [] as ReadonlyArray<RoguelikeOperator>;
+        const data = yield* Effect.tryPromise({
+          try: () => operatorCatalogue.load(root),
+          catch: (cause) => maaxError("无法读取干员数据", cause),
+        }).pipe(Effect.orElseSucceed(() => undefined));
+        if (data === undefined) return [] as ReadonlyArray<RoguelikeOperator>;
+        const recommended = yield* Effect.tryPromise({
+          try: () => readStartingOperators(root, theme),
+          catch: () => maaxError("无法读取肉鸽开局干员推荐"),
+        }).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+        return mergeRoguelikeOperators(data, recommended);
+      });
+
+    /**
+     * Downscaled avatars for the picker. `resource/template/avatar/<id>.png`
+     * ships with the resource tree but only covers part of the catalogue, and a
+     * hand-written custom name has no id at all, so the caller must render a
+     * fallback badge for anything missing from the answer.
+     */
+    const avatarCache = new Map<string, string>();
+    const operatorAvatars = (ids: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        const root = yield* activeResourceRoot;
+        if (root === undefined) return [] as ReadonlyArray<OperatorAvatar>;
+        const unique = [...new Set(ids.filter(isAvatarId))].slice(0, AVATAR_LIMIT);
+        return yield* Effect.sync(() =>
+          unique.flatMap((id) => {
+            const key = `${root}|${id}`;
+            const cached = avatarCache.get(key);
+            if (cached !== undefined) return [{ id, dataUrl: cached }];
+            const image = nativeImage.createFromPath(avatarPath(root, id));
+            if (image.isEmpty()) return [];
+            // 40 px matches the row; the source PNGs are several hundred pixels
+            // wide and would dominate the IPC payload at full size.
+            const dataUrl = image.resize({ width: 40, height: 40 }).toDataURL();
+            avatarCache.set(key, dataUrl);
+            return [{ id, dataUrl }];
+          }),
+        );
       });
 
     /**
@@ -362,14 +442,10 @@ export const ApplicationLive: Layer.Layer<
      * operators missing from the core's own battle data.
      */
     const knownCopilotOperators = Effect.gen(function* () {
-      const currentSettings = yield* settings.get;
-      const ready = (yield* registry.list).filter((core) => core.status === "ready");
-      const active = currentSettings.activeCoreId
-        ? ready.find((core) => core.id === currentSettings.activeCoreId)
-        : ready[0];
-      if (!active) return undefined;
+      const root = yield* activeResourceRoot;
+      if (root === undefined) return undefined;
       const data = yield* Effect.tryPromise({
-        try: () => operatorCatalogue.load(join(active.root, "resource")),
+        try: () => operatorCatalogue.load(root),
         catch: (cause) => maaxError("无法读取干员数据", cause),
       }).pipe(Effect.orElseSucceed(() => undefined));
       if (data === undefined) return undefined;
@@ -404,7 +480,7 @@ export const ApplicationLive: Layer.Layer<
 
     const refreshLocalState = Effect.gen(function* () {
       settingsCache = yield* settings.get;
-      setCloseToTray(settingsCache.closeToTray);
+      setWindowBehavior({ closeToTray: settingsCache.closeToTray, locale: settingsCache.locale });
       const deviceList = yield* workspace.getDevices;
       profiles = new Map(deviceList.map((device) => [device.id, device]));
       plans = [...(yield* workspace.getPlans)];
@@ -559,18 +635,26 @@ export const ApplicationLive: Layer.Layer<
       reconnectWanted.delete(deviceId);
     };
 
-    const stopHost = (key: string): void => {
+    // A host removed from `hosts` may still be exiting; repair/move waits for
+    // both the live entries and these in-flight shutdowns (Windows DLL locks).
+    const stoppingHosts = new Map<string, Promise<void>>();
+    const stopHost = (key: string): Promise<void> => {
       const host = hosts.get(key);
-      if (!host) return;
+      if (!host) return stoppingHosts.get(key) ?? Promise.resolve();
       hosts.delete(key);
       host.devices.clear();
-      void host.client.stop().catch(() => undefined);
+      const stop = host.client.stop().catch(() => undefined);
+      stoppingHosts.set(key, stop);
+      void stop.then(() => {
+        if (stoppingHosts.get(key) === stop) stoppingHosts.delete(key);
+      });
+      return stop;
     };
 
     const releaseHostIfIdle = (key: string): void => {
       const host = hosts.get(key);
       if (!host || host.devices.size > 0) return;
-      stopHost(key);
+      void stopHost(key);
       emitEngine();
     };
 
@@ -659,22 +743,32 @@ export const ApplicationLive: Layer.Layer<
       if (!meta) return;
       const configId = run.taskConfigIds.get(taskId);
       const taskIndex = configId === undefined ? -1 : meta.taskIds.indexOf(configId);
-      const succeeded = copilotSucceededItems(meta.items, meta.kind, outcome, meta.lastLoaded, taskIndex);
+      const succeeded = copilotSucceededEntries(meta.items, meta.kind, outcome, meta.lastLoaded, taskIndex);
       if (succeeded.length > 0) {
-        const ids = new Set(succeeded.map((item) => item.id));
+        // One row may carry both difficulties; each completed entry unchecks
+        // exactly its own bit, so a normal clear keeps the pending raid run.
+        const completed = new Map<string, CopilotMode[]>();
+        for (const entry of succeeded) {
+          const modes = completed.get(entry.item.id) ?? [];
+          modes.push(entry.mode);
+          completed.set(entry.item.id, modes);
+        }
         // oxlint-disable-next-line effecttsgo/run-effect-inside-effect
         void Effect.runPromise(
           copilotSetup.patchItems((items) =>
-            items.map((item) => (ids.has(item.id) ? { ...item, enabled: false } : item)),
+            items.map((item) => {
+              const modes = completed.get(item.id);
+              return modes === undefined ? item : modes.reduce(unscheduleCopilotMode, item);
+            }),
           ),
         )
           .then((setup) => {
             emitCopilot(setup);
           })
           .catch((error: unknown) => {
-            console.warn("自动屏蔽已完成作业失败", error);
+            console.warn("自动取消已完成作业的难度失败", error);
           });
-        for (const item of succeeded) rateCopilot(item.copilotId);
+        for (const entry of succeeded) rateCopilot(entry.item.copilotId);
       }
       // A normal batch has one task; sequential kinds wait for the next task
       // completion and are cleared when the queue closes.
@@ -1002,7 +1096,9 @@ export const ApplicationLive: Layer.Layer<
         setDeviceState(deviceId, { status: "connecting", lastError: undefined });
         emitDevice(deviceId);
         const core = yield* ensureActiveCore();
-        const adbPath = profile.adbPath || settingsCache?.adbPath || "adb";
+        // An empty ADB path means "auto": packaged Windows builds do not have
+        // adb on PATH, so resolve the emulator's bundled client at connect time.
+        const adbPath = yield* Effect.promise(() => resolveAdbPath(profile.adbPath || settingsCache?.adbPath || ""));
         // `adb connect` has no timeout of its own, and MaaCore cannot cancel the
         // call it starts, so prove the address is reachable before asking for it.
         const probe = yield* Effect.tryPromise({
@@ -1309,23 +1405,23 @@ export const ApplicationLive: Layer.Layer<
           if ((target.kind ?? "normal") !== "normal") {
             return yield* maaxError("单作业模式只支持普通关卡作业", "保全派驻和悖论模拟请使用各自的入口");
           }
-          // An explicit single run overrides the batch switch; it is the one
-          // way to re-run a retired assignment without re-enabling it first.
-          runSetup = { items: [{ ...target, enabled: true }], options: setup.options };
+          // An explicit single run ignores the difficulty checkboxes; it is the
+          // one way to re-run a retired assignment without checking it first.
+          runSetup = { items: [withSingleMode(target)], options: setup.options };
           manual = true;
         } else {
-          const enabledItems = setup.items.filter((item) => item.enabled !== false);
-          if (enabledItems.length === 0) {
-            return yield* maaxError("没有启用的作业", "打开作业右侧的开关后再开始");
+          const checkedItems = setup.items.filter(copilotItemActive);
+          if (checkedItems.length === 0) {
+            return yield* maaxError("没有选中的作业", "在作业列表里勾选普通或突袭难度后再开始");
           }
-          const kinds = new Set(enabledItems.map((item) => item.kind ?? "normal"));
+          const kinds = new Set(checkedItems.map((item) => item.kind ?? "normal"));
           if (kinds.size > 1) {
             return yield* maaxError(
               "同一批作业不能混合普通关卡、保全派驻和悖论模拟",
               "它们从不同的游戏界面开始，请清空列表后分别运行",
             );
           }
-          runSetup = { items: enabledItems, options: setup.options };
+          runSetup = { items: checkedItems.map(normalizeCopilotItem), options: setup.options };
         }
         // PRTS assignments are user content: MaaCore rejects the whole file
         // when one operator's elite requirement contradicts its own skill or
@@ -1397,7 +1493,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const next = yield* settings.update(patch);
         settingsCache = next;
-        setCloseToTray(next.closeToTray);
+        setWindowBehavior({ closeToTray: next.closeToTray, locale: next.locale });
         return next;
       });
 
@@ -1462,15 +1558,24 @@ export const ApplicationLive: Layer.Layer<
         if (inUse) return yield* maaxError("请先断开连接到这个核心的设备，再更新资源");
       });
 
-    const releaseCoreHosts = (coreId: string): void => {
-      let stopped = false;
-      for (const [key, host] of hosts) {
-        if (host.core.id !== coreId) continue;
-        stopHost(key);
-        stopped = true;
-      }
-      if (stopped) emitEngine();
-    };
+    /**
+     * Stop every host that holds this core and wait for the processes to exit.
+     * Windows keeps `MaaCore.dll` locked until then, so a repair/move that
+     * renames the core directory must not race the utility process shutdown.
+     */
+    const releaseCoreHosts = (coreId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const waits: Promise<void>[] = [];
+        for (const [key, promise] of stoppingHosts) {
+          if (key.startsWith(`${coreId}::`)) waits.push(promise);
+        }
+        for (const [key, host] of hosts) {
+          if (host.core.id !== coreId) continue;
+          waits.push(stopHost(key));
+        }
+        if (waits.length > 0) emitEngine();
+        yield* Effect.promise(() => Promise.all(waits));
+      });
 
     const afterResourceChange = Effect.gen(function* () {
       const cores = yield* registry.refresh;
@@ -1500,7 +1605,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const core = yield* coreForUpdate(coreId);
         yield* ensureCoreIdle(coreId);
-        releaseCoreHosts(coreId);
+        yield* releaseCoreHosts(coreId);
         const result = yield* resources
           .apply(core, emitResourceProgress)
           .pipe(Effect.tapError(failResource("资源更新失败")));
@@ -1519,7 +1624,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const core = yield* coreForUpdate(coreId);
         yield* ensureCoreIdle(coreId);
-        releaseCoreHosts(coreId);
+        yield* releaseCoreHosts(coreId);
         const result = yield* resources
           .rollback(core, backupId, emitResourceProgress)
           .pipe(Effect.tapError(failResource("资源回滚失败")));
@@ -1634,6 +1739,9 @@ export const ApplicationLive: Layer.Layer<
         bus.emit({ _tag: "cores-updated", cores });
         return { settings: next, cores };
       });
+
+    const discoverDevices = (adbPath: string): Effect.Effect<DeviceDiscovery> =>
+      Effect.promise(() => discoverAdbDevices({ adbPath }));
 
     const addDevice = (draft: DeviceDraft) =>
       Effect.gen(function* () {
@@ -1925,7 +2033,7 @@ export const ApplicationLive: Layer.Layer<
         const core = yield* registry.get(id);
         if (!core) return yield* maaxError("核心不存在");
         yield* ensureCoreIdle(id);
-        releaseCoreHosts(id);
+        yield* releaseCoreHosts(id);
         const repaired = yield* installer.repair(core).pipe(Effect.tapError(failCoreAction("核心修复失败")));
         const cores = yield* registry.list;
         bus.emit({ _tag: "cores-updated", cores });
@@ -1941,7 +2049,7 @@ export const ApplicationLive: Layer.Layer<
           return yield* maaxError("只能移动由 MaaX 下载安装的核心", "导入的核心请重新选择目录");
         }
         yield* ensureCoreIdle(id);
-        releaseCoreHosts(id);
+        yield* releaseCoreHosts(id);
 
         const window = BrowserWindow.getFocusedWindow();
         const options = {
@@ -2222,6 +2330,11 @@ export const ApplicationLive: Layer.Layer<
         yield* Effect.tryPromise({ try: () => host.client.stop(), catch: () => undefined }).pipe(Effect.ignore);
       }
       hosts.clear();
+      yield* Effect.promise(() => Promise.all(stoppingHosts.values()));
+      // MaaCore starts the ADB daemon and leaves it running: it outlives the app
+      // and keeps holding its port (and the fds it inherited). Stop the one this
+      // app started now that no host is using it.
+      yield* Effect.promise(() => releaseAdbServer());
     });
 
     const api: ApplicationApi = {
@@ -2237,6 +2350,7 @@ export const ApplicationLive: Layer.Layer<
       repairCore,
       moveCore,
       setActiveCore,
+      discoverDevices,
       addDevice,
       updateDevice,
       removeDevice,
@@ -2257,8 +2371,12 @@ export const ApplicationLive: Layer.Layer<
       resolveCopilot: prts.resolve,
       readCopilotDetail: prts.detail,
       searchCopilot: prts.search,
+      copilotSetSearch: prts.setSearch,
+      copilotSetItems: prts.setItems,
       copilotLevels: prts.levels,
       copilotOperators,
+      roguelikeOperators,
+      operatorAvatars,
       updateCopilotOptions: (patch) =>
         copilotSetup.updateOptions(patch).pipe(Effect.tap((setup) => Effect.sync(() => emitCopilot(setup)))),
       setCopilotItems: (items) =>

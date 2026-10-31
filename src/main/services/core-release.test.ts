@@ -17,10 +17,11 @@ const release: CoreRelease = {
 };
 
 describe("core release metadata", () => {
-  it("maps only the platforms this build can host", () => {
+  it("maps the platforms this build can host", () => {
     expect(platformSuffixFor("linux", "x64")).toBe("linux-x86_64");
     expect(platformSuffixFor("linux", "arm64")).toBe("linux-aarch64");
-    expect(platformSuffixFor("win32", "x64")).toBeUndefined();
+    expect(platformSuffixFor("win32", "x64")).toBe("win-x64");
+    expect(platformSuffixFor("win32", "arm64")).toBe("win-arm64");
     expect(platformSuffixFor("darwin", "arm64")).toBeUndefined();
   });
 
@@ -31,7 +32,12 @@ describe("core release metadata", () => {
       url: "https://example/linux",
     });
     expect(pickCoreAsset(release, "linux-aarch64")?.name).toBe("MAA-v6.21.0-linux-aarch64.tar.gz");
-    expect(pickCoreAsset(release, "win-x64")).toBeUndefined();
+    expect(pickCoreAsset(release, "win-x64")).toEqual({
+      name: "MAA-v6.21.0-win-x64.zip",
+      size: 284,
+      url: "https://example/win",
+    });
+    expect(pickCoreAsset(release, "win-arm64")).toBeUndefined();
   });
 
   it("orders versions and treats an unparseable installed version as outdated", () => {

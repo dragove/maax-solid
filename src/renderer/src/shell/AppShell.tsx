@@ -1,4 +1,15 @@
-import { For, Show, createEffect, createMemo, createSignal, flush, onSettled, untrack, type Component } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  flush,
+  onCleanup,
+  onSettled,
+  untrack,
+  type Component,
+} from "solid-js";
 import type {
   AppSettingsPatch,
   Bootstrap,
@@ -17,11 +28,19 @@ import type {
   ToolKind,
 } from "../../../shared/schemas";
 import { COMMANDS, type CommandName, type CommandPayloads, type CommandResults } from "../../../shared/ipc";
-import { isCopilotItem, selectCopilotMode, type CopilotMode } from "../../../shared/copilot-mode";
+import {
+  copilotItemModes,
+  mergeCopilotItems,
+  normalizeCopilotItem,
+  readCopilotBatch,
+  selectCopilotMode,
+  type CopilotMode,
+} from "../../../shared/copilot-mode";
 import { formatResourceStamp } from "../../../shared/resource-version";
-import { TASK_DEFINITIONS, createTask } from "../../../shared/tasks";
+import { TASK_DEFINITIONS, createTask, withTaskParam } from "../../../shared/tasks";
 import { AddDeviceDialog } from "../components/AddDeviceDialog";
 import { CopilotBrowser } from "../components/CopilotBrowser";
+import { WindowControls } from "../components/WindowControls";
 import { Icon } from "../components/ui/Icon";
 import { ProgressBar } from "../components/ui/ProgressBar";
 import { notify } from "../components/ui/Toaster";
@@ -173,10 +192,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
     const id = browserTaskId();
     return id === null ? undefined : selectedPlan()?.tasks.find((task) => task.id === id);
   });
-  const browserCopilotItems = createMemo<ReadonlyArray<CopilotItem>>(() => {
-    const raw = browserTask()?.params.copilot_list;
-    return Array.isArray(raw) ? raw.filter(isCopilotItem) : [];
-  });
+  const browserCopilotItems = createMemo<ReadonlyArray<CopilotItem>>(() =>
+    readCopilotBatch(browserTask()?.params.copilot_list),
+  );
 
   // A run owns the active core until it ends; only then may the core change.
   // The device status covers a window reload, where no run snapshot survives.
@@ -195,6 +213,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
   // A theme swap cross-fades instead of snapping, so light/dark does not flash.
   // The first application is the boot palette and lands instantly.
   let themeApplied = false;
+  let themeTransition: ViewTransition | undefined;
   createEffect(
     () => resolvedTheme(),
     (theme) => {
@@ -202,14 +221,31 @@ export const AppShell: Component<AppShellProps> = (props) => {
       const booting = !themeApplied;
       themeApplied = true;
       if (root.dataset.theme === theme) return;
-      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (booting || reduced || typeof document.startViewTransition !== "function") {
+      if (booting || prefersReducedMotion() || typeof document.startViewTransition !== "function") {
         root.dataset.theme = theme;
         return;
       }
-      document.startViewTransition(() => {
+      root.dataset.themeTransition = "true";
+      try {
+        const transition = document.startViewTransition(() => {
+          root.dataset.theme = theme;
+        });
+        themeTransition = transition;
+        transition.finished
+          .catch(() => {})
+          .finally(() => {
+            // A second flip can start while this one runs and skips it; only the
+            // transition that still owns the flag may clear it, or the new flip
+            // would capture a root with no view-transition-name and snap.
+            if (themeTransition !== transition) return;
+            themeTransition = undefined;
+            delete root.dataset.themeTransition;
+          });
+      } catch {
+        themeTransition = undefined;
+        delete root.dataset.themeTransition;
         root.dataset.theme = theme;
-      });
+      }
     },
   );
   createEffect(
@@ -225,23 +261,56 @@ export const AppShell: Component<AppShellProps> = (props) => {
     },
   );
 
+  let activeTransition: ViewTransition | undefined;
+
   /**
    * Page switches cross-fade through a View Transition instead of swapping the
    * <Show> branch in one frame. The transition is scoped to the content area
    * (`::view-transition-*(content)`), so the sidebar and topbar stay put.
    * `flush` applies the signal write inside the capture callback; without it
    * the new snapshot would be taken before the page has rendered.
+   *
+   * An in-flight transition can be aborted immediately via `skipTransition()`
+   * so rapid page clicks interrupt the previous animation without lag.
    */
   const navigate = (next: View): void => {
     if (next === view()) return;
+    if (activeTransition) {
+      try {
+        activeTransition.skipTransition();
+      } catch {
+        // Ignored
+      }
+      activeTransition = undefined;
+    }
     if (prefersReducedMotion() || typeof document.startViewTransition !== "function") {
       setView(next);
       return;
     }
-    document.startViewTransition(() => {
-      flush(() => setView(next));
-    });
+    try {
+      const transition = document.startViewTransition(() => {
+        flush(() => setView(next));
+      });
+      activeTransition = transition;
+      transition.finished
+        .catch(() => {})
+        .finally(() => {
+          if (activeTransition === transition) {
+            activeTransition = undefined;
+          }
+        });
+    } catch {
+      setView(next);
+    }
   };
+
+  onCleanup(() => {
+    try {
+      activeTransition?.skipTransition();
+    } catch {
+      // Ignored
+    }
+  });
 
   const flushLogs = (): void => {
     logTimer = undefined;
@@ -511,6 +580,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setCoreBusy(false);
     }
   };
+
+  const discoverDevices = (adbPath: string) => send(COMMANDS.discoverDevices, { adbPath }, { busy: false });
 
   const addDevice = async (draft: DeviceDraft): Promise<void> => {
     const device = await send(COMMANDS.addDevice, draft);
@@ -852,7 +923,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     updatePlan((plan) => ({
       ...plan,
       tasks: plan.tasks.map((task) =>
-        task.id === taskId ? { ...task, params: { ...task.params, [key]: value } } : task,
+        task.id === taskId ? { ...task, params: withTaskParam(task.type, task.params, key, value) } : task,
       ),
     }));
   };
@@ -949,9 +1020,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
     const plan = selectedPlan();
     const task = plan?.tasks.find((item) => item.id === taskId);
     if (!task) return false;
-    const existing = Array.isArray(task.params.copilot_list) ? task.params.copilot_list : [];
+    const existing = readCopilotBatch(task.params.copilot_list);
     const incoming = mode === undefined ? result.items : selectCopilotMode(result.items, mode);
-    updateTaskParam(taskId, "copilot_list", [...existing, ...incoming]);
+    updateTaskParam(taskId, "copilot_list", mergeCopilotItems(existing, incoming));
     notify({
       kind: "success",
       title: tr(result.kind === "set" ? "copilot.setAdded" : "copilot.added"),
@@ -980,14 +1051,15 @@ export const AppShell: Component<AppShellProps> = (props) => {
     const result = await send(COMMANDS.resolveCopilot, { input }, { busy: false });
     if (!result) return false;
     const incoming = mode === undefined ? result.items : selectCopilotMode(result.items, mode);
-    const kinds = new Set([...data().copilot.items, ...incoming].map((item) => item.kind ?? "normal"));
+    const merged = mergeCopilotItems(data().copilot.items, incoming);
+    const kinds = new Set(merged.map((item) => item.kind ?? "normal"));
     if (kinds.size > 1) {
       // Mixing kinds would silently send SSS/Paradox files through the normal
       // task, and their entry screens differ. Refuse at add time.
       fail(new Error(tr("copilot.mixedKinds")));
       return false;
     }
-    await setCopilotItems([...data().copilot.items, ...incoming]);
+    await setCopilotItems(merged);
     notify({
       kind: "success",
       title: tr(result.kind === "set" ? "copilot.setAdded" : "copilot.added"),
@@ -996,8 +1068,39 @@ export const AppShell: Component<AppShellProps> = (props) => {
     return true;
   };
 
-  const addBrowsedCopilotGlobal = async (id: number, mode: CopilotMode): Promise<boolean> =>
-    resolveCopilotGlobal(String(id), mode);
+  /** Check one difficulty of a batch row; unchecking the last one drops the row. */
+  const withCopilotMode = (
+    items: ReadonlyArray<CopilotItem>,
+    id: number,
+    mode: CopilotMode,
+    checked: boolean,
+  ): ReadonlyArray<CopilotItem> => {
+    const row = items.find((entry) => entry.copilotId === id && (entry.kind ?? "normal") === "normal");
+    if (row === undefined) return items;
+    const normalized = normalizeCopilotItem(row);
+    const before = copilotItemModes(normalized);
+    const modes = mode === "normal" ? { ...before, normal: checked } : { ...before, raid: checked };
+    if (!modes.normal && !modes.raid) return items.filter((entry) => entry.id !== row.id);
+    return items.map((entry) => (entry.id === row.id ? { ...normalized, modes } : entry));
+  };
+
+  const toggleBrowsedCopilotMode = async (id: number, mode: CopilotMode, enabled: boolean): Promise<boolean> => {
+    const items = data().copilot.items;
+    const row = items.find((entry) => entry.copilotId === id && (entry.kind ?? "normal") === "normal");
+    if (!enabled) {
+      if (row !== undefined) await setCopilotItems(withCopilotMode(items, id, mode, false));
+      return true;
+    }
+    if (row !== undefined) {
+      if (copilotItemModes(row)[mode]) return true;
+      await setCopilotItems(withCopilotMode(items, id, mode, true));
+      return true;
+    }
+    return await resolveCopilotGlobal(String(id), mode);
+  };
+
+  const addBrowsedCopilotSetGlobal = async (setId: number): Promise<boolean> =>
+    resolveCopilotGlobal(`prts://s/${setId}`);
 
   const removeCopilotItem = (item: CopilotItem): void => {
     void setCopilotItems(data().copilot.items.filter((entry) => entry.id !== item.id));
@@ -1031,10 +1134,29 @@ export const AppShell: Component<AppShellProps> = (props) => {
     }
   };
 
-  const addBrowsedCopilot = async (id: number, mode: CopilotMode): Promise<boolean> => {
+  const toggleBrowsedCopilotModeFor = async (id: number, mode: CopilotMode, enabled: boolean): Promise<boolean> => {
     const taskId = browserTaskId();
     if (taskId === null) return false;
+    const task = selectedPlan()?.tasks.find((entry) => entry.id === taskId);
+    if (!task) return false;
+    const items = readCopilotBatch(task.params.copilot_list);
+    const row = items.find((entry) => entry.copilotId === id && (entry.kind ?? "normal") === "normal");
+    if (!enabled) {
+      if (row !== undefined) updateTaskParam(taskId, "copilot_list", withCopilotMode(items, id, mode, false));
+      return true;
+    }
+    if (row !== undefined) {
+      if (copilotItemModes(row)[mode]) return true;
+      updateTaskParam(taskId, "copilot_list", withCopilotMode(items, id, mode, true));
+      return true;
+    }
     return await resolveCopilotFor(taskId, String(id), mode);
+  };
+
+  const addBrowsedCopilotSet = async (setId: number): Promise<boolean> => {
+    const taskId = browserTaskId();
+    if (taskId === null) return false;
+    return await resolveCopilotFor(taskId, `prts://s/${setId}`);
   };
 
   const pickTaskFile = async (taskId: string, key: string): Promise<void> => {
@@ -1059,7 +1181,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
     // silently replacing the legacy single-file parameter.
     updateTaskParam(taskId, "copilot_list", [
       ...batch,
-      { id: crypto.randomUUID(), copilotId: 0, filename: file.filename, stage: "", title: file.name, isRaid: false },
+      {
+        id: crypto.randomUUID(),
+        copilotId: 0,
+        filename: file.filename,
+        stage: "",
+        title: file.name,
+        modes: { normal: true, raid: false },
+      },
     ]);
   };
 
@@ -1169,6 +1298,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
             <button type="button" class="icon-button" onClick={() => void toggleTheme()} title={tr("settings.theme")}>
               <Icon name={resolvedTheme() === "dark" ? "sun" : "moon"} />
             </button>
+            <Show when={window.maax.windowFrame.enabled}>
+              <WindowControls locale={locale} />
+            </Show>
           </div>
         </header>
 
@@ -1336,7 +1468,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
         locale={locale()}
         added={browserCopilotItems()}
         onClose={() => setBrowserTaskId(null)}
-        onAdd={addBrowsedCopilot}
+        onToggleMode={toggleBrowsedCopilotModeFor}
+        onAddSet={addBrowsedCopilotSet}
         onRemoveItem={removeBrowsedCopilot}
       />
 
@@ -1345,7 +1478,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
         locale={locale()}
         added={data().copilot.items}
         onClose={() => setCopilotBrowseOpen(false)}
-        onAdd={addBrowsedCopilotGlobal}
+        onToggleMode={toggleBrowsedCopilotMode}
+        onAddSet={addBrowsedCopilotSetGlobal}
         onRemoveItem={removeCopilotItem}
       />
 
@@ -1354,6 +1488,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         locale={locale()}
         settings={data().settings}
         onClose={() => setAddDeviceOpen(false)}
+        onDiscover={discoverDevices}
         onSubmit={(draft) => void addDevice(draft)}
       />
     </div>

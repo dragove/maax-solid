@@ -7,14 +7,21 @@ import type {
   TaskConfig,
   TaskType,
 } from "../../../shared/schemas";
-import { copilotEntryMode, copilotModeLabelKey, isCopilotItem } from "../../../shared/copilot-mode";
+import {
+  copilotItemActive,
+  copilotItemModes,
+  copilotModeLabelKey,
+  readCopilotBatch,
+} from "../../../shared/copilot-mode";
 import type { FieldOption, TaskField } from "../../../shared/tasks";
-import { TASK_DEFINITIONS } from "../../../shared/tasks";
+import { TASK_DEFINITIONS, fieldOptions } from "../../../shared/tasks";
 import { pick, t } from "../i18n/i18n";
 import { CopilotDetailBody, createCopilotDetails } from "./CopilotDetail";
+import { StartingOperPicker } from "./OperPicker";
 import { StagePicker } from "./StagePicker";
 import { Button } from "./ui/Button";
 import { Collapse } from "./ui/Collapse";
+import { Chevron } from "./ui/Chevron";
 import { Icon } from "./ui/Icon";
 import { Switch } from "./ui/Switch";
 
@@ -37,9 +44,15 @@ interface TaskCardProps {
   readonly onDrop: (event: DragEvent) => void;
 }
 
-const fieldOptionLabel = (type: TaskType, key: string, value: unknown, locale: Locale): string => {
+const fieldOptionLabel = (
+  type: TaskType,
+  key: string,
+  value: unknown,
+  params: Record<string, unknown>,
+  locale: Locale,
+): string => {
   const field = TASK_DEFINITIONS[type].fields.find((item) => item.key === key);
-  const option = field?.options?.find((item) => String(item.value) === String(value));
+  const option = field ? fieldOptions(field, params).find((item) => String(item.value) === String(value)) : undefined;
   return option ? pick(locale, option.label) : "";
 };
 
@@ -71,13 +84,13 @@ const summaryFor = (task: TaskConfig, locale: Locale): string => {
     case "Award":
       return locale === "en-US" ? "Daily collection" : "日常领取";
     case "Roguelike": {
-      const theme = fieldOptionLabel("Roguelike", "theme", params.theme, locale);
-      const mode = fieldOptionLabel("Roguelike", "mode", params.mode, locale);
+      const theme = fieldOptionLabel("Roguelike", "theme", params.theme, params, locale);
+      const mode = fieldOptionLabel("Roguelike", "mode", params.mode, params, locale);
       return [theme, mode].filter((part) => part !== "").join(" · ") || "—";
     }
     case "Reclamation": {
-      const theme = fieldOptionLabel("Reclamation", "theme", params.theme, locale);
-      const mode = fieldOptionLabel("Reclamation", "mode", params.mode, locale);
+      const theme = fieldOptionLabel("Reclamation", "theme", params.theme, params, locale);
+      const mode = fieldOptionLabel("Reclamation", "mode", params.mode, params, locale);
       return [theme, mode].filter((part) => part !== "").join(" · ") || "—";
     }
     case "StartUp":
@@ -116,7 +129,7 @@ const summaryFor = (task: TaskConfig, locale: Locale): string => {
       return names || "—";
     }
     case "SingleStep": {
-      const step = fieldOptionLabel("SingleStep", "subtask", params.subtask, locale);
+      const step = fieldOptionLabel("SingleStep", "subtask", params.subtask, params, locale);
       const detail = params.subtask === "stage" ? params.stage : params.name;
       return typeof detail === "string" && detail.trim() !== "" ? `${step} · ${detail}` : step || "—";
     }
@@ -141,6 +154,7 @@ const fileNameOf = (value: unknown): string => {
 
 const FieldControl: Component<{
   field: TaskField;
+  params: Record<string, unknown>;
   locale: Locale;
   stages: ReadonlyArray<StageCatalogEntry>;
   value: unknown;
@@ -204,7 +218,7 @@ const FieldControl: Component<{
         </label>
       );
     case "select": {
-      const options = () => props.field.options ?? [];
+      const options = () => fieldOptions(props.field, props.params);
       const current = () =>
         typeof props.value === "string" || typeof props.value === "number" ? props.value : (options()[0]?.value ?? "");
       return (
@@ -232,7 +246,7 @@ const FieldControl: Component<{
     case "multi-select": {
       const selected = (): Array<string | number> =>
         Array.isArray(props.value) ? (props.value as Array<string | number>) : [];
-      const options = () => props.field.options ?? [];
+      const options = () => fieldOptions(props.field, props.params);
       return (
         <div class="field field--wide" title={description()}>
           <span class="field-label">{label()}</span>
@@ -261,6 +275,16 @@ const FieldControl: Component<{
         </div>
       );
     }
+    case "opers":
+      return (
+        <StartingOperPicker
+          field={props.field}
+          params={props.params}
+          locale={props.locale}
+          value={props.value}
+          onChange={props.onChange}
+        />
+      );
     case "file": {
       const name = () => fileNameOf(props.value);
       return (
@@ -322,6 +346,10 @@ const CopilotBatch: Component<{
   // The card is mounted while it is expanded; each entry reads its downloaded
   // JSON once so the same detail panel as the browser is available here too.
   const details = createCopilotDetails(() => props.items);
+  const modesOf = (item: CopilotItem): ReadonlyArray<"normal" | "raid"> => {
+    const modes = copilotItemModes(item);
+    return [...(modes.normal ? (["normal"] as const) : []), ...(modes.raid ? (["raid"] as const) : [])];
+  };
 
   const submit = async (): Promise<void> => {
     const value = input().trim();
@@ -376,9 +404,25 @@ const CopilotBatch: Component<{
             {(item) => (
               <li class="copilot-item">
                 <div class="copilot-item-row">
-                  <span class={["copilot-mode", { "copilot-mode--raid": copilotEntryMode(item()) === "raid" }]}>
-                    {t(props.locale, copilotModeLabelKey(copilotEntryMode(item()) === "raid", item().stage))}
-                  </span>
+                  <Show
+                    when={(item().kind ?? "normal") === "normal"}
+                    fallback={
+                      <span class={["copilot-kind", `copilot-kind--${item().kind}`]}>
+                        {t(props.locale, item().kind === "sss" ? "copilot.kind.sss" : "copilot.kind.paradox")}
+                      </span>
+                    }
+                  >
+                    <For each={modesOf(item())}>
+                      {(mode) => (
+                        <span class={["copilot-mode", { "copilot-mode--raid": mode === "raid" }]}>
+                          {t(props.locale, copilotModeLabelKey(mode === "raid", item().stage))}
+                        </span>
+                      )}
+                    </For>
+                    <Show when={!copilotItemActive(item())}>
+                      <span class="copilot-mode copilot-mode--skip">{t(props.locale, "copilotPage.skipped")}</span>
+                    </Show>
+                  </Show>
                   <span class="copilot-title">{item().title || item().stage}</span>
                   <span class="copilot-stage">{item().stage}</span>
                   <Show when={details.hasDetail(item().id)}>
@@ -429,10 +473,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
   const applies = (field: TaskField): boolean => field.visibleWhen?.(props.task.params) ?? true;
   const basicFields = () => definition().fields.filter((field) => !field.advanced && applies(field));
   const advancedFields = () => definition().fields.filter((field) => field.advanced && applies(field));
-  const copilotItems = (): ReadonlyArray<CopilotItem> => {
-    const raw = props.task.params.copilot_list;
-    return Array.isArray(raw) ? raw.filter(isCopilotItem) : [];
-  };
+  const copilotItems = (): ReadonlyArray<CopilotItem> => readCopilotBatch(props.task.params.copilot_list);
   const removeCopilotItem = (id: string): void => {
     props.onParamChange(
       "copilot_list",
@@ -497,7 +538,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
             aria-label={props.expanded ? "collapse" : "expand"}
             onClick={props.onToggleExpanded}
           >
-            <Icon name={props.expanded ? "chevron-down" : "chevron-right"} />
+            <Chevron open={props.expanded} />
           </button>
         </span>
       </header>
@@ -520,6 +561,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
                 {(field) => (
                   <FieldControl
                     field={field}
+                    params={props.task.params}
                     locale={props.locale}
                     stages={props.stages}
                     value={props.task.params[field.key]}
@@ -531,7 +573,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
             </div>
             <Show when={advancedFields().length > 0}>
               <button type="button" class="advanced-toggle" onClick={() => setShowAdvanced((value) => !value)}>
-                <Icon name={showAdvanced() ? "chevron-down" : "chevron-right"} />
+                <Chevron open={showAdvanced()} />
                 {t(props.locale, "tasks.advanced")}
               </button>
               <Collapse open={showAdvanced()}>
@@ -541,6 +583,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
                       {(field) => (
                         <FieldControl
                           field={field}
+                          params={props.task.params}
                           locale={props.locale}
                           stages={props.stages}
                           value={props.task.params[field.key]}

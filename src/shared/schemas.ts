@@ -91,7 +91,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   connectionConfig: "General",
   confirmBeforeDownload: true,
   notifyOnComplete: true,
-  closeToTray: false,
+  closeToTray: true,
   developerMode: false,
 };
 
@@ -172,12 +172,23 @@ export type CopilotFile = Schema.Schema.Type<typeof CopilotFileSchema>;
 export const CopilotKindSchema = Schema.Literals(["normal", "sss", "paradox"]);
 export type CopilotKind = Schema.Schema.Type<typeof CopilotKindSchema>;
 
+/** Which difficulties one batch row will attempt; both may be checked. */
+export const CopilotModeSelectionSchema = Schema.Struct({
+  normal: Schema.Boolean,
+  raid: Schema.Boolean,
+});
+export type CopilotModeSelection = Schema.Schema.Type<typeof CopilotModeSelectionSchema>;
+
 /**
- * One entry of a copilot batch. Normal and raid runs of the same assignment are
- * two entries sharing a file but differing in `isRaid`.
+ * One entry of a copilot batch, one row per downloaded file.
+ *
+ * A normal assignment carries the difficulties it should run in; both unchecked
+ * means the row is skipped. `isRaid` and `enabled` only exist so batches saved
+ * before the two checkboxes still decode — the helpers in `copilot-mode` fold
+ * them into `modes` and normalise the row on the way in.
  *
  * `kind` is optional so a batch saved before type detection still decodes as
- * a normal assignment.
+ * a normal assignment. SSS and paradox rows keep the plain `enabled` switch.
  */
 export const CopilotItemSchema = Schema.Struct({
   id: Schema.NonEmptyString,
@@ -185,9 +196,11 @@ export const CopilotItemSchema = Schema.Struct({
   filename: Schema.NonEmptyString,
   stage: Schema.String,
   title: Schema.String,
-  isRaid: Schema.Boolean,
+  modes: Schema.optional(CopilotModeSelectionSchema),
+  /** Retired single-mode flag, folded into `modes`. */
+  isRaid: Schema.optional(Schema.Boolean),
   kind: Schema.optional(CopilotKindSchema),
-  /** Batch switch in the Copilot tab; missing means enabled. */
+  /** SSS/paradox switch; a retired normal row uses it only for migration. */
   enabled: Schema.optional(Schema.Boolean),
 });
 export type CopilotItem = Schema.Schema.Type<typeof CopilotItemSchema>;
@@ -251,6 +264,26 @@ export const CopilotSearchResultSchema = Schema.Struct({
 });
 export type CopilotSearchResult = Schema.Schema.Type<typeof CopilotSearchResultSchema>;
 
+/** One PRTS copilot set; the ids are ordered and each is fetched separately. */
+export const CopilotSetSchema = Schema.Struct({
+  id: Schema.Finite,
+  name: Schema.String,
+  description: Schema.String,
+  creator: Schema.String,
+  creatorId: Schema.String,
+  copilotIds: Schema.Array(Schema.Finite),
+  createTime: Schema.String,
+  updateTime: Schema.String,
+});
+export type CopilotSet = Schema.Schema.Type<typeof CopilotSetSchema>;
+
+export const CopilotSetSearchResultSchema = Schema.Struct({
+  total: Schema.Int,
+  hasNext: Schema.Boolean,
+  items: Schema.Array(CopilotSetSchema),
+});
+export type CopilotSetSearchResult = Schema.Schema.Type<typeof CopilotSetSearchResultSchema>;
+
 export const OperatorEntrySchema = Schema.Struct({
   id: Schema.String,
   /** Chinese name; this is what the PRTS `operator` filter expects. */
@@ -260,6 +293,27 @@ export const OperatorEntrySchema = Schema.Struct({
   profession: Schema.String,
 });
 export type OperatorEntry = Schema.Schema.Type<typeof OperatorEntrySchema>;
+
+/**
+ * One operator offered by the Roguelike starting-operator picker: the catalogue
+ * entry plus whether MAA recommends it for the current theme's opening.
+ */
+export const RoguelikeOperatorSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  nameEn: Schema.String,
+  rarity: Schema.Int,
+  profession: Schema.String,
+  recommended: Schema.Boolean,
+});
+export type RoguelikeOperator = Schema.Schema.Type<typeof RoguelikeOperatorSchema>;
+
+/** A downscaled avatar from the active core's `resource/template/avatar`. */
+export const OperatorAvatarSchema = Schema.Struct({
+  id: Schema.String,
+  dataUrl: Schema.String,
+});
+export type OperatorAvatar = Schema.Schema.Type<typeof OperatorAvatarSchema>;
 
 export const CopilotLevelSchema = Schema.Struct({
   stageId: Schema.NonEmptyString,
@@ -384,6 +438,30 @@ export const DeviceViewSchema = Schema.Struct({
   lastError: Schema.optional(Schema.String),
 });
 export type DeviceView = Schema.Schema.Type<typeof DeviceViewSchema>;
+
+/**
+ * Emulator family detected from the ADB serial. It only drives the suggested
+ * MaaCore connection config; any ADB endpoint can still be added manually.
+ */
+export const EmulatorKindSchema = Schema.Literals(["mumu", "nox", "generic"]);
+export type EmulatorKind = Schema.Schema.Type<typeof EmulatorKindSchema>;
+
+export const DiscoveredDeviceSchema = Schema.Struct({
+  serial: Schema.NonEmptyString,
+  state: Schema.String,
+  model: Schema.optional(Schema.String),
+  name: Schema.String,
+  emulator: EmulatorKindSchema,
+  config: Schema.String,
+});
+export type DiscoveredDevice = Schema.Schema.Type<typeof DiscoveredDeviceSchema>;
+
+export const DeviceDiscoverySchema = Schema.Struct({
+  adbPath: Schema.String,
+  devices: Schema.Array(DiscoveredDeviceSchema),
+  warning: Schema.optional(Schema.String),
+});
+export type DeviceDiscovery = Schema.Schema.Type<typeof DeviceDiscoverySchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Task plans                                                                 */

@@ -7,8 +7,12 @@ import {
   createCopilotRunTasks,
   createCopilotTask,
   createTask,
+  fieldOptions,
   firstMissingField,
   getTaskDefaults,
+  roguelikeDifficultyOptions,
+  roguelikeModeOptions,
+  withTaskParam,
 } from "./tasks";
 
 const settings: AppSettings = {
@@ -69,6 +73,23 @@ describe("required task fields", () => {
       },
     };
     expect(firstMissingField(batched)).toBeUndefined();
+    const skipped = {
+      ...task,
+      params: {
+        ...task.params,
+        copilot_list: [
+          {
+            id: "a",
+            copilotId: 7,
+            filename: "/tmp/prts-7.json",
+            stage: "1-7",
+            title: "t",
+            modes: { normal: false, raid: false },
+          },
+        ],
+      },
+    };
+    expect(firstMissingField(skipped)?.zh).toBe("本地作业文件");
   });
 
   it("flags a custom task without task names", () => {
@@ -97,8 +118,14 @@ describe("task catalogue", () => {
     expect(TASK_PALETTE_ORDER).not.toContain("Copilot");
     const task = createCopilotTask({
       items: [
-        { id: "a", copilotId: 7, filename: "/tmp/prts-7.json", stage: "1-7", title: "t", isRaid: false },
-        { id: "b", copilotId: 7, filename: "/tmp/prts-7.json", stage: "1-7", title: "t", isRaid: true },
+        {
+          id: "a",
+          copilotId: 7,
+          filename: "/tmp/prts-7.json",
+          stage: "1-7",
+          title: "t",
+          modes: { normal: true, raid: true },
+        },
       ],
       options: { ...DEFAULT_COPILOT_OPTIONS, loopTimes: 3, formationIndex: 2, useSanityPotion: true },
     });
@@ -144,14 +171,14 @@ describe("task catalogue", () => {
     expect(params).not.toHaveProperty("is_raid");
   });
 
-  it("keeps multi mode when a manual start somehow has several entries", () => {
+  it("sends one file even when a manual start carries several rows", () => {
     const item = (id: string): CopilotItem => ({
       id,
       copilotId: 1,
       filename: `/tmp/${id}.json`,
       stage: "main_17-07",
       title: id,
-      isRaid: false,
+      modes: { normal: true, raid: false },
       kind: "normal",
     });
     const task = createCopilotTask(
@@ -163,7 +190,8 @@ describe("task catalogue", () => {
       true,
     );
     const params = buildMaaTaskParams(task, settings);
-    expect(params.copilot_list).toHaveLength(2);
+    expect(params).toMatchObject({ filename: "/tmp/a.json" });
+    expect(params).not.toHaveProperty("copilot_list");
     expect(params).not.toHaveProperty("manual_start");
   });
 
@@ -182,7 +210,7 @@ describe("copilot task dispatch", () => {
     filename,
     stage: "1-7",
     title: "t",
-    isRaid: false,
+    modes: { normal: true, raid: false },
     kind,
   });
   const setup = (items: ReadonlyArray<CopilotItem>, loopTimes = 1) => ({
@@ -210,19 +238,34 @@ describe("copilot task dispatch", () => {
     expect(tasks[0]).toMatchObject({ type: "ParadoxCopilot", params: { filename: "/tmp/a.json" } });
   });
 
-  it("runs only switched-on assignments", () => {
-    const disabled: CopilotItem = { ...item("normal", "/tmp/a.json", "a"), enabled: false };
-    const enabled: CopilotItem = { ...item("normal", "/tmp/b.json", "b"), enabled: true };
-    const tasks = createCopilotRunTasks(setup([disabled, enabled]));
+  it("runs only rows with a checked difficulty", () => {
+    const skipped: CopilotItem = { ...item("normal", "/tmp/a.json", "a"), modes: { normal: false, raid: false } };
+    const checked: CopilotItem = { ...item("normal", "/tmp/b.json", "b"), modes: { normal: true, raid: false } };
+    const tasks = createCopilotRunTasks(setup([skipped, checked]));
     expect(tasks).toHaveLength(1);
     expect(tasks[0]!.params.copilot_list as ReadonlyArray<{ id: string }>).toEqual([
       expect.objectContaining({ id: "b" }),
     ]);
 
-    const task = createCopilotTask(setup([disabled, enabled]));
+    const task = createCopilotTask(setup([skipped, checked]));
     expect(buildMaaTaskParams(task, settings).copilot_list).toEqual([
       { id: 0, filename: "/tmp/b.json", is_raid: false },
     ]);
+  });
+
+  it("runs both difficulties of one row in order", () => {
+    const both: CopilotItem = { ...item("normal", "/tmp/a.json"), modes: { normal: true, raid: true } };
+    const task = createCopilotTask(setup([both]));
+    expect(buildMaaTaskParams(task, settings).copilot_list).toEqual([
+      { id: 0, filename: "/tmp/a.json", is_raid: false },
+      { id: 1, filename: "/tmp/a.json", is_raid: true },
+    ]);
+  });
+
+  it("still honours the retired switch of a saved batch", () => {
+    const disabled: CopilotItem = { ...item("normal", "/tmp/a.json", "a"), modes: undefined, enabled: false };
+    const enabled: CopilotItem = { ...item("normal", "/tmp/b.json", "b"), modes: undefined, enabled: true };
+    expect(createCopilotRunTasks(setup([disabled, enabled]))[0]!.params.copilot_list).toHaveLength(1);
   });
 
   it("drops switched-off files from a sequential batch too", () => {
@@ -233,9 +276,9 @@ describe("copilot task dispatch", () => {
     expect(tasks[0]!.params.filename).toBe("/tmp/b.json");
   });
 
-  it("returns nothing when every assignment is switched off", () => {
-    const disabled: CopilotItem = { ...item("normal", "/tmp/a.json"), enabled: false };
-    expect(createCopilotRunTasks(setup([disabled]))).toEqual([]);
+  it("returns nothing when every assignment is skipped", () => {
+    const skipped: CopilotItem = { ...item("normal", "/tmp/a.json"), modes: { normal: false, raid: false } };
+    expect(createCopilotRunTasks(setup([skipped]))).toEqual([]);
   });
 
   it("refuses a batch that mixes task families", () => {
@@ -434,12 +477,12 @@ describe("integrated strategies", () => {
       { ...task, params: { ...task.params, mode: 4, collectible_mode_start_list: ["hot_water", "hope"] } },
       settings,
     );
-    expect(params.collectible_mode_start_list).toMatchObject({
+    expect(params.collectible_mode_start_list).toEqual({
       hot_water: true,
-      hope: true,
       shield: false,
-      ideas: false,
-      ticket: false,
+      ingot: false,
+      hope: true,
+      random: false,
     });
   });
 });
@@ -550,10 +593,6 @@ describe("roguelike and reclamation", () => {
       ingot: false,
       hope: true,
       random: false,
-      key: false,
-      dice: false,
-      ideas: false,
-      ticket: false,
     });
   });
 
@@ -569,6 +608,203 @@ describe("roguelike and reclamation", () => {
     expect(
       buildMaaTaskParams({ ...task, params: { ...task.params, tools_to_craft: [] } }, settings),
     ).not.toHaveProperty("tools_to_craft");
+  });
+});
+
+describe("roguelike themes and modes", () => {
+  const fieldOf = (key: string) => {
+    const field = TASK_DEFINITIONS.Roguelike.fields.find((item) => item.key === key);
+    if (!field) throw new Error(`missing field: ${key}`);
+    return field;
+  };
+  const taskWith = (params: Record<string, unknown>) => ({
+    ...createTask("Roguelike"),
+    params: { ...getTaskDefaults("Roguelike"), ...params },
+  });
+
+  it("lists every core theme and only the modes that theme accepts", () => {
+    expect(fieldOptions(fieldOf("theme"), {}).map((option) => option.value)).toEqual([
+      "Phantom",
+      "Mizuki",
+      "Sami",
+      "Sarkaz",
+      "JieGarden",
+      "BlackFlow",
+    ]);
+    expect(roguelikeModeOptions("BlackFlow").map((option) => option.value)).toEqual([0, 1, 30003]);
+    expect(roguelikeModeOptions("Sami").map((option) => option.value)).toContain(5);
+    expect(roguelikeModeOptions("JieGarden").map((option) => option.value)).toContain(20001);
+    expect(roguelikeModeOptions("Phantom").map((option) => option.value)).not.toContain(5);
+    expect(roguelikeModeOptions("Sarkaz").map((option) => option.value)).not.toContain(20001);
+  });
+
+  it("offers the theme's difficulty range plus the core's sentinels", () => {
+    const options = roguelikeDifficultyOptions("Sami").map((option) => Number(option.value));
+    expect(options.slice(0, 2)).toEqual([-1, 2147483647]);
+    expect(options).toContain(15);
+    expect(options).not.toContain(16);
+  });
+
+  it("switches the mode and difficulty when the theme changes", () => {
+    const defaults = getTaskDefaults("Roguelike");
+    const switched = withTaskParam("Roguelike", { ...defaults, theme: "Sami", mode: 5 }, "theme", "BlackFlow");
+    expect(switched.mode).toBe(0);
+    // 2147483647 is theme-independent, concrete levels are not.
+    expect(switched.difficulty).toBe(2147483647);
+    expect(
+      withTaskParam("Roguelike", { ...defaults, theme: "Mizuki", mode: 0, difficulty: 18 }, "theme", "Sami").difficulty,
+    ).toBe(-1);
+    expect(
+      withTaskParam("Roguelike", { ...defaults, theme: "Mizuki", mode: 0, difficulty: 15 }, "theme", "Sami").difficulty,
+    ).toBe(15);
+  });
+
+  it("clears the Elite 2 reset switches when leaving opening reset", () => {
+    const reset = {
+      mode: 4,
+      start_with_elite_two: true,
+      only_start_with_elite_two: true,
+    };
+    const next = withTaskParam("Roguelike", { ...getTaskDefaults("Roguelike"), ...reset }, "mode", 0);
+    expect(next.start_with_elite_two).toBe(false);
+    expect(next.only_start_with_elite_two).toBe(false);
+    // The core rejects the key outside mode 4, so it must not be sent either.
+    expect(buildMaaTaskParams(taskWith(reset), settings)).toMatchObject({ start_with_elite_two: true });
+    expect(buildMaaTaskParams(taskWith({ ...reset, mode: 0 }), settings)).not.toHaveProperty("start_with_elite_two");
+  });
+
+  it("writes the starting-operator list and drops the legacy single operator", () => {
+    const legacy = { core_char: "维什戴尔", use_support: true };
+    const legacyPayload = buildMaaTaskParams(taskWith(legacy), settings);
+    expect(legacyPayload).toMatchObject({ core_char: "维什戴尔", use_support: true });
+    expect(legacyPayload).not.toHaveProperty("core_char_list");
+
+    const next = withTaskParam("Roguelike", { ...getTaskDefaults("Roguelike"), ...legacy }, "core_char_list", [
+      { name: "维什戴尔", useSupport: true },
+      { name: "古米", useSupport: false },
+    ]);
+    expect(next).not.toHaveProperty("core_char");
+    expect(next).not.toHaveProperty("use_support");
+    expect(buildMaaTaskParams({ ...taskWith({}), params: next }, settings).core_char_list).toEqual([
+      { name: "维什戴尔", use_support: true },
+      { name: "古米", use_support: false },
+    ]);
+  });
+
+  it("offers only the opening rewards the theme actually has", () => {
+    const rewards = fieldOf("collectible_mode_start_list");
+    expect(fieldOptions(rewards, { theme: "JieGarden" }).map((option) => option.value)).toEqual([
+      "hot_water",
+      "shield",
+      "ingot",
+      "random",
+      "ticket",
+    ]);
+    expect(fieldOptions(rewards, { theme: "Mizuki" }).map((option) => option.value)).toContain("dice");
+    expect(fieldOptions(rewards, { theme: "Phantom" }).map((option) => option.value)).not.toContain("dice");
+  });
+
+  it("builds the Blackflow leveling and fast-flight payloads", () => {
+    const leveling = buildMaaTaskParams(taskWith({ theme: "BlackFlow", mode: 0 }), settings);
+    expect(leveling).toMatchObject({
+      theme: "BlackFlow",
+      mode: 0,
+      squad: "指挥分队",
+      roles: "取长补短",
+      blackflow_strategy: "ending1",
+    });
+
+    const flight = buildMaaTaskParams(taskWith({ theme: "BlackFlow", mode: 0, blackflow_fast_flight: true }), settings);
+    expect(flight).toMatchObject({
+      squad: "特勤分队",
+      roles: "稳扎稳打",
+      core_char_list: [{ name: "机械师", use_support: false }],
+    });
+    expect(flight).not.toHaveProperty("blackflow_strategy");
+  });
+
+  it("sends the Blackflow start-run requirements", () => {
+    const base = {
+      theme: "BlackFlow",
+      mode: 30003,
+      blackflow_animal_1: "swaddled_feathered_serpent",
+      blackflow_animal_2: "swaddled_cat",
+      blackflow_start_rewards: ["pegasus", "space_lease"],
+    };
+    const params = buildMaaTaskParams(taskWith(base), settings);
+    expect(params).toMatchObject({
+      blackflow_start_animals: ["swaddled_feathered_serpent", "swaddled_cat"],
+      blackflow_start_rewards: 68,
+    });
+    expect(params).not.toHaveProperty("blackflow_start_utopia");
+    expect(params).not.toHaveProperty("blackflow_start_reward_priority");
+
+    const utopia = buildMaaTaskParams(taskWith({ ...base, blackflow_start_utopia: true }), settings);
+    expect(utopia.blackflow_start_utopia).toBe(true);
+    expect(utopia.blackflow_start_reward_priority).toHaveLength(12);
+
+    // Without a serpent the blue card is not a hit condition, so its bit drops out.
+    const noSerpent = buildMaaTaskParams(
+      taskWith({ ...base, blackflow_animal_1: "swaddled_cat", blackflow_animal_2: "" }),
+      settings,
+    );
+    expect(noSerpent.blackflow_start_animals).toEqual(["swaddled_cat"]);
+    expect(noSerpent.blackflow_start_rewards).toBe(4);
+
+    const prepFlight = buildMaaTaskParams(taskWith({ ...base, blackflow_start_run_fast_flight: true }), settings);
+    expect(prepFlight).toMatchObject({
+      collectible_mode_squad: "特勤分队",
+      collectible_mode_roles: "稳扎稳打",
+      collectible_mode_core_char_list: [{ name: "机械师", use_support: false }],
+    });
+  });
+
+  it("keeps at most one feathered serpent in the requirement slots", () => {
+    const base = {
+      theme: "BlackFlow",
+      mode: 30003,
+      blackflow_animal_1: "swaddled_cat",
+      blackflow_animal_2: "swaddled_feathered_serpent",
+    };
+    const next = withTaskParam(
+      "Roguelike",
+      { ...getTaskDefaults("Roguelike"), ...base },
+      "blackflow_animal_1",
+      "swaddled_feathered_serpent",
+    );
+    expect(next.blackflow_animal_2).toBe("");
+    expect(
+      fieldOptions(fieldOf("blackflow_animal_2"), next).some((option) => option.value === "swaddled_feathered_serpent"),
+    ).toBe(false);
+  });
+
+  it("only sends the Sami foldartals in the modes that read them", () => {
+    const base = { theme: "Sami", mode: 4, start_foldartal_list: ["迁徙", "捕猎"], first_floor_foldartal: "远见" };
+    const params = buildMaaTaskParams(taskWith(base), settings);
+    expect(params).toMatchObject({ start_foldartal_list: ["迁徙", "捕猎"], first_floor_foldartal: "远见" });
+    // An empty list must stay out: the core rejects the whole parameter set.
+    expect(buildMaaTaskParams(taskWith({ ...base, start_foldartal_list: [] }), settings)).not.toHaveProperty(
+      "start_foldartal_list",
+    );
+    const otherTheme = buildMaaTaskParams(taskWith({ ...base, theme: "Phantom" }), settings);
+    expect(otherTheme).not.toHaveProperty("start_foldartal_list");
+    expect(otherTheme).not.toHaveProperty("first_floor_foldartal");
+  });
+
+  it("clamps the Playtime target and keeps the seed to its themes", () => {
+    const base = {
+      theme: "JieGarden",
+      mode: 20001,
+      find_playTime_target: 9,
+      start_with_seed: " 2b3c4d,rogue_1,120 ",
+    };
+    expect(buildMaaTaskParams(taskWith(base), settings)).toMatchObject({
+      find_playTime_target: 1,
+      start_with_seed: "2b3c4d,rogue_1,120",
+    });
+    const phantom = buildMaaTaskParams(taskWith({ ...base, theme: "Phantom", mode: 0 }), settings);
+    expect(phantom).not.toHaveProperty("start_with_seed");
+    expect(phantom).not.toHaveProperty("find_playTime_target");
   });
 });
 

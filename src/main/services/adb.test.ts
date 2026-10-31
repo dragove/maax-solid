@@ -5,7 +5,14 @@ import {
   AdbTimeoutError,
   adbConnectedOutput,
   adbReadyState,
+  adbSearchPaths,
+  connectionConfigFor,
+  discoverAdbDevices,
+  emulatorForSerial,
+  makeAdbServerTracker,
+  parseAdbDevices,
   probeAdbConnection,
+  resolveAdbPath,
   type ExecAdb,
 } from "./adb";
 
@@ -90,5 +97,190 @@ describe("probeAdbConnection", () => {
       ok: false,
       message: "cannot connect to 127.0.0.1:5555: Connection refused",
     });
+  });
+});
+
+describe("ADB discovery parsing", () => {
+  it("parses devices, transport ids and ignores daemon chatter", () => {
+    const output = [
+      "* daemon not running; starting now at tcp:5037",
+      "* daemon started successfully",
+      "List of devices attached",
+      "127.0.0.1:16384\tdevice product:vermeer model:23113RKC6C device:vermeer transport_id:1",
+      "emulator-5554          device product:vermeer model:23113RKC6C device:vermeer transport_id:2",
+      "10.0.0.2:5555          offline",
+      "",
+    ].join("\r\n");
+
+    expect(parseAdbDevices(output)).toEqual([
+      {
+        serial: "127.0.0.1:16384",
+        state: "device",
+        model: "23113RKC6C",
+        product: "vermeer",
+        transportId: "1",
+      },
+      {
+        serial: "emulator-5554",
+        state: "device",
+        model: "23113RKC6C",
+        product: "vermeer",
+        transportId: "2",
+      },
+      { serial: "10.0.0.2:5555", state: "offline" },
+    ]);
+  });
+
+  it("maps local emulator ports to a MaaCore connection config", () => {
+    expect(emulatorForSerial("127.0.0.1:16384")).toBe("mumu");
+    expect(emulatorForSerial("127.0.0.1:16416")).toBe("mumu");
+    expect(emulatorForSerial("127.0.0.1:7555")).toBe("mumu");
+    expect(emulatorForSerial("127.0.0.1:62001")).toBe("nox");
+    expect(emulatorForSerial("emulator-5554")).toBe("generic");
+    expect(emulatorForSerial("10.0.0.2:5555")).toBe("generic");
+    expect(connectionConfigFor("mumu")).toBe("MuMuEmulator12");
+    expect(connectionConfigFor("nox")).toBe("Nox");
+    expect(connectionConfigFor("generic")).toBe("General");
+  });
+});
+
+describe("adbSearchPaths", () => {
+  it("searches the bundled Windows emulator clients before PATH", () => {
+    const paths = adbSearchPaths({
+      platform: "win32",
+      env: {
+        ProgramFiles: String.raw`C:\PF`,
+        "ProgramFiles(x86)": String.raw`C:\PF86`,
+        LOCALAPPDATA: String.raw`C:\Users\me\AppData\Local`,
+        PATH: String.raw`C:\bin`,
+      },
+    });
+    expect(paths).toContain(String.raw`C:\PF\Netease\MuMu\nx_main\adb.exe`);
+    expect(paths).toContain(String.raw`C:\PF\Netease\MuMuPlayer-12.0\shell\adb.exe`);
+    expect(paths).toContain(String.raw`C:\Users\me\AppData\Local\Android\Sdk\platform-tools\adb.exe`);
+    expect(paths).toContain(String.raw`C:\bin\adb.exe`);
+  });
+
+  it("keeps an explicit adb path untouched", async () => {
+    await expect(resolveAdbPath("C:/tools/adb.exe", { platform: "win32", env: {} })).resolves.toBe("C:/tools/adb.exe");
+  });
+});
+
+describe("discoverAdbDevices", () => {
+  const devicesOutput = [
+    "List of devices attached",
+    "127.0.0.1:16384\tdevice product:vermeer model:23113RKC6C device:vermeer transport_id:1",
+    "emulator-5554\tdevice product:vermeer model:23113RKC6C device:vermeer transport_id:2",
+    "",
+  ].join("\n");
+
+  it("dedupes the multiple endpoints of one emulator and prefers MuMu TCP", async () => {
+    const calls: Array<string> = [];
+    const exec: ExecAdb = async (_adbPath, args) => {
+      calls.push(args.join(" "));
+      if (args[0] === "devices") return { stdout: devicesOutput, stderr: "" };
+      return { stdout: args.includes("android_id") ? "6adbfb6c7711b95f\n" : "", stderr: "" };
+    };
+
+    const result = await discoverAdbDevices({
+      adbPath: "adb",
+      exec,
+      portOpen: async () => false,
+    });
+
+    expect(result.adbPath).toBe("adb");
+    expect(result.devices).toHaveLength(1);
+    expect(result.devices[0]).toMatchObject({
+      serial: "127.0.0.1:16384",
+      state: "device",
+      emulator: "mumu",
+      config: "MuMuEmulator12",
+      model: "23113RKC6C",
+    });
+    expect(calls.filter((call) => call.startsWith("connect "))).toHaveLength(0);
+  });
+
+  it("returns a warning instead of throwing when adb cannot run", async () => {
+    const result = await discoverAdbDevices({
+      adbPath: "C:/missing/adb.exe",
+      exec: async () => {
+        throw new AdbSpawnError("spawn C:/missing/adb.exe ENOENT");
+      },
+      portOpen: async () => false,
+    });
+    expect(result.devices).toEqual([]);
+    expect(result.warning).toContain("无法执行 ADB");
+    expect(result.warning).toContain("C:/missing/adb.exe");
+  });
+});
+
+describe("ADB server ownership", () => {
+  const recorder = () => {
+    const calls: Array<ReadonlyArray<string>> = [];
+    const exec: ExecAdb = async (_adbPath, args) => {
+      calls.push(args);
+      return { stdout: "", stderr: "" };
+    };
+    return { calls, exec };
+  };
+
+  it("stops the server it started on release", async () => {
+    const { calls, exec } = recorder();
+    const tracker = makeAdbServerTracker({ portOpen: async () => false, exec });
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    expect(calls).toEqual([["kill-server"]]);
+  });
+
+  it("leaves a server that was already running alone", async () => {
+    const { calls, exec } = recorder();
+    const tracker = makeAdbServerTracker({ portOpen: async () => true, exec });
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    expect(calls).toEqual([]);
+  });
+
+  it("never runs adb when nothing was used or released twice", async () => {
+    const { calls, exec } = recorder();
+    const unused = makeAdbServerTracker({ portOpen: async () => false, exec });
+    await unused.release();
+    expect(calls).toEqual([]);
+
+    const tracker = makeAdbServerTracker({ portOpen: async () => false, exec });
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    await tracker.release();
+    expect(calls).toEqual([["kill-server"]]);
+  });
+
+  it("decides ownership at prime time, before any host can start the daemon", async () => {
+    const { calls, exec } = recorder();
+    const tracker = makeAdbServerTracker({ portOpen: async () => true, exec });
+    tracker.prime();
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    expect(calls).toEqual([]);
+  });
+
+  it("still stops the daemon when nothing listened at startup", async () => {
+    const { calls, exec } = recorder();
+    const tracker = makeAdbServerTracker({ portOpen: async () => false, exec });
+    tracker.prime();
+    await tracker.noteUse("/usr/bin/adb");
+    await tracker.release();
+    expect(calls).toEqual([["kill-server"]]);
+  });
+
+  it("stops the daemon with the first client it saw", async () => {
+    const paths: string[] = [];
+    const exec: ExecAdb = async (adbPath) => {
+      paths.push(adbPath);
+      return { stdout: "", stderr: "" };
+    };
+    const tracker = makeAdbServerTracker({ portOpen: async () => false, exec });
+    await tracker.noteUse("/first/adb");
+    await tracker.noteUse("/second/adb");
+    await tracker.release();
+    expect(paths).toEqual(["/first/adb"]);
   });
 });

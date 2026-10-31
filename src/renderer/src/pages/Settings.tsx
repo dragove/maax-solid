@@ -48,7 +48,7 @@ interface SettingsProps {
 const clientTypes: ReadonlyArray<ClientType> = ["Official", "Bilibili", "txwy", "YoStarEN", "YoStarJP", "YoStarKR"];
 
 const touchModes: ReadonlyArray<TouchMode> = ["maatouch", "minitouch", "adb"];
-const connectionProfiles = ["General", "MuMuEmulator12", "LDPlayer", "Nox", "XYAZ", "WSA", "Androws"];
+const connectionProfiles = ["General", "MuMuEmulator12", "LDPlayer", "Nox", "BlueStacks", "XYAZ", "WSA", "Androws"];
 
 const coreStatusLabel = (core: CoreInfo, locale: Locale): string => {
   if (core.status === "ready") return t(locale, "settings.coreReady");
@@ -550,6 +550,42 @@ export const Settings: Component<SettingsProps> = (props) => {
               </div>
             </dl>
             <p class="license-note">AGPL-3.0-or-later · MaaCore is licensed separately under AGPL-3.0.</p>
+          </section>
+
+          <section class="settings-card">
+            <header class="settings-card-head">
+              <span class="settings-icon">
+                <Icon name="users" />
+              </span>
+              <div>
+                <h2>{t(props.locale, "settings.credits")}</h2>
+                <p>{t(props.locale, "settings.creditsText")}</p>
+              </div>
+            </header>
+            <ul class="credits-list">
+              <li>
+                <a href="https://github.com/MaaAssistantArknights/MaaX" target="_blank" rel="noreferrer">
+                  <span class="credits-name">MaaX</span>
+                  <span class="credits-note">{t(props.locale, "settings.creditsMaaX")}</span>
+                </a>
+              </li>
+              <li>
+                <a href="https://github.com/Aliothmoon/MAA-Meow" target="_blank" rel="noreferrer">
+                  <span class="credits-name">MAA-Meow</span>
+                  <span class="credits-note">{t(props.locale, "settings.creditsMaaMeow")}</span>
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com/MaaAssistantArknights/MaaAssistantArknights"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span class="credits-name">MaaCore</span>
+                  <span class="credits-note">{t(props.locale, "settings.creditsMaaCore")}</span>
+                </a>
+              </li>
+            </ul>
           </section>
 
           <section class="settings-card">

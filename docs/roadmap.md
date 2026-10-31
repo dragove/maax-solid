@@ -31,15 +31,22 @@
       and cleared, never queued. SSS Copilot, Paradox Copilot, Depot, OperBox and
       Custom stay available as queue tasks.
 - [x] Remaining task types: Roguelike, Reclamation, SingleStep,
-      VideoRecognition. Roguelike covers theme, mode, squad, opening reset and
-      investment options; Reclamation covers both themes and the crafting mode;
-      SingleStep maps stage/start/action; VideoRecognition takes a recording path.
-- [x] Copilot workspace: add assignments by PRTS id, `prts://s/<id>` set link
-      or by browsing, run them as a batch, and expand a dual-difficulty file into
-      normal and raid runs.
-- [x] Copilot browsing: search PRTS by keyword, stage, operator, author and
-      sort order from inside the app, with a disk-cached stage catalogue and the
-      core's own operator list.
+      VideoRecognition. Roguelike covers all six themes (including 黑流树海),
+      their mode lists, the starting-operator order with per-slot support,
+      opening reset, foldartals, seeds, Playtime nodes, Blackflow start-run
+      rewards and both mechanic fast-flight switches; Reclamation covers both
+      themes and the crafting mode; SingleStep maps stage/start/action;
+      VideoRecognition takes a recording path.
+- [x] Copilot workspace: add assignments by PRTS id, `prts://s/<id>` set
+      link or by browsing, and run them as a batch. Each row checks 普通 and
+      突袭/磨难/险地 independently (both run, neither skips); H stages only offer
+      普通. A cleared difficulty unchecks itself and single-assignment runs ignore
+      the checkboxes.
+- [x] Copilot browsing: assignments and sets tabs. Search PRTS by keyword,
+      stage, operator, author and sort order; browse curated sets with author
+      filtering, expand a set to its assignments and add all of them at once.
+      The stage catalogue is disk-cached and operator suggestions come from the
+      core's own list.
 - [x] Tools: recruitment calculator, operator box, depot. Recruitment reads
       the active core's tables; OperBox/Depot results stream from the core's
       `SubTaskExtraInfo` callbacks and are kept per device.
@@ -63,7 +70,9 @@
 ## v2 — polish and platform breadth
 
 - [ ] Application self-update (electron-updater or a signed custom updater).
-- [ ] Windows and macOS core host variants, archive formats, emulator discovery.
+- [x] Windows core host (`MaaCore.dll` / `.zip`), ADB discovery and MuMu
+      connection profiles.
+- [ ] macOS core host variant and archive format.
 - [ ] Incremental resource updates from the MAA resource channel.
 - [ ] Theme editor, compact/terminal layouts, keyboard command palette.
 - [ ] End-to-end tests against a recorded core event fixture.

@@ -7,7 +7,14 @@ import type {
   Locale,
   RunSnapshot,
 } from "../../../shared/schemas";
-import { copilotEntryMode, copilotModeLabelKey } from "../../../shared/copilot-mode";
+import {
+  copilotItemActive,
+  copilotItemModes,
+  copilotModeLabelKey,
+  copilotStageModes,
+  normalizeCopilotItem,
+  type CopilotMode,
+} from "../../../shared/copilot-mode";
 import type { UiLogEntry } from "../log-format";
 import { t } from "../i18n/i18n";
 import { CopilotDetailBody, createCopilotDetails } from "../components/CopilotDetail";
@@ -57,8 +64,22 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
   const [dragFrom, setDragFrom] = createSignal<number | null>(null);
   const [dragOver, setDragOver] = createSignal<number | null>(null);
   const singleItem = createMemo(() => props.items.find((item) => item.id === singleId()));
-  const enabledItems = createMemo(() => props.items.filter((item) => item.enabled !== false));
-  const toggleItem = (id: string, enabled: boolean): void => {
+  const checkedItems = createMemo(() => props.items.filter(copilotItemActive));
+  /** Check one difficulty of a row; both unchecked keeps it in the list, skipped. */
+  const setMode = (id: string, mode: CopilotMode, checked: boolean): void => {
+    props.onItems(
+      props.items.map((item) => {
+        if (item.id !== id) return item;
+        const modes = copilotItemModes(item);
+        return {
+          ...normalizeCopilotItem(item),
+          modes: mode === "normal" ? { ...modes, normal: checked } : { ...modes, raid: checked },
+        };
+      }),
+    );
+  };
+  /** SSS and paradox rows keep a plain switch instead of difficulties. */
+  const setEnabled = (id: string, enabled: boolean): void => {
     props.onItems(props.items.map((item) => (item.id === id ? { ...item, enabled } : item)));
   };
   const moveItem = (from: number, to: number): void => {
@@ -88,7 +109,7 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
 
   /** A batch can only drive one MaaCore task family at a time. */
   const kind = (): CopilotKind | "mixed" => {
-    const kinds = new Set(enabledItems().map((item) => item.kind ?? "normal"));
+    const kinds = new Set(checkedItems().map((item) => item.kind ?? "normal"));
     if (kinds.size === 0) return "normal";
     return kinds.size === 1 ? [...kinds][0]! : "mixed";
   };
@@ -97,7 +118,7 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
     if (singleItem() !== undefined) {
       return t(props.locale, "copilotPage.prerequisiteManual");
     }
-    if (props.items.length > 0 && enabledItems().length === 0) {
+    if (props.items.length > 0 && checkedItems().length === 0) {
       return t(props.locale, "copilotPage.allDisabled");
     }
     switch (kind()) {
@@ -170,7 +191,7 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
                   disabled={
                     props.busy ||
                     props.items.length === 0 ||
-                    (singleItem() === undefined && (kind() === "mixed" || enabledItems().length === 0))
+                    (singleItem() === undefined && (kind() === "mixed" || checkedItems().length === 0))
                   }
                   onClick={() => props.onStart(singleItem()?.id)}
                 >
@@ -239,7 +260,7 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
                     class={[
                       "copilot-item",
                       {
-                        "copilot-item--disabled": item().enabled === false,
+                        "copilot-item--disabled": !copilotItemActive(item()),
                         "copilot-item--dragging": dragFrom() === index(),
                         "copilot-item--drop": dragOver() === index() && dragFrom() !== index(),
                       },
@@ -278,16 +299,50 @@ export const Copilot: Component<CopilotPageProps> = (props) => {
                         </span>
                         <span class="copilot-index">{index() + 1}</span>
                       </span>
-                      <Switch
-                        checked={item().enabled !== false}
-                        disabled={running()}
-                        onChange={(value) => toggleItem(item().id, value)}
-                        label={t(props.locale, "copilotPage.enableItem")}
-                        title={t(props.locale, "copilotPage.enableItem")}
-                      />
-                      <span class={["copilot-mode", { "copilot-mode--raid": copilotEntryMode(item()) === "raid" }]}>
-                        {t(props.locale, copilotModeLabelKey(copilotEntryMode(item()) === "raid", item().stage))}
-                      </span>
+                      <Show
+                        when={(item().kind ?? "normal") === "normal"}
+                        fallback={
+                          <label class="mode-toggle">
+                            <input
+                              type="checkbox"
+                              checked={item().enabled !== false}
+                              disabled={running()}
+                              onChange={(event) => setEnabled(item().id, event.currentTarget.checked)}
+                            />
+                            <span>{t(props.locale, "copilotPage.enableItem")}</span>
+                          </label>
+                        }
+                      >
+                        <For each={["normal", "raid"] as const}>
+                          {(mode) => {
+                            const available = (): boolean => copilotStageModes(item().stage).includes(mode);
+                            return (
+                              <label
+                                class={[
+                                  "mode-toggle",
+                                  {
+                                    "mode-toggle--raid": mode === "raid",
+                                    "mode-toggle--on": copilotItemModes(item())[mode],
+                                    "mode-toggle--locked": !available(),
+                                  },
+                                ]}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={copilotItemModes(item())[mode]}
+                                  disabled={running() || !available()}
+                                  title={available() ? undefined : t(props.locale, "copilotPage.modeUnavailable")}
+                                  onChange={(event) => setMode(item().id, mode, event.currentTarget.checked)}
+                                />
+                                <span>{t(props.locale, copilotModeLabelKey(mode === "raid", item().stage))}</span>
+                              </label>
+                            );
+                          }}
+                        </For>
+                        <Show when={!copilotItemActive(item())}>
+                          <span class="copilot-mode copilot-mode--skip">{t(props.locale, "copilotPage.skipped")}</span>
+                        </Show>
+                      </Show>
                       <Show when={(item().kind ?? "normal") !== "normal"}>
                         <span class={["copilot-kind", `copilot-kind--${item().kind}`]}>
                           {kindLabel(item().kind ?? "normal")}

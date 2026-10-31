@@ -9,9 +9,10 @@ import type {
   CopilotResolveResult,
   CopilotSearchItem,
   CopilotSearchResult,
+  CopilotSetSearchResult,
 } from "../../shared/schemas";
 import { copilotKindFromContent } from "../../shared/copilot-kind";
-import { isToughStage } from "../../shared/copilot-mode";
+import { copilotModes, copilotStageModes, type CopilotModeSelection } from "../../shared/copilot-mode";
 import { writeFileAtomic, type PrtsClient } from "./prts";
 
 /**
@@ -23,7 +24,6 @@ import { writeFileAtomic, type PrtsClient } from "./prts";
  * lists ids; each entry is fetched separately.
  */
 const DIFFICULTY_NORMAL = 1;
-const DIFFICULTY_RAID = 2;
 const SET_CONCURRENCY = 4;
 
 export interface CopilotReference {
@@ -69,24 +69,24 @@ export const itemsFromContent = (
   const stage = typeof content.stage_name === "string" ? content.stage_name : "";
   const title = typeof content.doc?.title === "string" && content.doc.title !== "" ? content.doc.title : stage;
   const raw = typeof content.difficulty === "number" ? content.difficulty : 0;
+  // The site omits the mask on most uploads; normal is the default except on a
+  // 磨难 map, which only has the hard bit, and an H map, which only has normal.
   const difficulty = raw === 0 ? DIFFICULTY_NORMAL : raw;
   const kind = copilotKindFromContent(content.type);
   // SSS and Paradox are not normal/raid pairs; their files carry no difficulty
   // branch even if a malformed document still has the bitmask.
   if (kind !== "normal") {
-    return [{ id: randomUUID(), copilotId, filename, stage, title, isRaid: false, kind }];
+    return [{ id: randomUUID(), copilotId, filename, stage, title, kind }];
   }
-  // A `tough_` stage is the 磨难 map itself, and the site usually omits the
-  // difficulty mask on those uploads. Running such a file as normal would send
-  // the core to the standard stage, so the stage id decides here.
-  if (isToughStage(stage)) {
-    return [{ id: randomUUID(), copilotId, filename, stage, title, isRaid: true, kind }];
-  }
-  const modes: boolean[] = [];
-  if ((difficulty & DIFFICULTY_NORMAL) !== 0) modes.push(false);
-  if ((difficulty & DIFFICULTY_RAID) !== 0) modes.push(true);
-  if (modes.length === 0) modes.push(false);
-  return modes.map((isRaid) => ({ id: randomUUID(), copilotId, filename, stage, title, isRaid, kind }));
+  return [{ id: randomUUID(), copilotId, filename, stage, title, kind, modes: modesFromContent(difficulty, stage) }];
+};
+
+/** A downloaded file's difficulty selection, capped by what the stage offers. */
+const modesFromContent = (difficulty: number, stage: string): CopilotModeSelection => {
+  const available = copilotStageModes(stage);
+  if (available.length === 1) return { normal: available[0] === "normal", raid: available[0] === "raid" };
+  const modes = copilotModes(difficulty, stage);
+  return { normal: modes.includes("normal"), raid: modes.includes("raid") };
 };
 
 const unwrap = (raw: unknown): { code: number; message: string; data: unknown } => {
@@ -396,3 +396,92 @@ export const searchCopilot = async (
   params: CopilotSearchParams,
   stageCodes: ReadonlyMap<string, string> = new Map(),
 ): Promise<CopilotSearchResult> => mapCopilotSearch(await client.getJson(buildCopilotQuery(params)), stageCodes);
+
+/* -------------------------------------------------------------------------- */
+/* Sets                                                                       */
+/* -------------------------------------------------------------------------- */
+
+export interface CopilotSetSearchParams {
+  /** Full-text keyword over the set name and description. */
+  readonly keyword?: string;
+  /** PRTS user id; clicking a set author filters on it. */
+  readonly creatorId?: string;
+  readonly page?: number;
+  readonly limit?: number;
+}
+
+/**
+ * The set query is the one POST read endpoint; the body is snake_case like
+ * every other PRTS payload. The backend sorts by id descending, so there is no
+ * sort field to send.
+ */
+export const buildCopilotSetBody = (params: CopilotSetSearchParams): Record<string, unknown> => ({
+  page: Math.max(1, Math.trunc(params.page ?? 1)),
+  limit: Math.min(50, Math.max(1, Math.trunc(params.limit ?? 10))),
+  ...(params.keyword === undefined || params.keyword.trim() === "" ? {} : { keyword: params.keyword.trim() }),
+  ...(params.creatorId === undefined || params.creatorId.trim() === "" ? {} : { creator_id: params.creatorId.trim() }),
+});
+
+/** Turn one `set/query` response into renderable rows. */
+export const mapCopilotSetSearch = (raw: unknown): CopilotSetSearchResult => {
+  const data = asRecord(asRecord(raw).data);
+  const rows = Array.isArray(data.data) ? data.data : [];
+  const items = rows.flatMap((row) => {
+    const record = asRecord(row);
+    const id = asNumber(record.id);
+    if (id <= 0) return [];
+    return [
+      {
+        id,
+        name: asString(record.name),
+        description: asString(record.description),
+        creator: asString(record.creator),
+        creatorId: asString(record.creator_id) || String(asNumber(record.creator_id) || ""),
+        copilotIds: Array.isArray(record.copilot_ids)
+          ? record.copilot_ids.filter((value): value is number => typeof value === "number" && value > 0)
+          : [],
+        createTime: asString(record.create_time),
+        updateTime: asString(record.update_time),
+      },
+    ];
+  });
+  return { total: asNumber(data.total), hasNext: data.has_next === true, items };
+};
+
+export const searchCopilotSets = async (
+  client: PrtsClient,
+  params: CopilotSetSearchParams,
+): Promise<CopilotSetSearchResult> =>
+  mapCopilotSetSearch(await client.postJson("/set/query", buildCopilotSetBody(params)));
+
+/** `copilot/query` accepts a repeated `copilot_ids` filter; 50 is its page cap. */
+const ID_QUERY_LIMIT = 50;
+
+/**
+ * Summaries of the assignments a set lists, in the set's own order.
+ *
+ * A set only stores ids, so a set browser has to fetch the files behind them.
+ * Ids that no longer resolve (deleted or private) simply drop out.
+ */
+export const searchCopilotByIds = async (
+  client: PrtsClient,
+  ids: ReadonlyArray<number>,
+  stageCodes: ReadonlyMap<string, string> = new Map(),
+): Promise<ReadonlyArray<CopilotSearchItem>> => {
+  const unique = [...new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0))];
+  const rows = new Map<number, CopilotSearchItem>();
+  for (let index = 0; index < unique.length; index += ID_QUERY_LIMIT) {
+    const chunk = unique.slice(index, index + ID_QUERY_LIMIT);
+    const query = new URLSearchParams();
+    query.set("page", "1");
+    query.set("limit", String(ID_QUERY_LIMIT));
+    for (const id of chunk) query.append("copilot_ids", String(id));
+    const result = mapCopilotSearch(await client.getJson(`/copilot/query?${query.toString()}`), stageCodes);
+    for (const item of result.items) if (!rows.has(item.id)) rows.set(item.id, item);
+  }
+  // The API orders by hot score; the set's own order is what the user arranged.
+  return unique.flatMap((id) => {
+    const item = rows.get(id);
+    return item === undefined ? [] : [item];
+  });
+};

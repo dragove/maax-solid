@@ -14,7 +14,7 @@ declare global {
     readonly electron: string;
     readonly solid: string;
     readonly effect: string;
-    readonly typescript: string;
+    readonly tsrs: string;
   };
 }
 
