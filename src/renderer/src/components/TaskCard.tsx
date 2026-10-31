@@ -21,6 +21,7 @@ import { StartingOperPicker } from "./OperPicker";
 import { StagePicker } from "./StagePicker";
 import { Button } from "./ui/Button";
 import { Collapse } from "./ui/Collapse";
+import { Chevron } from "./ui/Chevron";
 import { Icon } from "./ui/Icon";
 import { Switch } from "./ui/Switch";
 
@@ -537,7 +538,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
             aria-label={props.expanded ? "collapse" : "expand"}
             onClick={props.onToggleExpanded}
           >
-            <Icon name={props.expanded ? "chevron-down" : "chevron-right"} />
+            <Chevron open={props.expanded} />
           </button>
         </span>
       </header>
@@ -572,7 +573,7 @@ export const TaskCard: Component<TaskCardProps> = (props) => {
             </div>
             <Show when={advancedFields().length > 0}>
               <button type="button" class="advanced-toggle" onClick={() => setShowAdvanced((value) => !value)}>
-                <Icon name={showAdvanced() ? "chevron-down" : "chevron-right"} />
+                <Chevron open={showAdvanced()} />
                 {t(props.locale, "tasks.advanced")}
               </button>
               <Collapse open={showAdvanced()}>

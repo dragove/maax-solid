@@ -5,6 +5,7 @@ import { ROGUELIKE_STARTING_OPERS, readStartingOpers, type StartingOper, type Ta
 import { command } from "../effect/desktop";
 import { useAppRuntime } from "../effect/solid-effect";
 import { pick, t } from "../i18n/i18n";
+import { Chevron } from "./ui/Chevron";
 import { Icon } from "./ui/Icon";
 import { Switch } from "./ui/Switch";
 
@@ -313,7 +314,7 @@ export const StartingOperPicker: Component<StartingOperPickerProps> = (props) =>
                     {(url) => <img class="opers-avatar" src={url()} alt="" draggable="false" />}
                   </Show>
                   <span class="opers-name">{row().name.trim() || t(props.locale, "tasks.operPick")}</span>
-                  <Icon name="chevron-down" class="opers-caret" />
+                  <Chevron open={slot() === index} class="opers-caret" />
                 </button>
                 <span class="opers-support">
                   <Switch

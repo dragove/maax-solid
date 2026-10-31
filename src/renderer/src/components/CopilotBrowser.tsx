@@ -25,6 +25,7 @@ import { t } from "../i18n/i18n";
 import { CopilotDetailBody, CopilotGroups, CopilotOperators, createCopilotDetails } from "./CopilotDetail";
 import { Button } from "./ui/Button";
 import { Collapse } from "./ui/Collapse";
+import { Chevron } from "./ui/Chevron";
 import { Icon } from "./ui/Icon";
 import { Modal } from "./ui/Modal";
 
@@ -880,7 +881,7 @@ export const CopilotBrowser: Component<CopilotBrowserProps> = (props) => {
                     </div>
                     <div class="browser-actions">
                       <Button size="sm" variant="ghost" onClick={() => toggleSet(set)}>
-                        <Icon name={isSetOpen(set.id) ? "chevron-down" : "chevron-right"} />
+                        <Chevron open={isSetOpen(set.id)} />
                         {isSetOpen(set.id)
                           ? t(props.locale, "browser.setCollapse")
                           : t(props.locale, "browser.setExpand")}

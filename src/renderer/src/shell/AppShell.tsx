@@ -1,4 +1,15 @@
-import { For, Show, createEffect, createMemo, createSignal, flush, onSettled, untrack, type Component } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  flush,
+  onCleanup,
+  onSettled,
+  untrack,
+  type Component,
+} from "solid-js";
 import type {
   AppSettingsPatch,
   Bootstrap,
@@ -202,6 +213,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
   // A theme swap cross-fades instead of snapping, so light/dark does not flash.
   // The first application is the boot palette and lands instantly.
   let themeApplied = false;
+  let themeTransition: ViewTransition | undefined;
   createEffect(
     () => resolvedTheme(),
     (theme) => {
@@ -209,14 +221,31 @@ export const AppShell: Component<AppShellProps> = (props) => {
       const booting = !themeApplied;
       themeApplied = true;
       if (root.dataset.theme === theme) return;
-      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (booting || reduced || typeof document.startViewTransition !== "function") {
+      if (booting || prefersReducedMotion() || typeof document.startViewTransition !== "function") {
         root.dataset.theme = theme;
         return;
       }
-      document.startViewTransition(() => {
+      root.dataset.themeTransition = "true";
+      try {
+        const transition = document.startViewTransition(() => {
+          root.dataset.theme = theme;
+        });
+        themeTransition = transition;
+        transition.finished
+          .catch(() => {})
+          .finally(() => {
+            // A second flip can start while this one runs and skips it; only the
+            // transition that still owns the flag may clear it, or the new flip
+            // would capture a root with no view-transition-name and snap.
+            if (themeTransition !== transition) return;
+            themeTransition = undefined;
+            delete root.dataset.themeTransition;
+          });
+      } catch {
+        themeTransition = undefined;
+        delete root.dataset.themeTransition;
         root.dataset.theme = theme;
-      });
+      }
     },
   );
   createEffect(
@@ -232,23 +261,56 @@ export const AppShell: Component<AppShellProps> = (props) => {
     },
   );
 
+  let activeTransition: ViewTransition | undefined;
+
   /**
    * Page switches cross-fade through a View Transition instead of swapping the
    * <Show> branch in one frame. The transition is scoped to the content area
    * (`::view-transition-*(content)`), so the sidebar and topbar stay put.
    * `flush` applies the signal write inside the capture callback; without it
    * the new snapshot would be taken before the page has rendered.
+   *
+   * An in-flight transition can be aborted immediately via `skipTransition()`
+   * so rapid page clicks interrupt the previous animation without lag.
    */
   const navigate = (next: View): void => {
     if (next === view()) return;
+    if (activeTransition) {
+      try {
+        activeTransition.skipTransition();
+      } catch {
+        // Ignored
+      }
+      activeTransition = undefined;
+    }
     if (prefersReducedMotion() || typeof document.startViewTransition !== "function") {
       setView(next);
       return;
     }
-    document.startViewTransition(() => {
-      flush(() => setView(next));
-    });
+    try {
+      const transition = document.startViewTransition(() => {
+        flush(() => setView(next));
+      });
+      activeTransition = transition;
+      transition.finished
+        .catch(() => {})
+        .finally(() => {
+          if (activeTransition === transition) {
+            activeTransition = undefined;
+          }
+        });
+    } catch {
+      setView(next);
+    }
   };
+
+  onCleanup(() => {
+    try {
+      activeTransition?.skipTransition();
+    } catch {
+      // Ignored
+    }
+  });
 
   const flushLogs = (): void => {
     logTimer = undefined;
