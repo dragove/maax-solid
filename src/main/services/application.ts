@@ -67,7 +67,7 @@ import {
   type CopilotMode,
 } from "../../shared/copilot-mode";
 import { scheduleDue } from "../../shared/schedule";
-import { setCloseToTray } from "../app-behavior";
+import { setWindowBehavior } from "../app-behavior";
 import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
 import { discoverAdbDevices, probeAdbConnection, resolveAdbPath } from "./adb";
 
@@ -480,7 +480,7 @@ export const ApplicationLive: Layer.Layer<
 
     const refreshLocalState = Effect.gen(function* () {
       settingsCache = yield* settings.get;
-      setCloseToTray(settingsCache.closeToTray);
+      setWindowBehavior({ closeToTray: settingsCache.closeToTray, locale: settingsCache.locale });
       const deviceList = yield* workspace.getDevices;
       profiles = new Map(deviceList.map((device) => [device.id, device]));
       plans = [...(yield* workspace.getPlans)];
@@ -1493,7 +1493,7 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const next = yield* settings.update(patch);
         settingsCache = next;
-        setCloseToTray(next.closeToTray);
+        setWindowBehavior({ closeToTray: next.closeToTray, locale: next.locale });
         return next;
       });
 

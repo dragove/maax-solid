@@ -510,6 +510,11 @@ Use a utility process/worker, one host per core version or resource set.
   window close handler runs outside Effect. `window-all-closed` must keep the
   app alive when close-to-tray is enabled and a tray exists; otherwise a
   programmatic window close would strand a hidden process.
+- The mirror also carries the app `locale` and notifies the shell through
+  `setShellSync`; the Electron shell owns the `Tray` and keeps it in step with
+  the settings: no icon while close-to-tray is off, and the menu and the
+  "still running" notification follow the app locale, not `app.getLocale()`
+  (the OS one). Do not create the tray unconditionally at startup.
 - Log/diagnostics exports are local only. The diagnostics folder intentionally
   includes device addresses and paths, so document that before sharing.
 

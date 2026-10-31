@@ -40,7 +40,7 @@ Maax 是一个 Electron 桌面应用，核心组合为 **Electron 45 + Solid 2 R
 - **回调消息 ID 不等于日志级别**。在统一 formatter 中按 payload 语义分级：预期分支退出用 debug/info，可操作失败才用 error，并优先显示 `first`/`subtask`/`taskchain`，不要输出 `unknown`。
 - **工具识别只走既有回调**。OperBox/Depot 的结果来自 `SubTaskExtraInfo`（msg 20003）的 `OperBoxInfo` / `DepotInfo`；在 `src/shared/tools.ts` 解析、按设备保存最新快照，不要为此新增 native API。公开招募计算器只读活动核心的 `recruitment.json` 与 `battle_data.json`。
 - **终止态运行只写一次历史**。完成回调、停止、宿主崩溃与启动失败都经 `recordRun`；不要在渲染进程或事件处理器里重复记录。定时任务只在应用运行时检查，使用本地时间与两小时补跑窗口，失败/跳过也要写入 `lastStatus`。
-- **托盘关闭行为要可回来**。`closeToTray` 通过 `src/main/app-behavior.ts` 镜像给窗口关闭处理器；托盘不可用时正常关闭窗口，`window-all-closed` 在托盘模式下不得退出。诊断包只写本地目录，不自动上传。
+- **托盘关闭行为要可回来**。`closeToTray` 与 `locale` 通过 `src/main/app-behavior.ts` 镜像给窗口关闭处理器与托盘：托盘图标只在开关开启时存在，菜单与关闭提示跟随设置里的语言（不是系统语言），设置变更由主进程 `setShellSync` 同步；托盘不可用时正常关闭窗口，`window-all-closed` 在托盘模式下不得退出。诊断包只写本地目录，不自动上传。
 
 ## Effect boundary
 
