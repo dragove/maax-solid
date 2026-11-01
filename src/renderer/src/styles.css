@@ -419,17 +419,14 @@ svg {
 
 .brand-mark,
 .boot-mark {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--accent-ink);
-  background: var(--accent);
-  border-radius: var(--radius-control);
+  /* The mark sits inside the window drag region: it must not start a native
+     image drag, and pointer input belongs to the drag region. */
+  -webkit-user-drag: none;
+  pointer-events: none;
+  user-select: none;
 }
 
 .brand-lockup {

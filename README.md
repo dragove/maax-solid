@@ -1,4 +1,24 @@
+<!-- markdownlint-disable -->
+
+<div align="center">
+
+<img alt="Maax logo" src="./docs/logo.webp" width="256" height="256" />
+
 # Maax
+
+<div>
+    <img alt="license" src="https://img.shields.io/github/license/dragove/maax-solid">
+    <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blueviolet">
+</div>
+<div>
+    <img alt="commit activity" src="https://img.shields.io/github/commit-activity/m/dragove/maax-solid?color=%23ff69b4">
+    <img alt="stars" src="https://img.shields.io/github/stars/dragove/maax-solid?style=social">
+    <img alt="GitHub all releases" src="https://img.shields.io/github/downloads/dragove/maax-solid/total?style=social">
+</div>
+
+</div>
+
+<!-- markdownlint-restore -->
 
 Maax 是一个面向 **MaaAssistantArknights / MaaCore** 的现代桌面客户端，使用
 **Electron 45 + Solid 2 RC + Effect 4** 构建。它重新实现了已停止维护的 MaaX
