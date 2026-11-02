@@ -65,16 +65,11 @@ describe("Modal mounting", () => {
       );
 
   it("opens an initially visible dialog after insertion and focuses inside", () => {
-    // showModal() throws InvalidStateError on a detached element, so recording
-    // what the call saw is the assertion that covers the ref-timing regression.
-    const connected: boolean[] = [];
-    const showModal = HTMLDialogElement.prototype.showModal;
-    vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(function (this: HTMLDialogElement) {
-      connected.push(this.isConnected);
-      showModal.call(this);
-    });
+    // showModal() throws InvalidStateError on a detached element, so the
+    // receiver it actually ran on is the assertion that covers ref timing.
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
     mount(true);
-    expect(connected).toEqual([true]);
+    expect(showModal.mock.contexts).toEqual([dialog()]);
     expect(dialog().matches(":modal")).toBe(true);
     expect(dialog().contains(document.activeElement)).toBe(true);
   });
