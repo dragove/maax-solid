@@ -1,0 +1,23 @@
+.github/workflows/release.yml
+  s_74d81c6f62365a::t_acdc4051f833cc 27-28
+  s_74d81c6f62365a::t_ff2117306ac10a 95-137
+README.md
+  s_74d81c6f62365a::t_eb058f1fb5a710 147-149
+  s_74d81c6f62365a::t_996ce17175a637 153-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "14a3e100d39f44a5799d125947295528f73c48f6",
+  "prompts": {},
+  "sessions": {
+    "s_74d81c6f62365a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a19bd0-afd7-74dd-b7b9-2c19d0e9b268",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
