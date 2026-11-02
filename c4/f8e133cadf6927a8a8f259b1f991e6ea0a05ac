@@ -1,0 +1,19 @@
+src/renderer/src/components/ui/Modal.browser.test.tsx
+  s_22bd02b6c78ea3::t_2a274ed57c54b2 68-70,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "c4f8e133cadf6927a8a8f259b1f991e6ea0a05ac",
+  "prompts": {},
+  "sessions": {
+    "s_22bd02b6c78ea3": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a19be4-59df-73ae-9c5c-5aa0d656d98b",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
