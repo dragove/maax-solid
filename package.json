@@ -1,6 +1,6 @@
 {
   "name": "maax-solid",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "description": "A modern desktop client for MaaAssistantArknights, built with Electron 45, Solid 2 and Effect 4.",
   "license": "AGPL-3.0-or-later",
