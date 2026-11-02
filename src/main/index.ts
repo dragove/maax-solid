@@ -3,6 +3,7 @@ import { closeToTray, setShellSync, shellLocale } from "./app-behavior";
 import { Effect } from "effect";
 import { join } from "node:path";
 import appIcon from "../../build/icon.png?asset";
+import trayIcon from "../../build/tray-icon.png?asset";
 import { attachRendererBootTrace, bootTrace, bootTraceEnabled } from "./boot-trace";
 import { registerIpcHandlers } from "./ipc";
 import { makeRuntime, type AppRuntime } from "./runtime";
@@ -62,8 +63,10 @@ function trayMenu(): Menu {
 function createTray(): void {
   if (tray) return;
   try {
-    const image = nativeImage.createFromPath(appIcon);
-    tray = new Tray(image.isEmpty() ? appIcon : image.resize({ width: 22, height: 22 }));
+    // The full artwork is a detailed illustration that turns into an
+    // unreadable blob at tray size, so the tray ships a tight face crop.
+    const image = nativeImage.createFromPath(trayIcon);
+    tray = new Tray(image.isEmpty() ? trayIcon : image.resize({ width: 22, height: 22 }));
     tray.setToolTip("Maax");
     tray.setContextMenu(trayMenu());
     tray.on("click", showMainWindow);

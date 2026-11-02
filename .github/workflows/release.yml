@@ -24,6 +24,8 @@ jobs:
     name: Linux AppImage and tar.zst
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -90,3 +92,46 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "Maax $VERSION" \
             --generate-notes
+
+  # The installer is built only on Windows: electron-builder's NSIS target
+  # needs the Windows toolchain, and cross-building it from Linux would pull in
+  # Wine. It runs after `linux` because that job owns the release version and
+  # creates the release this job uploads into.
+  windows:
+    name: Windows x64 installer
+    runs-on: windows-latest
+    needs: linux
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Stamp package version
+        run: pnpm pkg set "version=$env:VERSION"
+        env:
+          VERSION: ${{ needs.linux.outputs.version }}
+
+      - name: Build Windows installer
+        run: |
+          pnpm run build
+          pnpm exec electron-builder --win nsis --x64 --publish never
+          Get-ChildItem dist\*.exe | Format-Table Name, Length
+
+      - name: Upload installer to the GitHub release
+        if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || inputs.publish)
+        run: Get-ChildItem dist\*.exe | ForEach-Object { gh release upload "v$env:VERSION" $_.FullName --clobber }
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.linux.outputs.version }}

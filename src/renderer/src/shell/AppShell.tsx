@@ -38,6 +38,7 @@ import {
 } from "../../../shared/copilot-mode";
 import { formatResourceStamp } from "../../../shared/resource-version";
 import { TASK_DEFINITIONS, createTask, withTaskParam } from "../../../shared/tasks";
+import brandLogo from "../assets/logo.png";
 import { AddDeviceDialog } from "../components/AddDeviceDialog";
 import { CopilotBrowser } from "../components/CopilotBrowser";
 import { WindowControls } from "../components/WindowControls";
@@ -1227,9 +1228,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     <div class="shell">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <span class="brand-mark">
-            <span>M</span>
-          </span>
+          <img class="brand-mark" src={brandLogo} alt="" width="36" height="36" draggable={false} />
           <span class="brand-lockup">
             <strong>{tr("app.name")}</strong>
           </span>

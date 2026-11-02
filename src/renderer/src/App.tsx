@@ -1,5 +1,6 @@
 import { Show, createSignal, onSettled, type Component } from "solid-js";
 import type { Bootstrap } from "../../shared/schemas";
+import brandLogo from "./assets/logo.png";
 import { AppShell } from "./shell/AppShell";
 import { traceRendererBoot } from "./boot-trace";
 import { DesktopBridgeLive, bootstrap as bootstrapEffect, describeError } from "./effect/desktop";
@@ -11,9 +12,7 @@ const FatalScreen: Component<{ error: unknown; onRetry: () => void }> = (props) 
   <div class="fatal-screen">
     <div class="fatal-card">
       <div class="fatal-brand">
-        <span class="boot-mark">
-          <span>M</span>
-        </span>
+        <img class="boot-mark" src={brandLogo} alt="" width="36" height="36" draggable={false} />
         <span>
           <strong>MAAX</strong>
           <small>Runtime failure</small>
