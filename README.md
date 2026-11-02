@@ -144,13 +144,14 @@ AppImage 和本地 Electron + app.asar，测量到工作台首帧的耗时与稳
 
 `dev` 是默认开发分支，功能改动先合入 `dev`；`master` 只接收 `dev` 的合并。
 `dev` 合并到 `master` 后，`master` 的 push 会触发
-[`.github/workflows/release.yml`](.github/workflows/release.yml)，构建 Linux AppImage
-与 `.tar.zst`，并创建 GitHub Release。Windows 安装包需要在本机执行
-`pnpm dist`（electron-builder 的 NSIS 目标）；自动发布矩阵尚未包含 Windows。版本号按已有 `v*` tag 自动递增
+[`.github/workflows/release.yml`](.github/workflows/release.yml)：Linux 任务构建 AppImage
+与 `.tar.zst` 并创建 GitHub Release，随后的 Windows 任务（`windows-latest`）构建
+NSIS x64 安装包并追加到同一个 Release，因此两个平台始终同版本发布。版本号按已有 `v*` tag 自动递增
 patch，首次发布为 `0.1.0`；需要指定 minor / major 版本时，在 `dev` 上直接修改
 `package.json` 的 `version` 再合并。发布流程不会把递增后的版本写回仓库。AppImage
 便于直接运行，tar.zst 便于免 FUSE 解包运行（`tar --zstd -xf`，需要 zstd）。产物命名为
-`Maax-<version>-linux-x86_64.AppImage` 与 `Maax-<version>-linux-x64.tar.zst`。
+`Maax-<version>-linux-x86_64.AppImage`、`Maax-<version>-linux-x64.tar.zst` 与
+`Maax-<version>-win-x64.exe`。
 
 ## 架构
 
