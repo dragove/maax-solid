@@ -1,0 +1,16 @@
+package.json
+  h_78212b192cfe73 31,33,40
+pnpm-lock.yaml
+  h_78212b192cfe73 174-175,180-181,201-202,342-343,346,348-349,352,394-395,397,1498-1499,2344-2345,2724,2727,2733,2735-2736,2774,2776,3745,4642,4742
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "38c4a83c36426efa1275479759d4452ea08dabbf",
+  "prompts": {},
+  "humans": {
+    "h_78212b192cfe73": {
+      "author": "dragove <dragove@qq.com>"
+    }
+  }
+}
