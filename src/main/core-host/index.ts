@@ -1,14 +1,15 @@
 import { mkdirSync } from "node:fs";
-import type {
-  AppendTaskRequest,
-  ConnectRequest,
-  CreateSessionRequest,
-  EngineCallback,
-  EngineMessage,
-  EngineRequest,
-  InitRequest,
-  ScreenshotResult,
-  SessionRequest,
+import {
+  callbackRecord,
+  parseEngineCallback,
+  type AppendTaskRequest,
+  type ConnectRequest,
+  type CreateSessionRequest,
+  type EngineCallback,
+  type EngineMessage,
+  type EngineRequest,
+  type InitRequest,
+  type ScreenshotResult,
 } from "../../shared/engine";
 import { loadMaaCore, type MaaCoreLibrary } from "./ffi";
 
@@ -25,20 +26,30 @@ if (!parentPort) {
 
 const port: ParentPortLike = parentPort;
 const InstanceOptionKey = { TouchMode: 2, ClientType: 6 } as const;
+/** Stay well inside the client's request budget so the core reports the cause. */
+const CAPTURE_TIMEOUT_MS = 25_000;
 
 interface Session {
   readonly id: string;
   readonly handle: bigint;
   readonly callback: unknown;
-  connected: boolean;
-  running: boolean;
+  preview?: PendingPreview;
+}
+
+interface PendingPreview {
+  readonly requestId: number;
+  readonly callId: number;
+  readonly startedAt: number;
+  readonly timer: NodeJS.Timeout;
 }
 
 let library: MaaCoreLibrary | undefined;
-let libraryRoot = "";
 const sessions = new Map<string, Session>();
 const callbackQueue: EngineCallback[] = [];
 let commandChain: Promise<void> = Promise.resolve();
+let exiting = false;
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const send = (message: EngineMessage): void => {
   try {
@@ -53,7 +64,7 @@ const respond = (id: number, value: unknown): void => {
 };
 
 const fail = (id: number, error: unknown): void => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   send({
     id,
     ok: false,
@@ -68,6 +79,33 @@ const flushCallbacks = (): void => {
   if (callbackQueue.length === 0) return;
   const items = callbackQueue.splice(0, callbackQueue.length);
   send({ type: "callbacks", items });
+  for (const item of items) {
+    const session = sessions.get(item.sessionId);
+    const preview = session?.preview;
+    if (!session || !preview || item.msg !== 4) continue;
+    const payload = parseEngineCallback(item.details);
+    if (payload.what !== "Screencap" || payload.async_call_id !== preview.callId) continue;
+    clearTimeout(preview.timer);
+    delete session.preview;
+    const details = callbackRecord(payload.details);
+    if (details.ret !== true) {
+      const reason = typeof details.error === "string" ? details.error : "MaaCore reported capture failure";
+      fail(preview.requestId, new Error(reason));
+      continue;
+    }
+    try {
+      // Preview latency: request → callback → PNG readback, including the
+      // flush interval. The core's own capture time travels separately as
+      // AsyncCallInfo.details.cost and is what the log row reports.
+      const result: ScreenshotResult = {
+        ...requireLibrary().readScreenshot(session.handle),
+        durationMs: Math.round(performance.now() - preview.startedAt),
+      };
+      respond(preview.requestId, result);
+    } catch (error) {
+      fail(preview.requestId, error);
+    }
+  }
 };
 
 setInterval(flushCallbacks, 25);
@@ -86,7 +124,6 @@ const requireSession = (sessionId: string): Session => {
 const init = (request: InitRequest): unknown => {
   if (library) throw new Error("MaaCore is already initialised");
   mkdirSync(request.userDir, { recursive: true });
-  libraryRoot = request.coreRoot;
 
   const loaded = loadMaaCore(request.coreRoot);
   if (!loaded.setUserDir(request.userDir)) {
@@ -131,8 +168,6 @@ const createSession = (request: CreateSessionRequest): unknown => {
     id: request.sessionId,
     handle,
     callback,
-    connected: false,
-    running: false,
   });
   return { ok: true };
 };
@@ -158,50 +193,52 @@ const appendTask = (request: AppendTaskRequest): unknown => {
 const start = (session: Session): unknown => {
   const core = requireLibrary();
   if (!core.start(session.handle)) throw new Error("AsstStart returned false");
-  session.running = true;
   return { ok: true };
 };
 
 const stop = (session: Session): unknown => {
   const core = requireLibrary();
   const ok = core.stop(session.handle);
-  session.running = false;
   return { ok };
 };
 
-const destroySession = (session: Session): void => {
+const requestScreenshot = (session: Session, requestId: number): void => {
   const core = requireLibrary();
-  if (session.running) {
-    try {
-      core.stop(session.handle);
-    } catch {
-      // The task may already have finished; destruction below is authoritative.
-    }
-  }
-  core.destroy(session.handle, session.callback);
-  sessions.delete(session.id);
+  if (session.preview) throw new Error("A screenshot is already in progress for this device");
+  if (!core.connected(session.handle)) throw new Error("The device is not connected");
+  const startedAt = performance.now();
+  const callId = core.requestScreenshot(session.handle);
+  if (callId <= 0) throw new Error("AsstAsyncScreencap did not return a call id");
+  const timer = setTimeout(() => {
+    delete session.preview;
+    fail(requestId, new Error("Timed out waiting for MaaCore to finish the screenshot"));
+  }, CAPTURE_TIMEOUT_MS);
+  session.preview = { requestId, callId, startedAt, timer };
 };
 
-const handleSessionRequest = (request: SessionRequest): unknown => {
-  const session = requireSession(request.sessionId);
-  const core = requireLibrary();
-  switch (request.op) {
-    case "start":
-      return start(session);
-    case "stop":
-      return stop(session);
-    case "screenshot": {
-      if (!core.connected(session.handle)) {
-        throw new Error("The device is not connected");
-      }
-      const result: ScreenshotResult = core.screenshot(session.handle);
-      return result;
-    }
-    case "disconnect":
-    case "destroy-session":
-      destroySession(session);
-      return { ok: true };
+const destroySession = async (session: Session): Promise<void> => {
+  if (session.preview) {
+    clearTimeout(session.preview.timer);
+    fail(session.preview.requestId, new Error("The device disconnected during capture"));
+    delete session.preview;
   }
+  const core = requireLibrary();
+  // Drop the session before awaiting: a failed destructor must not be retried
+  // on the same handle, which would free it twice.
+  sessions.delete(session.id);
+  try {
+    await core.destroy(session.handle, session.callback);
+  } catch (error) {
+    // The destructor did not confirm, so the instance may still be alive and
+    // may keep calling back under this session id. Only a fresh process gives
+    // a known state; the parent reconnects attached devices on host exit.
+    if (!exiting) {
+      send({ type: "fatal", message: `AsstDestroy failed: ${errorMessage(error)}` });
+      setTimeout(() => process.exit(1), 50);
+    }
+    throw error;
+  }
+  flushCallbacks();
 };
 
 const handle = async (request: EngineRequest): Promise<void> => {
@@ -227,17 +264,25 @@ const handle = async (request: EngineRequest): Promise<void> => {
         });
         break;
       }
-      case "start":
-      case "stop":
       case "screenshot":
+        requestScreenshot(requireSession(request.sessionId), request.id);
+        break;
+      case "start":
+        respond(request.id, start(requireSession(request.sessionId)));
+        break;
+      case "stop":
+        respond(request.id, stop(requireSession(request.sessionId)));
+        break;
       case "disconnect":
       case "destroy-session":
-        respond(request.id, handleSessionRequest(request));
+        await destroySession(requireSession(request.sessionId));
+        respond(request.id, { ok: true });
         break;
       case "shutdown": {
+        exiting = true;
         for (const session of sessions.values()) {
           try {
-            destroySession(session);
+            await destroySession(session);
           } catch (error) {
             console.error("Failed to destroy session during shutdown", error);
           }
@@ -278,5 +323,5 @@ process.on("unhandledRejection", (reason) => {
 send({
   type: "log",
   level: "info",
-  message: `Core host started (root: ${libraryRoot || "uninitialised"})`,
+  message: "Core host started",
 });

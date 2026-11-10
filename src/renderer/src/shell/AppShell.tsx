@@ -117,6 +117,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const [screenshots, setScreenshots] = createSignal<
     Record<string, { url: string; width: number; height: number; durationMs: number }>
   >({});
+  const pendingScreenshots = new Set<string>();
+  const [capturing, setCapturing] = createSignal<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
   const [addDeviceOpen, setAddDeviceOpen] = createSignal(false);
@@ -648,18 +650,26 @@ export const AppShell: Component<AppShellProps> = (props) => {
   };
 
   const screenshotDevice = async (id: string): Promise<void> => {
-    const shot = await send(COMMANDS.screenshotDevice, { id }, { busy: false });
-    if (!shot) return;
-    const blob = new Blob([new Uint8Array(shot.png)], { type: "image/png" });
-    const url = URL.createObjectURL(blob);
-    setScreenshots((current) => {
-      const previous = current[id];
-      if (previous) URL.revokeObjectURL(previous.url);
-      return {
-        ...current,
-        [id]: { url, width: shot.width, height: shot.height, durationMs: shot.durationMs },
-      };
-    });
+    if (pendingScreenshots.has(id)) return;
+    pendingScreenshots.add(id);
+    setCapturing(new Set(pendingScreenshots));
+    try {
+      const shot = await send(COMMANDS.screenshotDevice, { id }, { busy: false });
+      if (!shot) return;
+      const blob = new Blob([new Uint8Array(shot.png)], { type: "image/png" });
+      const url = URL.createObjectURL(blob);
+      setScreenshots((current) => {
+        const previous = current[id];
+        if (previous) URL.revokeObjectURL(previous.url);
+        return {
+          ...current,
+          [id]: { url, width: shot.width, height: shot.height, durationMs: shot.durationMs },
+        };
+      });
+    } finally {
+      pendingScreenshots.delete(id);
+      setCapturing(new Set(pendingScreenshots));
+    }
   };
 
   const setActiveCore = async (id: string): Promise<void> => {
@@ -1414,6 +1424,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               data={data()}
               locale={locale()}
               screenshots={screenshots()}
+              capturing={capturing()}
               busy={busy()}
               connectBusy={connectBusy()}
               onAdd={() => setAddDeviceOpen(true)}

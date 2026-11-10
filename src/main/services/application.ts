@@ -47,7 +47,14 @@ import type {
   ToolKind,
   RuntimeInfo,
 } from "../../shared/schemas";
-import type { AppendTaskResult, ConnectResult, EngineCallback, InitResult } from "../../shared/engine";
+import {
+  callbackRecord,
+  parseEngineCallback,
+  type AppendTaskResult,
+  type ConnectResult,
+  type EngineCallback,
+  type InitResult,
+} from "../../shared/engine";
 import type { TaskConfig } from "../../shared/schemas";
 import {
   buildMaaTaskParams,
@@ -593,12 +600,7 @@ export const ApplicationLive: Layer.Layer<
 
     const handleCallback = (item: EngineCallback): void => {
       const deviceId = item.sessionId;
-      let payload: Record<string, unknown> = {};
-      try {
-        payload = JSON.parse(item.details) as Record<string, unknown>;
-      } catch {
-        payload = {};
-      }
+      const payload = parseEngineCallback(item.details);
       bus.emit({
         _tag: "core-callback",
         sessionId: item.sessionId,
@@ -610,7 +612,7 @@ export const ApplicationLive: Layer.Layer<
       });
 
       const what = typeof payload.what === "string" ? payload.what : "";
-      const details = (payload.details ?? {}) as Record<string, unknown>;
+      const details = callbackRecord(payload.details);
 
       // OperBox and Depot stream their recognition results through
       // SubTaskExtraInfo; every frame replaces the previous snapshot, so the
@@ -1024,7 +1026,11 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const { state, host } = yield* getConnectedDevice(deviceId);
         const result = yield* Effect.tryPromise({
-          try: () => host.client.request({ id: 0, op: "screenshot", sessionId: state.sessionId! }),
+          try: () =>
+            // The host answers only once the capture callback arrives (or its
+            // 25 s timeout), and the request can queue behind a session
+            // destruction, so the default 30 s budget is too tight.
+            host.client.request({ id: 0, op: "screenshot", sessionId: state.sessionId! }, 60_000),
           catch: (cause) => maaxError("截图失败", cause),
         });
         const shot = result as Screenshot;
