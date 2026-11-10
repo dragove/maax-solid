@@ -1,6 +1,6 @@
 {
   "name": "maax-solid",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "A modern desktop client for MaaAssistantArknights, built with Electron 45, Solid 2 and Effect 4.",
   "license": "AGPL-3.0-or-later",
@@ -25,38 +25,38 @@
     "bench:startup": "node scripts/measure-startup.mjs"
   },
   "dependencies": {
-    "koffi": "3.3.4"
+    "koffi": "3.3.7"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.1.1",
-    "@effect/tsgo": "0.63.0",
-    "@effect/vitest": "4.1.1",
-    "@solidjs/vite-plugin": "3.0.0-next.51",
-    "@solidjs/web": "^2.0.0-rc.20",
-    "@types/node": "26.6.5",
+    "@effect/platform-node": "4.1.2",
+    "@effect/tsgo": "0.67.5",
+    "@effect/vitest": "4.1.2",
+    "@solidjs/vite-plugin": "3.0.0-next.57",
+    "@solidjs/web": "^2.0.0-rc.21",
+    "@types/node": "26.6.6",
     "@types/semver": "7.8.0",
     "@types/yauzl": "3.4.0",
-    "@vitest/browser-playwright": "5.0.5",
-    "effect": "4.1.1",
-    "electron": "45.0.0",
+    "@vitest/browser-playwright": "5.1.0",
+    "effect": "4.1.2",
+    "electron": "45.2.3",
     "electron-builder": "26.18.0",
     "electron-vite": "6.0.0",
-    "lucide": "1.61.0",
-    "oxfmt": "0.74.0",
-    "oxlint": "1.89.0",
-    "oxlint-tsgolint": "7.0.2005",
-    "playwright": "1.64.1",
-    "semver": "7.8.5",
-    "solid-js": "^2.0.0-rc.20",
-    "tsrs": "0.20.1-ts7.1.0-beta",
-    "vite": "8.3.5",
-    "vitest": "5.0.5",
+    "lucide": "1.70.0",
+    "oxfmt": "0.78.0",
+    "oxlint": "1.92.0",
+    "oxlint-tsgolint": "7.0.2006",
+    "playwright": "1.65.0",
+    "semver": "7.8.6",
+    "solid-js": "^2.0.0-rc.21",
+    "tsrs": "0.23.0-ts7.1.0-beta",
+    "vite": "8.3.7",
+    "vitest": "5.1.0",
     "yauzl": "3.4.0"
   },
   "engines": {
     "node": ">=26.0.0 <27",
     "pnpm": ">=12.0.0 <13"
   },
-  "packageManager": "pnpm@12.15.0",
+  "packageManager": "pnpm@12.18.0",
   "productName": "Maax"
 }

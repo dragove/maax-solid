@@ -7,11 +7,13 @@ import { CoreInstallerLive } from "./services/core-installer";
 import { DownloaderLive } from "./services/download";
 import { AppPathsLive } from "./services/paths";
 import { CopilotSetupLive } from "./services/copilot-setup";
+import { OperatorLibraryLive } from "./services/operator-library";
 import { PrtsLibraryLive } from "./services/prts-library";
 import { ResourceUpdaterLive } from "./services/resource-updater";
 import { RunHistoryLive } from "./services/run-history";
 import { ScheduleStoreLive } from "./services/schedules";
 import { SettingsLive } from "./services/settings";
+import { StageCatalogLive } from "./services/stage-catalog-service";
 import { ToolDataLive } from "./services/tool-data";
 import { WorkspaceLive } from "./services/workspace";
 import { EventBus, EventBusLive } from "./events";
@@ -40,6 +42,8 @@ const AppLive = ApplicationLive.pipe(
   Layer.provideMerge(ScheduleStoreLive),
   Layer.provideMerge(ToolDataLive),
   Layer.provideMerge(SettingsLive),
+  Layer.provideMerge(StageCatalogLive),
+  Layer.provideMerge(OperatorLibraryLive),
   Layer.provideMerge(WorkspaceLive),
   Layer.provideMerge(CoreRegistryLive),
   Layer.provideMerge(CoreInstallerWithDeps),

@@ -9,6 +9,7 @@ interface DevicesProps {
   readonly data: Bootstrap;
   readonly locale: Locale;
   readonly screenshots: Readonly<Record<string, { url: string; width: number; height: number; durationMs: number }>>;
+  readonly capturing: ReadonlySet<string>;
   readonly busy: boolean;
   readonly connectBusy: boolean;
   readonly onAdd: () => void;
@@ -87,6 +88,8 @@ export const Devices: Component<DevicesProps> = (props) => {
           <For each={props.data.devices} keyed={(device) => device.profile.id}>
             {(device) => {
               const connected = () => device().status === "online" || device().status === "running";
+              const capturing = () => props.capturing.has(device().profile.id);
+              const captureLabel = () => t(props.locale, capturing() ? "devices.capturing" : "devices.screenshot");
               return (
                 <article class={["device-card", { "device-card--online": connected() }]}>
                   <header class="device-card-head">
@@ -110,10 +113,10 @@ export const Devices: Component<DevicesProps> = (props) => {
                           <Button
                             size="sm"
                             variant="ghost"
-                            disabled={!connected() || props.busy}
+                            disabled={!connected() || props.busy || capturing()}
                             onClick={() => props.onScreenshot(device().profile.id)}
                           >
-                            {t(props.locale, "devices.screenshot")}
+                            {captureLabel()}
                           </Button>
                         </div>
                       }
@@ -123,7 +126,8 @@ export const Devices: Component<DevicesProps> = (props) => {
                           <img class="device-shot-image" src={shot().url} alt={`${device().profile.name} screenshot`} />
                           <span class="device-shot-meta">
                             <span>
-                              {shot().width}×{shot().height} · {shot().durationMs} ms
+                              {shot().width}×{shot().height} · {t(props.locale, "devices.capturePreview")}{" "}
+                              {shot().durationMs} ms
                             </span>
                             <Show when={device().screencapCost}>
                               {(cost) => (
@@ -140,8 +144,9 @@ export const Devices: Component<DevicesProps> = (props) => {
                       <button
                         type="button"
                         class="device-shot-refresh icon-button"
-                        title={t(props.locale, "devices.screenshot")}
-                        disabled={!connected() || props.busy}
+                        title={captureLabel()}
+                        aria-label={captureLabel()}
+                        disabled={!connected() || props.busy || capturing()}
                         onClick={() => props.onScreenshot(device().profile.id)}
                       >
                         <Icon name="refresh-cw" />

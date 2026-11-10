@@ -16,20 +16,19 @@ export interface MaaCoreLibrary {
   loadResource(path: string): boolean;
   loadGlobalResource(server: string): boolean;
   create(callback: (payload: CallbackPayload) => void): { handle: bigint; callback: unknown };
-  destroy(handle: bigint, callback: unknown): void;
+  destroy(handle: bigint, callback: unknown): Promise<void>;
   setInstanceOption(handle: bigint, key: number, value: string): boolean;
   asyncConnect(handle: bigint, adbPath: string, address: string, config: string): number;
   appendTask(handle: bigint, type: string, params: string): number;
   setTaskParams(handle: bigint, taskId: number, params: string): boolean;
   start(handle: bigint): boolean;
   stop(handle: bigint): boolean;
-  running(handle: bigint): boolean;
   connected(handle: bigint): boolean;
-  screenshot(handle: bigint): {
+  requestScreenshot(handle: bigint): number;
+  readScreenshot(handle: bigint): {
     png: Uint8Array;
     width: number;
     height: number;
-    durationMs: number;
   };
 }
 
@@ -80,7 +79,6 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
   const asstSetTaskParams = lib.func("uint8 AsstSetTaskParams(void *handle, int32 taskId, const char *params)");
   const asstStart = lib.func("uint8 AsstStart(void *handle)");
   const asstStop = lib.func("uint8 AsstStop(void *handle)");
-  const asstRunning = lib.func("uint8 AsstRunning(void *handle)");
   const asstConnected = lib.func("uint8 AsstConnected(void *handle)");
   const asstAsyncScreencap = lib.func("int32 AsstAsyncScreencap(void *handle, uint8 block)");
   const asstGetImage = lib.func("uint64 AsstGetImage(void *handle, void *buffer, uint64 size)");
@@ -114,21 +112,30 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
         throw error;
       }
     },
-    destroy: (handle, callback) => {
-      asstDestroy(handle);
-      koffi.unregister(callback as never);
-    },
+    // The native destructor joins the message thread. Keep the JS thread
+    // available to drain any registered Koffi callbacks while it waits.
+    destroy: (handle, callback) =>
+      new Promise<void>((resolve, reject) => {
+        asstDestroy.async(handle, (error: unknown) => {
+          if (error) {
+            // Keep the callback registered: when the destructor did not
+            // finish, the native side may still own the pointer.
+            reject(error);
+            return;
+          }
+          koffi.unregister(callback as never);
+          resolve();
+        });
+      }),
     setInstanceOption: (handle, key, value) => bool(asstSetInstanceOption(handle, key, value)),
     asyncConnect: (handle, adbPath, address, config) => Number(asstAsyncConnect(handle, adbPath, address, config, 0)),
     appendTask: (handle, type, params) => Number(asstAppendTask(handle, type, params)),
     setTaskParams: (handle, taskId, params) => bool(asstSetTaskParams(handle, taskId, params)),
     start: (handle) => bool(asstStart(handle)),
     stop: (handle) => bool(asstStop(handle)),
-    running: (handle) => bool(asstRunning(handle)),
     connected: (handle) => bool(asstConnected(handle)),
-    screenshot: (handle) => {
-      const startedAt = Date.now();
-      if (Number(asstAsyncScreencap(handle, 1)) <= 0) throw new Error("AsstAsyncScreencap failed");
+    requestScreenshot: (handle) => Number(asstAsyncScreencap(handle, 0)),
+    readScreenshot: (handle) => {
       const sizes = [8 * 1024 * 1024, 16 * 1024 * 1024];
       for (const size of sizes) {
         const buffer = Buffer.allocUnsafe(size);
@@ -139,7 +146,9 @@ export function loadMaaCore(root: string): MaaCoreLibrary {
           throw new Error("MaaCore returned an invalid screenshot length");
         }
         const png = new Uint8Array(buffer.buffer, buffer.byteOffset, length).slice();
-        return { png, ...pngSize(png), durationMs: Date.now() - startedAt };
+        const dimensions = pngSize(png);
+        if (!dimensions.width || !dimensions.height) throw new Error("MaaCore returned an invalid PNG screenshot");
+        return { png, ...dimensions };
       }
       throw new Error("Screenshot exceeds the 16 MiB capture buffer");
     },

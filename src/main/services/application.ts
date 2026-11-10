@@ -1,5 +1,5 @@
-import { Context, Effect, Layer, Schema } from "effect";
-import { BrowserWindow, Notification, app, dialog, nativeImage } from "electron";
+import { Context, Effect, Layer } from "effect";
+import { BrowserWindow, Notification, app, dialog } from "electron";
 import { randomUUID } from "node:crypto";
 import { cpus, release, totalmem } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
@@ -41,15 +41,20 @@ import type {
   RunHistoryEntry,
   RunSnapshot,
   Schedule,
+  StageCatalog as StageCatalogData,
   Screenshot,
-  StageCatalog,
-  StageCatalogEntry,
   TaskPlan,
   ToolKind,
   RuntimeInfo,
 } from "../../shared/schemas";
-import type { AppendTaskResult, ConnectResult, EngineCallback, InitResult } from "../../shared/engine";
-import { TaskConfigSchema } from "../../shared/schemas";
+import {
+  callbackRecord,
+  parseEngineCallback,
+  type AppendTaskResult,
+  type ConnectResult,
+  type EngineCallback,
+  type InitResult,
+} from "../../shared/engine";
 import type { TaskConfig } from "../../shared/schemas";
 import {
   buildMaaTaskParams,
@@ -71,112 +76,22 @@ import { setWindowBehavior } from "../app-behavior";
 import { completeTask, failTask, finishSnapshot, runCallbackAction, startTask } from "../run-projection";
 import { discoverAdbDevices, probeAdbConnection, releaseAdbServer, resolveAdbPath } from "./adb";
 
-const STAGE_ACTIVITY_URL = "https://api.maa.plus/MaaAssistantArknights/api/gui/StageActivityV2.json";
-
-const ActivityInfoSchema = Schema.Struct({
-  Tip: Schema.optional(Schema.String),
-  StageName: Schema.optional(Schema.String),
-  UtcStartTime: Schema.optional(Schema.String),
-  UtcExpireTime: Schema.optional(Schema.String),
-  TimeZone: Schema.optional(Schema.Finite),
-});
-const ActivityStageSchema = Schema.Struct({
-  Display: Schema.optional(Schema.String),
-  Value: Schema.optional(Schema.String),
-  Drop: Schema.optional(Schema.String),
-});
-const SideStorySchema = Schema.Struct({
-  MinimumRequired: Schema.optional(Schema.String),
-  Activity: Schema.optional(ActivityInfoSchema),
-  Stages: Schema.optional(Schema.Array(ActivityStageSchema)),
-});
-const StageActivityResponseSchema = Schema.Record(
-  Schema.String,
-  Schema.Struct({ sideStoryStage: Schema.optional(Schema.Record(Schema.String, SideStorySchema)) }),
-);
-type StageActivityData = Schema.Schema.Type<typeof StageActivityResponseSchema>;
-
-const parseActivityDate = (value: string | undefined, timeZone: number | undefined): number => {
-  if (!value) return 0;
-  const normalized = value.replaceAll("/", "-").replace(" ", "T");
-  const zone = typeof timeZone === "number" ? timeZone : 8;
-  const offset = `${zone >= 0 ? "+" : "-"}${String(Math.abs(zone)).padStart(2, "0")}:00`;
-  const parsed = Date.parse(`${normalized}${offset}`);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const permanentStageEntries = (locale: string): ReadonlyArray<StageCatalogEntry> => {
-  const zh = locale === "zh-CN";
-  const group = {
-    recommended: zh ? "推荐" : "Recommended",
-    resource: zh ? "资源关卡" : "Resource stages",
-    annihilation: zh ? "剿灭作战" : "Annihilation",
-  };
-  const entry = (value: string, label: string, groupLabel: string, tip?: string): StageCatalogEntry => ({
-    value,
-    label,
-    group: groupLabel,
-    groupLabel,
-    ...(tip ? { tip } : {}),
-  });
-
-  return [
-    entry(
-      "",
-      zh ? "当前 / 上次关卡" : "Current / last stage",
-      group.recommended,
-      zh ? "留空则识别游戏当前或上次关卡" : "Leave empty to use the current or last stage",
-    ),
-    entry("1-7", "1-7", group.recommended),
-    entry("R8-11", "R8-11", group.recommended),
-    entry("12-17-HARD", "12-17-HARD", group.recommended),
-    entry("CE-6", "CE-6", group.resource, zh ? "龙门币" : "LMD"),
-    entry("LS-6", "LS-6", group.resource, zh ? "经验" : "EXP"),
-    entry("CA-5", "CA-5", group.resource, zh ? "技能" : "Skill summaries"),
-    entry("AP-5", "AP-5", group.resource, zh ? "采购凭证" : "Purchase certificates"),
-    entry("SK-5", "SK-5", group.resource, zh ? "碳" : "Carbon"),
-    entry("PR-A-1", "PR-A-1", group.resource, zh ? "术师/近卫芯片" : "Caster/Guard chips"),
-    entry("PR-A-2", "PR-A-2", group.resource, zh ? "术师/近卫芯片" : "Caster/Guard chips"),
-    entry("PR-B-1", "PR-B-1", group.resource, zh ? "狙击/重装芯片" : "Sniper/Defender chips"),
-    entry("PR-B-2", "PR-B-2", group.resource, zh ? "狙击/重装芯片" : "Sniper/Defender chips"),
-    entry("PR-C-1", "PR-C-1", group.resource, zh ? "医疗/辅助芯片" : "Medic/Supporter chips"),
-    entry("PR-C-2", "PR-C-2", group.resource, zh ? "医疗/辅助芯片" : "Medic/Supporter chips"),
-    entry("PR-D-1", "PR-D-1", group.resource, zh ? "先锋/特种芯片" : "Vanguard/Specialist chips"),
-    entry("PR-D-2", "PR-D-2", group.resource, zh ? "先锋/特种芯片" : "Vanguard/Specialist chips"),
-    entry("Annihilation", "Annihilation", group.annihilation, zh ? "当前剿灭" : "Current annihilation"),
-    entry("Chernobog@Annihilation", "Chernobog", group.annihilation),
-    entry("LungmenOutskirts@Annihilation", "Lungmen Outskirts", group.annihilation),
-    entry("LungmenDowntown@Annihilation", "Lungmen Downtown", group.annihilation),
-  ];
-};
-
-const clientKeyFor = (clientType: string): string => (clientType === "Bilibili" ? "Official" : clientType);
-
-interface StageCache {
-  readonly key: string;
-  readonly at: number;
-  readonly catalog: StageCatalog;
-}
 import { CoreHostClient } from "../core-host-client";
 import { repairCopilotFile, type CopilotSearchParams, type CopilotSetSearchParams } from "./copilot";
 import { CoreRegistry } from "./core-registry";
 import { CoreInstaller } from "./core-installer";
 import { maaxError, type MaaxError } from "../errors";
 import { EventBus } from "../events";
+import { exportDiagnostics as writeDiagnostics, exportLogs as writeLogs, type DiagnosticsSnapshot } from "./log-export";
 import { AppPaths } from "./paths";
+import { decodePlanFile, encodePlanFile, planFileName } from "./plan-file";
 import { CopilotSetupStore } from "./copilot-setup";
-import { OperatorCatalogue } from "./operator-catalog";
-import {
-  AVATAR_LIMIT,
-  avatarPath,
-  isAvatarId,
-  mergeRoguelikeOperators,
-  readStartingOperators,
-} from "./roguelike-catalog";
 import { PrtsLibrary } from "./prts-library";
 import { ResourceUpdater, type ResourceProgress } from "./resource-updater";
 import { RunHistory as RunHistoryService } from "./run-history";
 import { ScheduleStore } from "./schedules";
+import { OperatorLibrary } from "./operator-library";
+import { StageCatalog as StageCatalogService } from "./stage-catalog-service";
 import { Settings } from "./settings";
 import { ToolData } from "./tool-data";
 import { Workspace } from "./workspace";
@@ -240,7 +155,7 @@ export interface ApplicationApi {
   readonly connectDevice: (id: string) => Effect.Effect<DeviceView, MaaxError>;
   readonly disconnectDevice: (id: string) => Effect.Effect<DeviceView, MaaxError>;
   readonly screenshotDevice: (id: string) => Effect.Effect<Screenshot, MaaxError>;
-  readonly stageCatalog: Effect.Effect<StageCatalog>;
+  readonly stageCatalog: Effect.Effect<StageCatalogData>;
   readonly savePlan: (plan: TaskPlan) => Effect.Effect<TaskPlan, MaaxError>;
   readonly removePlan: (id: string) => Effect.Effect<ReadonlyArray<TaskPlan>>;
   readonly createPlan: (deviceId: string, name: string) => Effect.Effect<TaskPlan, MaaxError>;
@@ -341,6 +256,8 @@ export const ApplicationLive: Layer.Layer<
   | RunHistoryService
   | ScheduleStore
   | ToolData
+  | StageCatalogService
+  | OperatorLibrary
 > = Layer.effect(
   Application,
   Effect.gen(function* () {
@@ -356,106 +273,12 @@ export const ApplicationLive: Layer.Layer<
     const history = yield* RunHistoryService;
     const schedules = yield* ScheduleStore;
     const toolData = yield* ToolData;
+    const stageCatalogService = yield* StageCatalogService;
+    const operatorLibrary = yield* OperatorLibrary;
 
     const emitCopilot = (setup: CopilotSetup): void => {
       bus.emit({ _tag: "copilot-updated", copilot: setup });
     };
-    const operatorCatalogue = new OperatorCatalogue();
-
-    /**
-     * Operators come from the active core's `resource/battle_data.json`, so the
-     * list always matches the installed game data and costs no request.
-     */
-    /** The resource tree of the core the user activated; the source of every operator read. */
-    const activeResourceRoot = Effect.gen(function* () {
-      const currentSettings = yield* settings.get;
-      const ready = (yield* registry.list).filter((core) => core.status === "ready");
-      const active = currentSettings.activeCoreId
-        ? ready.find((core) => core.id === currentSettings.activeCoreId)
-        : ready[0];
-      return active === undefined ? undefined : join(active.root, "resource");
-    });
-
-    const copilotOperators = (query: string) =>
-      Effect.gen(function* () {
-        const root = yield* activeResourceRoot;
-        if (root === undefined) return yield* maaxError("没有可用的核心，无法读取干员数据");
-        return yield* Effect.tryPromise({
-          try: () => operatorCatalogue.search(root, query),
-          catch: (cause) => maaxError("无法读取干员数据", cause),
-        });
-      });
-
-    /**
-     * The Roguelike starting-operator picker: the whole catalogue, marked with
-     * the theme's recommendations. The list is only a suggestion — the core
-     * accepts any Chinese name — so a missing core, file or malformed JSON must
-     * leave the field usable instead of failing the command.
-     */
-    const roguelikeOperators = (theme: string) =>
-      Effect.gen(function* () {
-        const root = yield* activeResourceRoot;
-        if (root === undefined) return [] as ReadonlyArray<RoguelikeOperator>;
-        const data = yield* Effect.tryPromise({
-          try: () => operatorCatalogue.load(root),
-          catch: (cause) => maaxError("无法读取干员数据", cause),
-        }).pipe(Effect.orElseSucceed(() => undefined));
-        if (data === undefined) return [] as ReadonlyArray<RoguelikeOperator>;
-        const recommended = yield* Effect.tryPromise({
-          try: () => readStartingOperators(root, theme),
-          catch: () => maaxError("无法读取肉鸽开局干员推荐"),
-        }).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
-        return mergeRoguelikeOperators(data, recommended);
-      });
-
-    /**
-     * Downscaled avatars for the picker. `resource/template/avatar/<id>.png`
-     * ships with the resource tree but only covers part of the catalogue, and a
-     * hand-written custom name has no id at all, so the caller must render a
-     * fallback badge for anything missing from the answer.
-     */
-    const avatarCache = new Map<string, string>();
-    const operatorAvatars = (ids: ReadonlyArray<string>) =>
-      Effect.gen(function* () {
-        const root = yield* activeResourceRoot;
-        if (root === undefined) return [] as ReadonlyArray<OperatorAvatar>;
-        const unique = [...new Set(ids.filter(isAvatarId))].slice(0, AVATAR_LIMIT);
-        return yield* Effect.sync(() =>
-          unique.flatMap((id) => {
-            const key = `${root}|${id}`;
-            const cached = avatarCache.get(key);
-            if (cached !== undefined) return [{ id, dataUrl: cached }];
-            const image = nativeImage.createFromPath(avatarPath(root, id));
-            if (image.isEmpty()) return [];
-            // 40 px matches the row; the source PNGs are several hundred pixels
-            // wide and would dominate the IPC payload at full size.
-            const dataUrl = image.resize({ width: 40, height: 40 }).toDataURL();
-            avatarCache.set(key, dataUrl);
-            return [{ id, dataUrl }];
-          }),
-        );
-      });
-
-    /**
-     * Names the active core knows, used only to decide whether a downloaded
-     * assignment needs the elite-requirement repair: MaaCore skips its check for
-     * operators missing from the core's own battle data.
-     */
-    const knownCopilotOperators = Effect.gen(function* () {
-      const root = yield* activeResourceRoot;
-      if (root === undefined) return undefined;
-      const data = yield* Effect.tryPromise({
-        try: () => operatorCatalogue.load(root),
-        catch: (cause) => maaxError("无法读取干员数据", cause),
-      }).pipe(Effect.orElseSucceed(() => undefined));
-      if (data === undefined) return undefined;
-      const names = new Set<string>();
-      for (const entry of data.entries) {
-        names.add(entry.name);
-        if (entry.nameEn !== "") names.add(entry.nameEn);
-      }
-      return names;
-    });
 
     const hosts = new Map<string, HostEntry>();
     const runtime = new Map<string, RuntimeDevice>();
@@ -470,7 +293,6 @@ export const ApplicationLive: Layer.Layer<
     let plans: TaskPlan[] = [];
     let engine: EngineInfo = { phase: "idle", sessionCount: 0 };
     let shuttingDown = false;
-    let stageCache: StageCache | undefined;
 
     const log = (level: "debug" | "info" | "warn" | "error", message: string): void => {
       if (level === "debug" && !settingsCache?.developerMode) return;
@@ -778,12 +600,7 @@ export const ApplicationLive: Layer.Layer<
 
     const handleCallback = (item: EngineCallback): void => {
       const deviceId = item.sessionId;
-      let payload: Record<string, unknown> = {};
-      try {
-        payload = JSON.parse(item.details) as Record<string, unknown>;
-      } catch {
-        payload = {};
-      }
+      const payload = parseEngineCallback(item.details);
       bus.emit({
         _tag: "core-callback",
         sessionId: item.sessionId,
@@ -795,7 +612,7 @@ export const ApplicationLive: Layer.Layer<
       });
 
       const what = typeof payload.what === "string" ? payload.what : "";
-      const details = (payload.details ?? {}) as Record<string, unknown>;
+      const details = callbackRecord(payload.details);
 
       // OperBox and Depot stream their recognition results through
       // SubTaskExtraInfo; every frame replaces the previous snapshot, so the
@@ -1209,7 +1026,11 @@ export const ApplicationLive: Layer.Layer<
       Effect.gen(function* () {
         const { state, host } = yield* getConnectedDevice(deviceId);
         const result = yield* Effect.tryPromise({
-          try: () => host.client.request({ id: 0, op: "screenshot", sessionId: state.sessionId! }),
+          try: () =>
+            // The host answers only once the capture callback arrives (or its
+            // 25 s timeout), and the request can queue behind a session
+            // destruction, so the default 30 s budget is too tight.
+            host.client.request({ id: 0, op: "screenshot", sessionId: state.sessionId! }, 60_000),
           catch: (cause) => maaxError("截图失败", cause),
         });
         const shot = result as Screenshot;
@@ -1427,7 +1248,7 @@ export const ApplicationLive: Layer.Layer<
         // when one operator's elite requirement contradicts its own skill or
         // module. Normalise that known inconsistency before launch so the
         // failure cannot surface as the opaque "CopilotFileReadError".
-        const known = yield* knownCopilotOperators;
+        const known = yield* operatorLibrary.knownNames;
         const repairs: string[] = [];
         for (const item of runSetup.items) {
           const repair = yield* Effect.tryPromise({
@@ -1633,68 +1454,6 @@ export const ApplicationLive: Layer.Layer<
         return result;
       });
 
-    const stageCatalog = Effect.gen(function* () {
-      const currentSettings = yield* settings.get;
-      const locale = currentSettings.locale;
-      const client = clientKeyFor(currentSettings.clientType);
-      const cacheKey = `${client}:${locale}`;
-      if (stageCache && stageCache.key === cacheKey && Date.now() - stageCache.at < 10 * 60_000) {
-        return stageCache.catalog;
-      }
-
-      const permanent = permanentStageEntries(locale);
-      const activity = yield* Effect.gen(function* () {
-        const raw = yield* Effect.tryPromise({
-          try: async (): Promise<unknown> => {
-            const response = await fetch(STAGE_ACTIVITY_URL, {
-              signal: AbortSignal.timeout(20_000),
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return await response.json();
-          },
-          catch: (cause) => maaxError("活动关卡获取失败", cause),
-        });
-        const data: StageActivityData = yield* Schema.decodeUnknownEffect(StageActivityResponseSchema)(raw).pipe(
-          Effect.mapError((cause) => maaxError("活动关卡数据格式无效", cause)),
-        );
-        const zh = locale === "zh-CN";
-        const entries: StageCatalogEntry[] = [];
-        const now = Date.now();
-        for (const story of Object.values(data[client]?.sideStoryStage ?? {})) {
-          const info = story.Activity;
-          const start = parseActivityDate(info?.UtcStartTime, info?.TimeZone);
-          const expire = parseActivityDate(info?.UtcExpireTime, info?.TimeZone);
-          if (start > 0 && now < start) continue;
-          if (expire > 0 && now > expire) continue;
-          const groupLabel = `${zh ? "活动" : "Event"} · ${info?.StageName || info?.Tip || ""}`.trim();
-          for (const stage of story.Stages ?? []) {
-            if (!stage.Value) continue;
-            entries.push({
-              value: stage.Value,
-              label: stage.Display || stage.Value,
-              group: "activity",
-              groupLabel,
-              ...(stage.Drop ? { tip: `${zh ? "掉落" : "Drop"}: ${stage.Drop}` } : {}),
-            });
-          }
-        }
-        return { entries, warning: undefined as string | undefined };
-      }).pipe(
-        Effect.orElseSucceed(() => ({
-          entries: [] as StageCatalogEntry[],
-          warning: locale === "zh-CN" ? "已显示常驻推荐关卡。" : "Showing permanent stage recommendations only.",
-        })),
-      );
-
-      const catalog: StageCatalog = {
-        entries: [permanent[0]!, ...activity.entries, ...permanent.slice(1)],
-        updatedAt: Date.now(),
-        ...(activity.warning ? { warning: activity.warning } : {}),
-      };
-      stageCache = { key: cacheKey, at: Date.now(), catalog };
-      return catalog;
-    });
-
     const checkCoreUpdate = installer.checkUpdate;
 
     /**
@@ -1892,11 +1651,6 @@ export const ApplicationLive: Layer.Layer<
         return saved;
       });
 
-    const PlanImportSchema = Schema.Struct({
-      name: Schema.optional(Schema.String),
-      tasks: Schema.Array(TaskConfigSchema),
-    });
-
     const importPlan = (deviceId: string) =>
       Effect.gen(function* () {
         if (!profiles.has(deviceId)) return yield* maaxError("设备不存在");
@@ -1917,9 +1671,7 @@ export const ApplicationLive: Layer.Layer<
           try: async (): Promise<unknown> => JSON.parse(await readFile(path, "utf8")) as unknown,
           catch: (cause) => maaxError("读取计划文件失败", cause),
         });
-        const imported = yield* Schema.decodeUnknownEffect(PlanImportSchema)(raw).pipe(
-          Effect.mapError((cause) => maaxError("计划文件格式无效", cause)),
-        );
+        const imported = yield* decodePlanFile(raw);
         const now = Date.now();
         const plan: TaskPlan = {
           id: randomUUID(),
@@ -1943,7 +1695,7 @@ export const ApplicationLive: Layer.Layer<
         const window = BrowserWindow.getFocusedWindow();
         const options = {
           title: "导出任务计划",
-          defaultPath: `${plan.name.replace(/[^\w\u4e00-\u9fa5-]+/gu, "-")}.json`,
+          defaultPath: planFileName(plan.name),
           filters: [{ name: "JSON", extensions: ["json"] }],
         };
         const picked = yield* Effect.tryPromise({
@@ -1951,7 +1703,7 @@ export const ApplicationLive: Layer.Layer<
           catch: (cause) => maaxError("打开保存对话框失败", cause),
         });
         if (picked.canceled || !picked.filePath) return null;
-        const payload = { version: 1, name: plan.name, tasks: plan.tasks };
+        const payload = encodePlanFile(plan);
         yield* Effect.tryPromise({
           try: () => writeFile(picked.filePath!, JSON.stringify(payload, null, 2), "utf8"),
           catch: (cause) => maaxError("写入计划文件失败", cause),
@@ -2131,101 +1883,28 @@ export const ApplicationLive: Layer.Layer<
       Effect.tap((value) => Effect.sync(() => bus.emit({ _tag: "history-updated", history: value }))),
     );
 
-    const stampForFile = (): string => new Date().toISOString().replace(/[:.]/gu, "-").slice(0, 19);
-
-    const formatLogEntries = (entries: ReadonlyArray<LogEntry>): string =>
-      entries
-        .map((entry) => `${new Date(entry.at).toISOString()} [${entry.level.toUpperCase()}] ${entry.message}`)
-        .join("\n") + "\n";
-
     const exportLogs = (entries: ReadonlyArray<LogEntry>): Effect.Effect<string | null, MaaxError> =>
-      Effect.gen(function* () {
-        const window = BrowserWindow.getFocusedWindow();
-        const options = {
-          title: "导出运行日志",
-          defaultPath: `maax-logs-${stampForFile()}.log`,
-          filters: [{ name: "Log", extensions: ["log", "txt"] }],
-        };
-        const picked = yield* Effect.tryPromise({
-          try: () => (window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options)),
-          catch: (cause) => maaxError("打开保存对话框失败", cause),
-        });
-        if (picked.canceled || !picked.filePath) return null;
-        const header = `# Maax ${app.getVersion()} logs\n# Exported ${new Date().toISOString()}\n\n`;
-        yield* Effect.tryPromise({
-          try: () => writeFile(picked.filePath!, header + formatLogEntries(entries), "utf8"),
-          catch: (cause) => maaxError("写入日志文件失败", cause),
-        });
-        return picked.filePath;
-      });
+      writeLogs(entries, app.getVersion());
 
     const exportDiagnostics = (entries: ReadonlyArray<LogEntry>): Effect.Effect<string | null, MaaxError> =>
       Effect.gen(function* () {
-        const window = BrowserWindow.getFocusedWindow();
-        const options = {
-          title: "选择诊断包存放目录",
-          buttonLabel: "导出到这里",
-          properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
+        const snapshot: DiagnosticsSnapshot = {
+          appVersion: app.getVersion(),
+          generatedAt: Date.now(),
+          runtime: readRuntimeInfo(),
+          settings: settingsCache,
+          engine,
+          cores: yield* registry.list,
+          devices: [...profiles.values()],
+          plans,
+          schedules: yield* schedules.list,
+          history: yield* history.result,
+          tools: yield* toolData.state,
+          copilot: yield* copilotSetup.get,
+          logs: entries,
         };
-        const picked = yield* Effect.tryPromise({
-          try: () => (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options)),
-          catch: (cause) => maaxError("打开目录对话框失败", cause),
-        });
-        const parent = picked.filePaths[0];
-        if (picked.canceled || parent === undefined) return null;
-
-        const cores = yield* registry.list;
-        const historyResult = yield* history.result;
-        const scheduleList = yield* schedules.list;
-        const tools = yield* toolData.state;
-        const copilot = yield* copilotSetup.get;
-        const base = join(parent, `maax-diagnostics-${stampForFile()}`);
-        const bundle = yield* Effect.tryPromise({
-          try: async () => {
-            let target = base;
-            for (let index = 2; index < 100; index += 1) {
-              const exists = await stat(target).then(
-                () => true,
-                () => false,
-              );
-              if (!exists) break;
-              target = `${base}-${index}`;
-            }
-            await mkdir(target, { recursive: false });
-            const summary = {
-              generatedAt: new Date().toISOString(),
-              runtime: readRuntimeInfo(),
-              settings: settingsCache,
-              engine,
-              cores,
-              devices: [...profiles.values()],
-              counts: { plans: plans.length, schedules: scheduleList.length, runs: historyResult.stats.total },
-            };
-            const files: ReadonlyArray<[string, string]> = [
-              ["summary.json", JSON.stringify(summary, null, 2)],
-              ["workspace.json", JSON.stringify({ plans }, null, 2)],
-              ["schedules.json", JSON.stringify(scheduleList, null, 2)],
-              ["history.json", JSON.stringify(historyResult, null, 2)],
-              ["tools.json", JSON.stringify(tools, null, 2)],
-              ["copilot.json", JSON.stringify(copilot, null, 2)],
-              ["logs.txt", formatLogEntries(entries)],
-              [
-                "README.txt",
-                [
-                  `Maax ${app.getVersion()} diagnostics bundle`,
-                  `Generated ${new Date().toISOString()}`,
-                  "",
-                  "This bundle contains local configuration, device addresses, installed",
-                  "core paths and recent run logs. Review it before sharing publicly.",
-                ].join("\n") + "\n",
-              ],
-            ];
-            await Promise.all(files.map(([name, text]) => writeFile(join(target, name), text, "utf8")));
-            return target;
-          },
-          catch: (cause) => maaxError("写入诊断包失败", cause),
-        });
-        bus.emit({ _tag: "toast", kind: "success", title: "诊断包已导出", message: bundle });
+        const bundle = yield* writeDiagnostics(snapshot);
+        if (bundle !== null) bus.emit({ _tag: "toast", kind: "success", title: "诊断包已导出", message: bundle });
         return bundle;
       });
 
@@ -2357,7 +2036,7 @@ export const ApplicationLive: Layer.Layer<
       connectDevice,
       disconnectDevice,
       screenshotDevice,
-      stageCatalog,
+      stageCatalog: stageCatalogService.catalog,
       savePlan,
       removePlan,
       createPlan,
@@ -2374,9 +2053,9 @@ export const ApplicationLive: Layer.Layer<
       copilotSetSearch: prts.setSearch,
       copilotSetItems: prts.setItems,
       copilotLevels: prts.levels,
-      copilotOperators,
-      roguelikeOperators,
-      operatorAvatars,
+      copilotOperators: operatorLibrary.search,
+      roguelikeOperators: operatorLibrary.roguelike,
+      operatorAvatars: operatorLibrary.avatars,
       updateCopilotOptions: (patch) =>
         copilotSetup.updateOptions(patch).pipe(Effect.tap((setup) => Effect.sync(() => emitCopilot(setup)))),
       setCopilotItems: (items) =>

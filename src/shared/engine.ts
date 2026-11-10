@@ -105,9 +105,23 @@ export interface ScreenshotResult {
   readonly png: Uint8Array;
   readonly width: number;
   readonly height: number;
+  /** Preview latency: request → capture callback → PNG readback, including the flush interval. */
   readonly durationMs: number;
 }
 
 export interface OkResult {
   readonly ok: boolean;
+}
+
+/** MaaCore callbacks contain JSON, but a malformed or non-object payload is possible. */
+export function callbackRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+export function parseEngineCallback(raw: string): Record<string, unknown> {
+  try {
+    return callbackRecord(JSON.parse(raw));
+  } catch {
+    return {};
+  }
 }

@@ -1,3 +1,4 @@
+import { callbackRecord as record } from "../../shared/engine";
 import type { CoreCallbackEvent, Locale } from "../../shared/schemas";
 import { t } from "./i18n/i18n";
 
@@ -39,9 +40,6 @@ const str = (value: unknown): string => (typeof value === "string" ? value : "")
 
 const num = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
-
-const record = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 
 const list = (value: unknown): ReadonlyArray<unknown> => (Array.isArray(value) ? value : []);
 
@@ -195,37 +193,97 @@ const detailSummary = (what: string, details: Record<string, unknown>, locale: L
   }
 };
 
-export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): LogLine | null {
+/**
+ * Cost fields arrive as numbers or numeric strings depending on the payload
+ * (each `FastestWayToScreencap` alternative is stringified, unsupported
+ * methods carry "???"), so accept both and treat anything else as unknown.
+ */
+const costMs = (value: unknown): number | undefined => {
+  const ms = typeof value === "string" ? (value.trim() === "" ? Number.NaN : Number(value)) : num(value);
+  return ms === undefined || !Number.isFinite(ms) || ms < 0 ? undefined : ms;
+};
+
+const timing = (value: unknown): string => {
+  const ms = costMs(value);
+  return ms === undefined ? "—" : `${ms} ms`;
+};
+
+export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): LogLine {
   const payload = record(event.payload);
+  const line = formatCallback(event.msg, payload, locale);
+  if (line.level !== "error" && line.level !== "warn") return line;
+
+  // Keep diagnostics bounded and out of the compact row. Retain curated
+  // detail (e.g. missing operator groups) ahead of the native payload.
+  const limit = 4096;
+  const raw = event.raw.length > limit ? `${event.raw.slice(0, limit)}…` : event.raw;
+  if (!raw || raw === "{}") return line;
+  return {
+    ...line,
+    detail: [line.detail, `MaaCore · msg ${event.msg}\n${raw}`].filter(Boolean).join("\n\n"),
+  };
+}
+
+function formatCallback(msg: number, payload: Record<string, unknown>, locale: Locale): LogLine {
   const chain = taskchain(payload);
   const details = record(payload.details);
   const why = str(payload.why);
   const what = str(payload.what);
 
-  switch (event.msg) {
+  const reason = [why, str(details.error), str(details.reason)]
+    .filter((value, index, all) => value !== "" && all.indexOf(value) === index)
+    .join(" · ");
+  const reasonSuffix = reason ? ` · ${reason}` : "";
+
+  if ((msg === 2 || msg === 20003) && what === "ScreencapCost") {
+    // A rolling controller statistic, not a per-capture failure: faults stay
+    // visible without promoting every ten captures to a warning.
+    const faults = num(details.fault_times);
+    return {
+      level: faults !== undefined && faults > 0 ? "info" : "debug",
+      message: [
+        t(locale, "log.screencapCost"),
+        `${t(locale, "log.screencapAverage")} ${timing(details.avg)}`,
+        `${t(locale, "log.screencapRange")} ${timing(details.min)} – ${timing(details.max)}`,
+        faults !== undefined && faults > 0 ? `${t(locale, "log.screencapFailures")} ${faults}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    };
+  }
+
+  switch (msg) {
     case 0:
-      return { level: "error", message: `${t(locale, "log.raw")} · InternalError ${why}`.trim() };
+      return { level: "error", message: `${t(locale, "log.raw")} · InternalError${reasonSuffix}` };
     case 1:
-      return { level: "error", message: `InitFailed${why ? ` · ${why}` : ""}` };
+      return { level: "error", message: `InitFailed${reasonSuffix}` };
     case 2: {
-      if (what === "ScreencapCost") {
-        const min = num(details.min);
-        const avg = num(details.avg);
-        const max = num(details.max);
+      if (what === "FastestWayToScreencap") {
+        const alternatives = list(details.alternatives).flatMap((entry) => {
+          const alternative = record(entry);
+          const method = str(alternative.method);
+          return method ? [`${method} · ${timing(alternative.cost)}`] : [];
+        });
         return {
-          level: "debug",
-          message: `${t(locale, "log.screencapCost")} · ${min ?? "?"} / ${avg ?? "?"} / ${max ?? "?"} ms`,
+          level: "info",
+          message: `${t(locale, "log.screencapMethod")} · ${str(details.method) || "—"} · ${timing(details.cost)}`,
+          ...(alternatives.length > 0 ? { detail: alternatives.join("\n") } : {}),
         };
       }
-      if (what === "FastestWayToScreencap") {
-        return {
-          level: "debug",
-          message: `${t(locale, "log.screencapMethod")} · ${str(details.method) || "?"} · ${num(details.cost) ?? "?"} ms`,
-        };
+      if (what === "EmulatorFPS") {
+        const fps = num(details.fps);
+        if (fps !== undefined) return { level: "debug", message: `${t(locale, "log.connection")} · ${fps} FPS` };
       }
       return {
-        level: what === "ConnectFailed" || what === "Disconnect" ? "warn" : "info",
-        message: `${t(locale, "log.connection")} · ${what}${why ? ` · ${why}` : ""}`,
+        level:
+          what === "ScreencapFailed" || what === "ResolutionError"
+            ? "error"
+            : what === "ConnectFailed" || what === "Disconnect"
+              ? "warn"
+              : "info",
+        message: [t(locale, "log.connection"), what, ...[reason].filter((value) => value !== what)]
+          .filter(Boolean)
+          .join(" · "),
       };
     }
     case 3:
@@ -233,11 +291,23 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
       // after a failed chain. Keep this a neutral marker; the per-chain rows and
       // the run snapshot carry success or failure.
       return { level: "info", message: `${t(locale, "log.allDone")} · ${chain}` };
-    case 4:
+    case 4: {
+      const failed = details.ret === false || reason !== "";
+      const capture = what === "Screencap";
+      const duration = costMs(details.cost);
       return {
-        level: "debug",
-        message: `${t(locale, "log.async")} · ${what}${details.ret === false ? " · failed" : ""}`,
+        level: failed ? "error" : capture ? "info" : "debug",
+        message: [
+          capture ? t(locale, "log.screencapCapture") : t(locale, "log.async"),
+          capture ? "" : what,
+          duration === undefined ? "" : timing(duration),
+          failed ? t(locale, "log.callbackFailed") : "",
+          reason,
+        ]
+          .filter(Boolean)
+          .join(" · "),
       };
+    }
     case 5:
       return { level: "debug", message: t(locale, "log.instanceDestroyed") };
     case 10000: {
@@ -245,7 +315,7 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
       // when it caught one). The actionable cause usually arrived earlier as a
       // SubTaskError; when even this payload is empty, name what to check
       // instead of leaving the row at "Task chain error · Copilot".
-      const reasons = [why, str(details.task), str(details.error)].filter(
+      const reasons = [why, str(details.task), str(details.error), str(details.reason)].filter(
         (value, index, all) => value !== "" && all.indexOf(value) === index,
       );
       const hint = chain === "Copilot" && reasons.length === 0 ? ` · ${t(locale, "log.copilotChainError")}` : "";
@@ -338,18 +408,18 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
       // expected branch exits. Keep them for diagnostics, not as warnings.
       return {
         level: "debug",
-        message: `${t(locale, "log.subtask")} · ${label} · error`,
+        message: `${t(locale, "log.subtask")} · ${label} · ${t(locale, "log.callbackFailed")}${reasonSuffix}`,
       };
     }
     case 20001:
       return {
         level: "debug",
-        message: `${t(locale, "log.subtask")} · ${str(details.task) || what} · start`,
+        message: `${t(locale, "log.subtask")} · ${str(details.task) || what || str(payload.subtask) || chain} · start`,
       };
     case 20002:
       return {
         level: "debug",
-        message: `${t(locale, "log.subtask")} · ${str(details.task) || what} · done`,
+        message: `${t(locale, "log.subtask")} · ${str(details.task) || what || str(payload.subtask) || chain} · done`,
       };
     case 20003: {
       if (what === "ExceededLimit") {
@@ -376,6 +446,6 @@ export function formatCoreCallback(event: CoreCallbackEvent, locale: Locale): Lo
     case 30000:
       return { level: "debug", message: `ReportRequest${what ? ` · ${what}` : ""}` };
     default:
-      return { level: "debug", message: `MaaCore · msg ${event.msg}` };
+      return { level: "debug", message: `MaaCore · msg ${msg}` };
   }
 }

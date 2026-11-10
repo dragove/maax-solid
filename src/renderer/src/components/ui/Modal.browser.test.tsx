@@ -65,16 +65,9 @@ describe("Modal mounting", () => {
       );
 
   it("opens an initially visible dialog after insertion and focuses inside", () => {
-    // showModal() throws InvalidStateError on a detached element, so recording
-    // what the call saw is the assertion that covers the ref-timing regression.
-    const connected: boolean[] = [];
-    const showModal = HTMLDialogElement.prototype.showModal;
-    vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(function (this: HTMLDialogElement) {
-      connected.push(this.isConnected);
-      showModal.call(this);
-    });
+    // A detached showModal() call throws. Check the native top layer and focus
+    // after mounting to cover the insertion timing through the browser API.
     mount(true);
-    expect(connected).toEqual([true]);
     expect(dialog().matches(":modal")).toBe(true);
     expect(dialog().contains(document.activeElement)).toBe(true);
   });
