@@ -428,7 +428,6 @@ export const AppShell: Component<AppShellProps> = (props) => {
       }
       case "core-callback": {
         const formatted = formatCoreCallback(event, locale());
-        if (!formatted) break;
         if (formatted.level === "debug" && !data().settings.developerMode) break;
         appendLog({ ...formatted, at: event.at, deviceId: event.deviceId });
         break;
@@ -887,15 +886,20 @@ export const AppShell: Component<AppShellProps> = (props) => {
     }
   };
 
+  const logEntriesForExport = () =>
+    logs().map(({ at, level, message, detail }) => ({
+      at,
+      level,
+      message: detail ? `${message}\n${detail}` : message,
+    }));
+
   const exportLogs = async (): Promise<void> => {
-    const entries = logs().map((entry) => ({ at: entry.at, level: entry.level, message: entry.message }));
-    const path = await send(COMMANDS.exportLogs, { entries }, { busy: false });
+    const path = await send(COMMANDS.exportLogs, { entries: logEntriesForExport() }, { busy: false });
     if (path) notify({ kind: "success", title: tr("settings.exported"), message: path });
   };
 
   const exportDiagnostics = async (): Promise<void> => {
-    const entries = logs().map((entry) => ({ at: entry.at, level: entry.level, message: entry.message }));
-    const path = await send(COMMANDS.exportDiagnostics, { entries }, { busy: false });
+    const path = await send(COMMANDS.exportDiagnostics, { entries: logEntriesForExport() }, { busy: false });
     if (path) notify({ kind: "success", title: tr("settings.exported"), message: path });
   };
 

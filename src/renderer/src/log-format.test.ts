@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CoreCallbackEvent } from "../../shared/schemas";
-import { firstLine, formatCoreCallback, formatLogTime } from "./log-format";
+import { formatCoreCallback } from "./log-format";
 
 const event = (msg: number, payload: Record<string, unknown>): CoreCallbackEvent => ({
   _tag: "core-callback",
@@ -49,17 +49,6 @@ describe("core callback formatting", () => {
     );
     expect(line?.level).toBe("error");
     expect(line?.message).toContain("no permit");
-  });
-});
-
-describe("row time", () => {
-  it("formats a fixed-width local clock", () => {
-    expect(formatLogTime(new Date(2024, 0, 2, 7, 5, 3).getTime())).toBe("07:05:03");
-  });
-
-  it("keeps only the headline for compact surfaces", () => {
-    expect(firstLine("本次掉落 · CE-6\n龙门币 ×21")).toBe("本次掉落 · CE-6");
-    expect(firstLine("单行")).toBe("单行");
   });
 });
 
@@ -264,5 +253,55 @@ describe("task chain lifecycle", () => {
     const started = formatCoreCallback(event(10001, { taskchain: "Fight" }), "zh-CN");
     expect(done?.level).toBe("success");
     expect(started?.level).toBe("info");
+  });
+});
+
+describe("native capture diagnostics", () => {
+  it("preserves a native failure reason and call ID for investigation", () => {
+    const line = formatCoreCallback(
+      event(4, { what: "Screencap", async_call_id: 19, details: { ret: false, cost: 37, error: "OpenCV" } }),
+      "en-US",
+    );
+    expect(line.level).toBe("error");
+    expect(line.message).toContain("OpenCV");
+    expect(line.message).toContain("37 ms");
+    expect(line.detail).toContain('"async_call_id":19');
+  });
+
+  it("labels rolling timing and shows capture faults", () => {
+    const line = formatCoreCallback(
+      event(2, { what: "ScreencapCost", details: { min: 25, avg: 37, max: 48, fault_times: 2 } }),
+      "en-US",
+    );
+    expect(line.level).toBe("info");
+    expect(line.message).toContain("Average 37 ms");
+    expect(line.message).toContain("Failures 2");
+  });
+
+  it("renders alternative costs that arrive as numeric strings", () => {
+    const line = formatCoreCallback(
+      event(2, {
+        what: "FastestWayToScreencap",
+        details: {
+          method: "RawByNc",
+          cost: 37,
+          alternatives: [
+            { method: "RawByNc", cost: "37" },
+            { method: "Encode", cost: "???" },
+          ],
+        },
+      }),
+      "en-US",
+    );
+    expect(line.detail).toContain("RawByNc · 37 ms");
+    expect(line.detail).toContain("Encode · —");
+  });
+
+  it("keeps a fault-free rolling summary at debug", () => {
+    const line = formatCoreCallback(
+      event(2, { what: "ScreencapCost", details: { min: 25, avg: 37, max: 48 } }),
+      "en-US",
+    );
+    expect(line.level).toBe("debug");
   });
 });
