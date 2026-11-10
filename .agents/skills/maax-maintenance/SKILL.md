@@ -435,17 +435,29 @@ Use a utility process/worker, one host per core version or resource set.
   returns.
 - Filter `process.env` before `utilityProcess.fork`; Electron accepts only
   string values and an `undefined` value aborts startup.
-- Correlate callbacks with the same ID used by waiters. A random session ID can
-  time out even though callbacks are arriving.
+- Preview capture uses `AsstAsyncScreencap(handle, 0)`. Read `AsstGetImage` only
+  after `AsyncCallInfo` reports `what: "Screencap"` and `details.ret: true` for
+  the matching session and `async_call_id`. The return value from the request
+  is an ID, and a failed capture may leave an older image in the cache.
+- Call `AsstDestroy` through asynchronous FFI. It joins MaaCore's callback
+  thread, so the utility process must stay available to dispatch callbacks
+  until destruction completes.
 - Preserve the native library's initialization order and root-directory
   contract. Validate required files before registering a core/resource.
 - Use the library's buffer-size sentinel and retry budget; do not hard-code a
   pointer or assume one buffer size is enough.
 - Do not send partial parameter objects when the native API resets omitted
   fields; send the complete object.
-- Measure user-visible duration at the boundary. If the library reports its own
-  timing separately, keep both and label them, rather than replacing one with
-  the other.
+- Keep the two capture measures apart: the preview card shows the host round
+  trip (request → callback → `AsstGetImage`), while the log row carries
+  `AsyncCallInfo.details.cost`, the core's own capture time. Never label one as
+  the other; the round trip also contains the 25 ms callback flush.
+- `ScreencapCost` keeps up to 30 captures and reports min/max/avg every ten
+  (`avg: -1` when the whole window failed, `fault_times` counts the failures).
+  It is a statistic, not a per-capture event, so a fault count is not a warning
+  about the current capture.
+- Measure user-visible duration at the boundary. When the library reports its
+  own timing, keep both and label them instead of mixing clocks in one number.
 
 ### Windows host
 
@@ -496,6 +508,12 @@ Use a utility process/worker, one host per core version or resource set.
 - On a crash, abort in-flight connects before scheduling the retry. A connect
   that is still waiting on its 60s timeout otherwise reports a stale failure over
   an already healthy retry.
+- A destructor that rejects leaves the instance in an unknown state: its threads
+  may still be alive and may keep calling back under the same session id, which
+  a reconnect would then reuse. Fail the host instead of letting the id come
+  back; `handleHostExit` already reconnects attached devices against a fresh
+  process. Do not unregister the Koffi callback on that path, since the native
+  side may still own the pointer.
 - A connect attempt must settle the device state on **every** exit path, not just
   the "MaaCore rejected it" branches: missing core, host start failure, session
   create failure, request error and the wait timeout all raise an error, and the
@@ -800,6 +818,10 @@ levels in one formatter:
   resource, operation aborted) are errors.
 - Always use the most specific payload field available (`first`, `subtask`,
   `taskchain`) instead of emitting `unknown`.
+- Cost fields are numbers or numeric strings, and the type varies per field:
+  `FastestWayToScreencap` stringifies each `alternatives[].cost` (`"???"` for an
+  unsupported method) while its winning `cost` is numeric. Parse both and keep
+  "—" for anything unparseable.
 - Add a formatter test for both an expected noisy event and a real failure.
 - Copilot failures arrive as `SubTaskError` with `what`
   (`CopilotFileReadError`, `CopilotStageNotSupported`,
@@ -865,7 +887,7 @@ toolset/compression changes with the artifact on the same filesystem.
 | Snapshot list        | replace a scan/batch/history list: only new rows enter, untouched rows keep their DOM so entrance animations do not replay                    |
 | Effect service       | type check, layer boot, and one failure path                                                                                                  |
 | IPC contract         | invalid payload is rejected; valid payload round-trips                                                                                        |
-| Native host          | connect, perform one operation, stop; inspect native log                                                                                      |
+| Native host          | connect, capture twice (preview latency on the card, native cost in the log), ten captures for the rolling stats, disconnect mid-capture      |
 | Device connect       | connect an unreachable address: fails within the ADB probe timeout and the device leaves `connecting`                                         |
 | Log formatter        | expected branch is not error; real failure is error                                                                                           |
 | Tool callback parser | partial OperBox/Depot frames replace the snapshot; malformed payload is ignored                                                               |
@@ -874,9 +896,11 @@ toolset/compression changes with the artifact on the same filesystem.
 | Diagnostics          | exported folder contains summary, workspace, schedules, history, tools and logs; no upload                                                    |
 | Packaging            | build, launch unpacked app, load a core/resource                                                                                              |
 
-Add tests only where the contract is stable: schemas, pure mappers, severity
-classification, parser output. Avoid brittle DOM tests for screens that are
-still changing quickly.
+Keep a test when it catches a distinct regression in a stable contract. For
+logs, assert severity, meaningful payload fields, and diagnostic context.
+Verify copy and layout during the runtime check. Do not test trivial display
+helpers (clock formatting, first-line clamping) whose behaviour is obvious at
+the call site: they cost maintenance without catching a regression.
 
 ## Portability
 
