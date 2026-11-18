@@ -25,38 +25,38 @@
     "bench:startup": "node scripts/measure-startup.mjs"
   },
   "dependencies": {
-    "koffi": "3.3.7"
+    "koffi": "3.3.8"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.1.2",
-    "@effect/tsgo": "0.67.5",
-    "@effect/vitest": "4.1.2",
-    "@solidjs/vite-plugin": "3.0.0-next.57",
-    "@solidjs/web": "^2.0.0-rc.21",
+    "@effect/platform-node": "4.1.4",
+    "@effect/tsgo": "0.70.0",
+    "@effect/vitest": "4.1.4",
+    "@solidjs/vite-plugin": "3.0.1",
+    "@solidjs/web": "2.0.1",
     "@types/node": "26.6.6",
     "@types/semver": "7.8.0",
     "@types/yauzl": "3.4.0",
-    "@vitest/browser-playwright": "5.1.0",
-    "effect": "4.1.2",
-    "electron": "45.2.3",
-    "electron-builder": "26.18.0",
+    "@vitest/browser-playwright": "5.1.1",
+    "effect": "4.1.4",
+    "electron": "45.3.4",
+    "electron-builder": "26.18.1",
     "electron-vite": "6.0.0",
-    "lucide": "1.70.0",
-    "oxfmt": "0.78.0",
-    "oxlint": "1.92.0",
-    "oxlint-tsgolint": "7.0.2006",
-    "playwright": "1.65.0",
+    "lucide": "1.75.0",
+    "oxfmt": "0.79.0",
+    "oxlint": "1.94.0",
+    "oxlint-tsgolint": "7.0.2007",
+    "playwright": "1.65.1",
     "semver": "7.8.6",
-    "solid-js": "^2.0.0-rc.21",
-    "tsrs": "0.23.0-ts7.1.0-beta",
-    "vite": "8.3.7",
-    "vitest": "5.1.0",
+    "solid-js": "2.0.1",
+    "tsrs": "0.25.0-ts7.1.0-beta",
+    "vite": "8.3.8",
+    "vitest": "5.1.1",
     "yauzl": "3.4.0"
   },
   "engines": {
     "node": ">=26.0.0 <27",
     "pnpm": ">=12.0.0 <13"
   },
-  "packageManager": "pnpm@12.18.0",
+  "packageManager": "pnpm@12.22.0",
   "productName": "Maax"
 }
