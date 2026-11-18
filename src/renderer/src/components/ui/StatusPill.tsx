@@ -1,26 +1,34 @@
 import type { Component } from "solid-js";
-import type { DeviceStatus, EnginePhase } from "../../../../shared/schemas";
+import type { DeviceStatus, EnginePhase, RunStatus } from "../../../../shared/schemas";
 import { Icon } from "./Icon";
 
 interface StatusPillProps {
-  readonly status: DeviceStatus | EnginePhase;
+  readonly status: DeviceStatus | EnginePhase | RunStatus;
   readonly label: string;
   readonly compact?: boolean;
 }
 
-const isActive = (status: string): boolean => status === "running" || status === "starting" || status === "connecting";
+/** Only in-flight states animate; every settled state must stay still. */
+const isActive = (status: string): boolean =>
+  status === "running" || status === "starting" || status === "connecting" || status === "preparing";
+
+const isSettled = (status: string): boolean => status === "online" || status === "ready" || status === "completed";
+
+const isBroken = (status: string): boolean => status === "error" || status === "crashed" || status === "failed";
 
 const toneFor = (status: string): string => {
-  if (status === "online" || status === "ready") return "ok";
+  if (isSettled(status)) return "ok";
   if (isActive(status)) return "busy";
-  if (status === "error" || status === "crashed") return "bad";
+  if (isBroken(status)) return "bad";
   return "muted";
 };
 
 const iconFor = (status: string): string => {
+  if (status === "completed") return "check";
   if (status === "online" || status === "ready") return "wifi";
   if (isActive(status)) return "loader";
-  if (status === "error" || status === "crashed") return "alert-triangle";
+  if (isBroken(status)) return "alert-triangle";
+  if (status === "stopped") return "square";
   return "wifi-off";
 };
 
