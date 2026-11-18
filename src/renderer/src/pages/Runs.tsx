@@ -4,13 +4,12 @@ import type {
   DeviceView,
   Locale,
   RunHistory,
-  RunHistoryEntry,
   RunSnapshot,
   Schedule,
   TaskPlan,
 } from "../../../shared/schemas";
 import { defaultSchedule, nextScheduledAt, WEEKDAYS } from "../../../shared/schedule";
-import { t } from "../i18n/i18n";
+import { runStatusKey, t } from "../i18n/i18n";
 import { Icon } from "../components/ui/Icon";
 import { StatusPill } from "../components/ui/StatusPill";
 import { Switch } from "../components/ui/Switch";
@@ -53,22 +52,6 @@ const dateTimeText = (at: number, locale: Locale): string =>
     minute: "2-digit",
     hourCycle: "h23",
   }).format(at);
-
-const statusTone = (status: RunHistoryEntry["status"]): "ok" | "bad" | "busy" =>
-  status === "completed" ? "ok" : status === "failed" ? "bad" : "busy";
-
-const statusLabel = (status: RunHistoryEntry["status"], locale: Locale): string => {
-  switch (status) {
-    case "completed":
-      return t(locale, "tasks.completed");
-    case "failed":
-      return t(locale, "tasks.failed");
-    case "stopped":
-      return t(locale, "tasks.stopped");
-    default:
-      return t(locale, "status.running");
-  }
-};
 
 export const Runs: Component<RunsProps> = (props) => {
   const [draft, setDraft] = createSignal<Schedule>();
@@ -409,15 +392,11 @@ export const Runs: Component<RunsProps> = (props) => {
                           </span>
                         </div>
                       </div>
+                      {/* History entries are terminal, so the pill reads the entry status
+                          directly: a stopped run must not inherit the running spinner. */}
                       <StatusPill
-                        status={
-                          statusTone(entry().status) === "ok"
-                            ? "online"
-                            : statusTone(entry().status) === "bad"
-                              ? "error"
-                              : "running"
-                        }
-                        label={statusLabel(entry().status, props.locale)}
+                        status={entry().status}
+                        label={t(props.locale, runStatusKey(entry().status))}
                         compact
                       />
                     </article>

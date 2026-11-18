@@ -62,6 +62,10 @@ Also:
   The memo's `equals` (default `===`) stops the re-run.
 - No writes inside a memo, effect compute, or component body (dev throws).
   Write from event handlers, `onSettled`, or actions.
+- A ref callback owns nothing and runs before insertion, so it must not create
+  primitives (dev throws `PRIMITIVE_IN_EFFECT_CALLBACK`) and `el.isConnected`
+  is still false. Use the two-phase ref: the factory creates the effect, the
+  returned callback only records the element.
 - Writes in one synchronous frame land together: if one starts async work
   (a navigation, a refetch), the rest are held with it. To land a write on
   its own (close a menu before calling `props.onSelect`), wrap it in
@@ -117,6 +121,7 @@ Also:
   `costs`, `end`).
 - Lint: `eslint-plugin-solid`, config `v2`
   (`import solid from "eslint-plugin-solid/configs/v2"`) or `v2-strict`.
-- Docs: https://v2.solidjs.com (Solid 2.0 docs; `/llms.txt` and
+- Docs: https://docs.solidjs.com (Solid 2.0 docs; `/llms.txt` and
   `/llms-full.txt` for agents). Migration guide: `documentation/solid-2.0/MIGRATION.md`
   in the repository.
+

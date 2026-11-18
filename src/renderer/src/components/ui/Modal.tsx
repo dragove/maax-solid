@@ -1,4 +1,4 @@
-import { Show, createEffect, createSignal, onCleanup, onSettled, type Component } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, type Component } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { dialogExitMs, prefersReducedMotion } from "../../motion";
 
@@ -11,6 +11,26 @@ interface ModalProps {
   readonly onClose: () => void;
   readonly wide?: boolean;
 }
+
+/** A dialog can only enter modal mode once it is attached, and a ref callback
+ * owns nothing, so the ref factory creates the effect and the callback only
+ * records the element (the two-phase ref pattern from the Solid cheat sheet).
+ */
+const openOnAttach = (record: (element: HTMLDialogElement) => void) => {
+  let current: HTMLDialogElement | undefined;
+  // No dependency to track: compute runs once, apply runs after the branch is
+  // attached, which is the earliest point a <dialog> can enter modal mode.
+  createEffect(
+    () => undefined,
+    () => {
+      if (current?.isConnected && !current.open) current.showModal();
+    },
+  );
+  return (element: HTMLDialogElement) => {
+    current = element;
+    record(element);
+  };
+};
 
 export const Modal: Component<ModalProps> = (props) => {
   // <Show> disposes its branch the moment the condition flips, and an effect
@@ -69,14 +89,9 @@ export const Modal: Component<ModalProps> = (props) => {
             event.preventDefault();
             props.onClose();
           }}
-          ref={(element) => {
+          ref={openOnAttach((element) => {
             dialogEl = element;
-            // Solid 2 refs run before insertion. Schedule each new <Show> branch
-            // after rendering, and ignore a branch removed before it settles.
-            onSettled(() => {
-              if (element.isConnected && !element.open) element.showModal();
-            });
-          }}
+          })}
         >
           <header class="modal-head">
             <div>

@@ -146,9 +146,12 @@ its old option list and displayed value after the data changes.
 
 ### Modal dialogs
 
-- `Modal` schedules `showModal()` from each new dialog ref with `onSettled`
-  and checks `isConnected`: Solid 2 refs run before DOM insertion. Do not set
-  the JSX `open` attribute, which opens a non-modal dialog instead.
+- `Modal` opens each new dialog from a two-phase ref: the factory creates the
+  effect (a ref callback owns nothing, so creating a primitive there throws
+  `PRIMITIVE_IN_EFFECT_CALLBACK`) and the returned callback only records the
+  element. The effect checks `isConnected` before `showModal()`: Solid 2 refs
+  run before DOM insertion. Do not set the JSX `open` attribute, which opens a
+  non-modal dialog instead.
 - Dimming and blur live on `dialog.modal::backdrop` only. Never add a
   sibling backdrop element: it is inert under the modal top layer, so it cannot
   catch clicks, and it stacks a second veil on the native one. `closedby="any"`
@@ -847,6 +850,20 @@ levels in one formatter:
 - Builder warnings about optional platform binaries are expected on a
   single-platform build, but the matching binary and a successful launch are
   required before calling them harmless.
+
+### Linux / Wayland runtime logs
+
+A native Wayland session logs
+`ui/ozone/platform/wayland/gpu/wayland_surface_factory.cc: '--ozone-platform=wayland' is not compatible with Vulkan …`
+on every launch. It is Chromium's one-shot Vulkan capability probe, not a
+rendering failure: an untouched Electron 45.3.4 window on Wayland still reports
+`gpu_compositing: enabled`, `opengl: enabled_on`, `webgl: enabled` and
+`vulkan: disabled_off`, and neither `--disable-features=Vulkan` nor
+`--no-zygote` removes the line. Do not "fix" it by forcing
+`--ozone-platform=x11` (blurry on fractional scale, and the repo keeps native
+Wayland) or by disabling the GPU. `~/.config/electron-flags.conf` and
+`chromium-flags.conf` are read by distro wrappers and the system Chromium, not
+by the npm `electron` binary, so they are not a lever here either.
 
 ### Startup measurement
 
